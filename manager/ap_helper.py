@@ -1,0 +1,281 @@
+#!/usr/bin/env python3
+"""Bridge between the manager and an Archipelago installation.
+
+This script runs inside the *Archipelago* Python environment (not the manager's), because everything it does
+needs AP's own modules: listing installed worlds, decoding multidata/save files with AP's restricted unpickler and
+rendering yaml templates.
+
+Usage: ap_helper.py --ap-dir DIR COMMAND [ARGS]
+
+Every command prints exactly one result line prefixed with SENTINEL so the caller can ignore any noise AP writes to
+stdout while importing (logging, warnings).
+"""
+import argparse
+import json
+import os
+import sys
+import traceback
+import zipfile
+import zlib
+
+SENTINEL = "@@APJSON@@"
+MAX_FORMAT_VERSION = 3  # MultiServer.Context.decompress refuses anything newer
+
+
+def emit(obj) -> None:
+    sys.stdout.write("\n" + SENTINEL + json.dumps(obj) + "\n")
+    sys.stdout.flush()
+
+
+def fail(message: str, code: int = 1) -> None:
+    emit({"ok": False, "error": message})
+    sys.exit(code)
+
+
+def setup(ap_dir: str) -> None:
+    ap_dir = os.path.abspath(ap_dir)
+    if not os.path.isfile(os.path.join(ap_dir, "Utils.py")):
+        fail(f"{ap_dir} is not an Archipelago source directory")
+    os.chdir(ap_dir)
+    sys.path.insert(0, ap_dir)
+    os.environ.setdefault("SKIP_REQUIREMENTS_UPDATE", "true")
+
+
+def version_str(version) -> str | None:
+    if version is None:
+        return None
+    if hasattr(version, "as_simple_string"):
+        return version.as_simple_string()
+    if isinstance(version, (tuple, list)):
+        return ".".join(str(part) for part in version)
+    return str(version)
+
+
+# --------------------------------------------------------------------------------------------------------------------
+# where: cheap, only imports Utils. Used to find out where custom worlds have to be placed *before* worlds is imported.
+# --------------------------------------------------------------------------------------------------------------------
+def cmd_where(_args) -> dict:
+    import Utils
+    user = Utils.user_path()
+    local = Utils.local_path()
+    # same formula as worlds/__init__.py
+    worlds_folder = Utils.user_path("worlds") if user != local else Utils.user_path("custom_worlds")
+    os.makedirs(worlds_folder, exist_ok=True)
+    return {
+        "version": Utils.__version__,
+        "version_tuple": list(Utils.version_tuple),
+        "user_path": user,
+        "local_path": local,
+        "worlds_folder": worlds_folder,
+        "host_yaml": Utils.user_path("host.yaml"),
+    }
+
+
+# --------------------------------------------------------------------------------------------------------------------
+# games: everything that was successfully (or unsuccessfully) loaded
+# --------------------------------------------------------------------------------------------------------------------
+def cmd_games(args) -> dict:
+    where = cmd_where(args)
+    import worlds
+    from worlds.AutoWorld import AutoWorldRegister
+
+    games = []
+    for name, world in sorted(AutoWorldRegister.world_types.items(), key=lambda kv: kv[0].lower()):
+        module = sys.modules.get(world.__module__)
+        file = getattr(module, "__file__", "") or ""
+        apworld_file = None
+        if ".apworld" in file:
+            apworld_file = os.path.basename(file.split(".apworld")[0]) + ".apworld"
+        in_user_folder = bool(worlds.user_folder) and os.path.abspath(file).startswith(os.path.abspath(worlds.user_folder))
+        games.append({
+            "name": name,
+            "source": "custom" if (apworld_file or in_user_folder) else "builtin",
+            "apworld_file": apworld_file,
+            "module": world.__module__,
+            "version": version_str(getattr(world, "world_version", None)) if getattr(world, "world_version", None) else None,
+            "hidden": bool(getattr(world, "hidden", False)),
+            "items": len(getattr(world, "item_name_to_id", {})),
+            "locations": len(getattr(world, "location_name_to_id", {})),
+        })
+    return {
+        **where,
+        "games": games,
+        "failed": dict(getattr(worlds, "failed_world_loads", {})),
+    }
+
+
+# --------------------------------------------------------------------------------------------------------------------
+# multidata
+# --------------------------------------------------------------------------------------------------------------------
+def read_multidata_bytes(path: str) -> bytes:
+    if path.lower().endswith(".zip"):
+        with zipfile.ZipFile(path) as zf:
+            for name in zf.namelist():
+                if name.endswith(".archipelago"):
+                    return zf.read(name)
+        raise ValueError("No .archipelago file found in archive.")
+    with open(path, "rb") as f:
+        return f.read()
+
+
+def decode_multidata(path: str):
+    import Utils
+    data = read_multidata_bytes(path)
+    if not data:
+        raise ValueError("Empty multidata file.")
+    if data[0] > MAX_FORMAT_VERSION:
+        raise ValueError("Incompatible multidata (format is newer than this Archipelago version supports).")
+    return Utils.restricted_loads(zlib.decompress(data[1:]))
+
+
+def cmd_multidata(args) -> dict:
+    where = cmd_where(args)
+    md = decode_multidata(args.path)
+    connect_names = {name: tuple(v) for name, v in md.get("connect_names", {}).items()}
+    slot_for_name = {slot: name for name, (_team, slot) in connect_names.items()}
+    locations = md.get("locations", {})
+    slots = []
+    for slot, info in sorted(md["slot_info"].items()):
+        slot_type = int(getattr(info, "type", 1))
+        slots.append({
+            "slot": int(slot),
+            "name": info.name,
+            "game": info.game,
+            # 0 = spectator, 1 = player, 2 = group
+            "type": slot_type,
+            "group_members": [int(m) for m in getattr(info, "group_members", ()) or ()],
+            "locations": len(locations.get(slot, {})),
+            "connect_name": slot_for_name.get(slot, info.name),
+        })
+    minimum = md.get("minimum_versions", {})
+    return {
+        "server_version": where["version"],
+        "seed_name": md.get("seed_name"),
+        "generator_version": list(md.get("version", ())),
+        "minimum_server_version": list(minimum.get("server", ())),
+        "race_mode": bool(md.get("race_mode", 0)),
+        "games": sorted(set(md.get("datapackage", {}).keys()) - {"Archipelago"}),
+        "server_options": {k: v for k, v in (md.get("server_options") or {}).items()
+                           if isinstance(v, (str, int, float, bool, type(None)))},
+        "slots": slots,
+    }
+
+
+# --------------------------------------------------------------------------------------------------------------------
+# progress, from the server's .apsave
+# --------------------------------------------------------------------------------------------------------------------
+def cmd_progress(args) -> dict:
+    cmd_where(args)
+    import Utils
+    with open(args.save, "rb") as f:
+        save = Utils.restricted_loads(zlib.decompress(f.read()))
+
+    slots: dict[int, dict] = {}
+
+    def entry(slot: int) -> dict:
+        return slots.setdefault(int(slot), {"checked": 0, "status": 0, "last_activity": None, "hints_used": 0})
+
+    for (team, slot), checks in save.get("location_checks", {}).items():
+        if team == 0:
+            entry(slot)["checked"] = len(checks)
+    for (team, slot), status in save.get("client_game_state", {}).items():
+        if team == 0:
+            entry(slot)["status"] = int(status)
+    for (team, slot), ts in save.get("client_activity_timers", ()):
+        if team == 0:
+            entry(slot)["last_activity"] = ts
+    for (team, slot), used in save.get("hints_used", {}).items():
+        if team == 0:
+            entry(slot)["hints_used"] = int(used)
+    return {"slots": slots}
+
+
+# --------------------------------------------------------------------------------------------------------------------
+# templates
+# --------------------------------------------------------------------------------------------------------------------
+def cmd_templates(args) -> dict:
+    cmd_where(args)
+    import yaml
+    import worlds  # noqa: F401  (registers all worlds)
+    import Options
+    target = os.path.abspath(args.out)
+    Options.generate_yaml_templates(target, generate_hidden=False)
+    templates = []
+    for entry in sorted(os.scandir(target), key=lambda e: e.name.lower()):
+        if entry.is_file() and entry.name.endswith(".yaml"):
+            try:
+                with open(entry.path, encoding="utf-8-sig") as f:
+                    doc = yaml.safe_load(f) or {}
+                game = doc.get("game")
+            except Exception:
+                game = None
+            templates.append({"file": entry.name, "game": game if isinstance(game, str) else None})
+    return {"templates": templates}
+
+
+# --------------------------------------------------------------------------------------------------------------------
+# host.yaml
+# --------------------------------------------------------------------------------------------------------------------
+def cmd_host_yaml(args) -> dict:
+    """Makes sure host.yaml exists (Archipelago creates it on first use) and says where it is."""
+    where = cmd_where(args)
+    import settings
+    settings.skip_autosave = True
+    settings.get_settings()
+    return {"path": where["host_yaml"]}
+
+
+def cmd_validate_host_yaml(args) -> dict:
+    """Loads a candidate host.yaml with Archipelago's own loader without touching any real file."""
+    cmd_where(args)
+    import io
+    import settings
+    settings.skip_autosave = True
+    loaded = settings.Settings(args.path)
+    loaded.dump(io.StringIO())  # exercises the type conversion of every section
+    return {"valid": True}
+
+
+COMMANDS = {
+    "host-yaml": cmd_host_yaml,
+    "validate-host-yaml": cmd_validate_host_yaml,
+    "where": cmd_where,
+    "games": cmd_games,
+    "multidata": cmd_multidata,
+    "progress": cmd_progress,
+    "templates": cmd_templates,
+}
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--ap-dir", required=True, help="Archipelago source directory")
+    sub = parser.add_subparsers(dest="command", required=True)
+    sub.add_parser("where")
+    sub.add_parser("games")
+    p = sub.add_parser("multidata")
+    p.add_argument("path")
+    p = sub.add_parser("progress")
+    p.add_argument("save")
+    p = sub.add_parser("templates")
+    p.add_argument("out")
+    sub.add_parser("host-yaml")
+    p = sub.add_parser("validate-host-yaml")
+    p.add_argument("path")
+    args = parser.parse_args()
+
+    # setup() changes the working directory, so resolve user supplied paths first
+    for attr in ("path", "save", "out"):
+        if getattr(args, attr, None):
+            setattr(args, attr, os.path.abspath(getattr(args, attr)))
+    setup(args.ap_dir)
+    try:
+        result = COMMANDS[args.command](args)
+    except Exception as e:  # noqa: BLE001 - report everything to the caller
+        traceback.print_exc(file=sys.stderr)
+        fail(f"{type(e).__name__}: {e}")
+    emit({"ok": True, **result})
+
+
+if __name__ == "__main__":
+    main()

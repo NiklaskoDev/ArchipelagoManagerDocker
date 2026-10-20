@@ -1,0 +1,109 @@
+"""Runtime configuration, read once from environment variables."""
+from __future__ import annotations
+
+import os
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+
+
+def _int(name: str, default: int) -> int:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        raise SystemExit(f"Environment variable {name} must be an integer, got {raw!r}") from None
+
+
+def _port_range(raw: str) -> tuple[int, int]:
+    raw = raw.strip()
+    try:
+        if "-" in raw:
+            start, end = (int(part) for part in raw.split("-", 1))
+        else:
+            start = end = int(raw)
+    except ValueError:
+        raise SystemExit(f"PORT_RANGE must look like 38281-38300, got {raw!r}") from None
+    if not (1 <= start <= end <= 65535):
+        raise SystemExit(f"PORT_RANGE {raw!r} is not a valid port range")
+    return start, end
+
+
+@dataclass(frozen=True)
+class Config:
+    data_dir: Path
+    ap_dir: Path
+    ap_python: str
+    helper: Path
+    port_start: int
+    port_end: int
+    public_host: str
+    admin_user: str
+    admin_password: str
+    max_upload_bytes: int
+    max_extract_bytes: int
+    generation_timeout: int
+    # Where Archipelago itself keeps its per-user data (host.yaml, logs, custom worlds when the install is read-only).
+    ap_data_home: Path
+
+    # --- derived paths -------------------------------------------------------------------------------------------
+    @property
+    def db_path(self) -> Path:
+        return self.data_dir / "manager.sqlite3"
+
+    @property
+    def configs_dir(self) -> Path:
+        return self.data_dir / "configs"
+
+    @property
+    def games_dir(self) -> Path:
+        return self.data_dir / "games"
+
+    @property
+    def apworlds_dir(self) -> Path:
+        return self.data_dir / "apworlds"
+
+    @property
+    def jobs_dir(self) -> Path:
+        return self.data_dir / "jobs"
+
+    @property
+    def templates_dir(self) -> Path:
+        return self.data_dir / "templates"
+
+    @property
+    def tmp_dir(self) -> Path:
+        return self.data_dir / "tmp"
+
+    def ensure_dirs(self) -> None:
+        for path in (self.data_dir, self.configs_dir, self.games_dir, self.apworlds_dir, self.jobs_dir,
+                     self.templates_dir, self.tmp_dir, self.ap_data_home):
+            path.mkdir(parents=True, exist_ok=True)
+
+
+def load_config() -> Config:
+    data_dir = Path(os.environ.get("DATA_DIR", "/config")).resolve()
+    start, end = _port_range(os.environ.get("PORT_RANGE", "38281-38300"))
+    return Config(
+        data_dir=data_dir,
+        ap_dir=Path(os.environ.get("AP_DIR", "/opt/archipelago")).resolve(),
+        ap_python=os.environ.get("AP_PYTHON", "/opt/venv-ap/bin/python"),
+        helper=Path(__file__).resolve().parent.parent / "ap_helper.py",
+        port_start=start,
+        port_end=end,
+        public_host=os.environ.get("PUBLIC_HOST", "").strip(),
+        admin_user=os.environ.get("ADMIN_USER", "").strip(),
+        admin_password=os.environ.get("ADMIN_PASSWORD", ""),
+        max_upload_bytes=_int("MAX_UPLOAD_MB", 512) * 1024 * 1024,
+        max_extract_bytes=_int("MAX_EXTRACT_MB", 2048) * 1024 * 1024,
+        generation_timeout=_int("GENERATION_TIMEOUT", 3600),
+        ap_data_home=Path(os.environ.get("XDG_DATA_HOME") or (data_dir / "ap-data")).resolve(),
+    )
+
+
+CONFIG = load_config()
+
+if not CONFIG.ap_dir.is_dir() and "pytest" not in sys.modules:
+    print(f"warning: AP_DIR {CONFIG.ap_dir} does not exist; Archipelago features will not work", file=sys.stderr)

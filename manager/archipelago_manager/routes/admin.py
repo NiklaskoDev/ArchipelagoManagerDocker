@@ -1,0 +1,142 @@
+"""Server-wide settings, system information and the Archipelago host.yaml."""
+from __future__ import annotations
+
+import asyncio
+import os
+import shutil
+import sqlite3
+from pathlib import Path
+
+import yaml
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
+
+from .. import __version__, apbridge, db, settings as app_settings
+from ..config import CONFIG
+from ..rooms import ROOMS
+from ..security import admin_user
+from .apworlds import refresh_load_status
+
+router = APIRouter(prefix="/api")
+
+
+@router.get("/settings")
+def read_settings(_admin: sqlite3.Row = Depends(admin_user)) -> dict:
+    return {
+        **app_settings.get_settings(),
+        "port_range": [CONFIG.port_start, CONFIG.port_end],
+        "public_host_from_env": CONFIG.public_host,
+    }
+
+
+class SettingsPatch(BaseModel):
+    public_host: str | None = None
+    allow_registration: bool | None = None
+    users_can_start_rooms: bool | None = None
+    users_can_generate: bool | None = None
+    users_can_upload_apworlds: bool | None = None
+    auto_restart_crashed: bool | None = None
+    default_server_options: dict | None = None
+
+
+@router.patch("/settings")
+def write_settings(body: SettingsPatch, _admin: sqlite3.Row = Depends(admin_user)) -> dict:
+    try:
+        updated = app_settings.update_settings(body.model_dump(exclude_unset=True, exclude_none=True))
+    except app_settings.SettingsError as e:
+        raise HTTPException(400, str(e)) from None
+    return {**updated, "port_range": [CONFIG.port_start, CONFIG.port_end],
+            "public_host_from_env": CONFIG.public_host}
+
+
+def _dir_size(path: Path) -> int:
+    total = 0
+    for root, _dirs, files in os.walk(path):
+        for name in files:
+            try:
+                total += os.path.getsize(os.path.join(root, name))
+            except OSError:
+                pass
+    return total
+
+
+@router.get("/system")
+async def system_info(_admin: sqlite3.Row = Depends(admin_user)) -> dict:
+    usage = shutil.disk_usage(CONFIG.data_dir)
+    running = sum(1 for r in db.query("SELECT id FROM games") if ROOMS.is_active(r["id"]))
+    where = apbridge.STATE.where or {}
+    return {
+        "manager_version": __version__,
+        "ap_version": apbridge.ap_version(),
+        "ap_error": apbridge.STATE.error,
+        "ap_dir": str(CONFIG.ap_dir),
+        "worlds_folder": where.get("worlds_folder"),
+        "host_yaml": where.get("host_yaml"),
+        "world_count": len(apbridge.installed_games(include_hidden=True)),
+        "failed_worlds": (apbridge.STATE.info or {}).get("failed", {}),
+        "quarantined": apbridge.STATE.quarantined,
+        "data_dir": str(CONFIG.data_dir),
+        "disk": {"total": usage.total, "free": usage.free},
+        "data_bytes": await asyncio.to_thread(_dir_size, CONFIG.data_dir),
+        "port_range": [CONFIG.port_start, CONFIG.port_end],
+        "games": db.query_one("SELECT COUNT(*) AS n FROM games")["n"],
+        "running_games": running,
+        "users": db.query_one("SELECT COUNT(*) AS n FROM users")["n"],
+    }
+
+
+@router.post("/system/reload-worlds")
+async def reload_worlds(_admin: sqlite3.Row = Depends(admin_user)) -> dict:
+    await apbridge.sync_apworlds()
+    await refresh_load_status()
+    if apbridge.STATE.info is None:
+        raise HTTPException(503, apbridge.STATE.error or "Archipelago is unavailable")
+    return {"world_count": len(apbridge.installed_games(include_hidden=True)),
+            "failed_worlds": apbridge.STATE.info.get("failed", {})}
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+# host.yaml
+# ----------------------------------------------------------------------------------------------------------------------
+async def _host_yaml_path() -> Path:
+    try:
+        result = await apbridge.run_helper("host-yaml", timeout=60)
+    except apbridge.APBridgeError as e:
+        raise HTTPException(503, str(e)) from None
+    return Path(result["path"])
+
+
+@router.get("/host-yaml")
+async def read_host_yaml(_admin: sqlite3.Row = Depends(admin_user)) -> dict:
+    path = await _host_yaml_path()
+    # Archipelago keeps host.yaml inside its install folder when that is writable, which only happens when running as
+    # root. Inside a container that is lost with the container, so the UI warns about it.
+    persistent = CONFIG.data_dir in path.resolve().parents
+    return {"path": str(path), "content": path.read_text(encoding="utf-8"), "persistent": persistent}
+
+
+class HostYaml(BaseModel):
+    content: str = Field(max_length=512 * 1024)
+
+
+@router.put("/host-yaml")
+async def write_host_yaml(body: HostYaml, _admin: sqlite3.Row = Depends(admin_user)) -> dict:
+    path = await _host_yaml_path()
+    try:
+        yaml.safe_load(body.content)
+    except yaml.MarkedYAMLError as e:
+        line = f" (line {e.problem_mark.line + 1})" if e.problem_mark else ""
+        raise HTTPException(400, f"Invalid YAML{line}: {e.problem}") from None
+    candidate = CONFIG.tmp_dir / "host-candidate.yaml"
+    candidate.write_text(body.content, encoding="utf-8")
+    try:
+        await apbridge.run_helper("validate-host-yaml", str(candidate), timeout=60)
+    except apbridge.APBridgeError as e:
+        raise HTTPException(400, f"Archipelago rejected this file: {e}") from None
+    finally:
+        candidate.unlink(missing_ok=True)
+    shutil.copyfile(path, path.with_suffix(".yaml.bak"))
+    tmp = path.with_suffix(".yaml.tmp")
+    tmp.write_text(body.content, encoding="utf-8")
+    tmp.replace(path)
+    return {"path": str(path)}
