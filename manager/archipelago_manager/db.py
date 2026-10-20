@@ -10,7 +10,7 @@ from collections.abc import Iterable, Iterator
 
 from .config import CONFIG
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 SCHEMA = """
 CREATE TABLE users (
@@ -87,6 +87,7 @@ CREATE TABLE games (
     desired_state     TEXT NOT NULL DEFAULT 'stopped' CHECK (desired_state IN ('running', 'stopped')),
     visibility        TEXT NOT NULL DEFAULT 'participants' CHECK (visibility IN ('participants', 'all')),
     claimable         INTEGER NOT NULL DEFAULT 0,
+    single_claim      INTEGER NOT NULL DEFAULT 0,
     notes             TEXT
 );
 CREATE UNIQUE INDEX games_port ON games(port) WHERE port IS NOT NULL;
@@ -140,6 +141,13 @@ CREATE INDEX job_players_job ON job_players(job_id);
 """
 
 
+# Upgrades for databases created by older versions: MIGRATIONS[n] turns schema n - 1 into schema n. New databases get
+# the current SCHEMA directly.
+MIGRATIONS: dict[int, str] = {
+    2: "ALTER TABLE games ADD COLUMN single_claim INTEGER NOT NULL DEFAULT 0;",
+}
+
+
 def _connect() -> sqlite3.Connection:
     conn = sqlite3.connect(CONFIG.db_path, timeout=30, isolation_level=None)
     conn.row_factory = sqlite3.Row
@@ -156,6 +164,9 @@ def init_db() -> None:
         version = conn.execute("PRAGMA user_version").fetchone()[0]
         if version == 0:
             conn.executescript("BEGIN;" + SCHEMA + f"PRAGMA user_version = {SCHEMA_VERSION}; COMMIT;")
+        elif version < SCHEMA_VERSION:
+            for step in range(version + 1, SCHEMA_VERSION + 1):
+                conn.executescript("BEGIN;" + MIGRATIONS[step] + f"PRAGMA user_version = {step}; COMMIT;")
         elif version > SCHEMA_VERSION:
             raise RuntimeError(f"Database schema v{version} is newer than this version of the manager "
                                f"(v{SCHEMA_VERSION}). Refusing to downgrade.")

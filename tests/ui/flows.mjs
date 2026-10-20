@@ -222,10 +222,11 @@ await shot(admin, "pregenerated");
 // allow claiming
 await admin.locator("details", { hasText: "Settings" }).first().locator("summary").click();
 await admin.getByLabel("Let users claim unowned slots themselves").check();
+await admin.getByLabel("Players may claim only one slot each").check();
 await admin.locator("select").filter({ hasText: "Only players in the game" }).selectOption("all");
 await admin.getByRole("button", { name: "Save settings" }).click();
 await expectText(admin, "Settings saved");
-log("claiming enabled and game made visible to everyone");
+log("claiming (one slot each) enabled and game made visible to everyone");
 
 // delete via danger zone --------------------------------------------------------------------------------------------------
 await admin.locator("details", { hasText: "Danger zone" }).first().locator("summary").click();
@@ -252,6 +253,9 @@ await claim.click();
 await expectText(user, "You now own");
 await user.locator("table a[href*='/files/']").first().waitFor();  // the claimed slot's patch file
 log("user claims a slot and gets their files");
+await expectText(user, "Each player can claim one slot");
+if (await user.getByRole("button", { name: "This is mine" }).count()) problems.push("a second slot is still offered for claiming");
+log("with one slot each, no further slot is offered");
 if (await user.locator("details", { hasText: "Console" }).count()) problems.push("regular user can see the console");
 await shot(user, "claimed");
 await nav(user, "#/");

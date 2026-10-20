@@ -113,8 +113,11 @@ export default async function render({ root, params, cleanup, isCurrent, query }
             ? h("div", { class: "stack tight" }, s.files.map((f) => h("a", { class: "btn sm", href: `/api/games/${id}/files/${f.id}`, title: f.filename },
                 icon("download", 14), shortName(f.filename), h("span", { class: "muted" }, fmtBytes(f.size)))))
             : h("span", { class: "muted" }, s.type === 1 ? (admin || s.mine ? "no file" : "") : ""))))))),
-      !admin && !game.my_slots.length && game.claimable
-        ? h("p", { class: "muted small" }, "Find your slot above and press “This is mine” to get your files.") : null));
+      !admin && game.claimable && !game.my_slots.length
+        ? h("p", { class: "muted small", style: { marginTop: "8px" } }, "Find your slot above and press “This is mine” to get your files.",
+          game.single_claim ? " Each player can claim one slot." : "") : null,
+      !admin && game.claimable && game.single_claim && game.my_slots.length && game.slots.some((s) => s.type === 1 && !s.user_id)
+        ? h("p", { class: "muted small", style: { marginTop: "8px" } }, "Each player can claim one slot. To swap, release yours first.") : null));
   }
 
   function signature() {
@@ -145,6 +148,8 @@ export default async function render({ root, params, cleanup, isCurrent, query }
     const password = h("input", { class: "input", value: game.password ?? "", placeholder: "none", autocomplete: "off" });
     const adminPassword = h("input", { class: "input", value: game.server_password ?? "", placeholder: "none (no remote admin)", autocomplete: "off" });
     const visibility = select([["participants", "Only players in the game"], ["all", "Every user on this server"]], game.visibility);
+    const singleClaim = checkbox("Players may claim only one slot each", game.single_claim,
+      "Administrators can still assign more slots to someone by hand.");
     const claimable = checkbox("Let users claim unowned slots themselves", game.claimable,
       "Handy when you upload a seed and your friends should pick their own slot.");
     const notes = h("textarea", { class: "input", rows: 2, maxLength: 2000, placeholder: "Only visible to administrators" }, game.notes ?? "");
@@ -153,7 +158,8 @@ export default async function render({ root, params, cleanup, isCurrent, query }
     save.onclick = action(async () => {
       const options = rules.read();
       const body = { name: name.value, password: password.value, server_password: adminPassword.value, options,
-        visibility: visibility.value, claimable: claimable.input.checked, notes: notes.value };
+        visibility: visibility.value, claimable: claimable.input.checked, single_claim: singleClaim.input.checked,
+        notes: notes.value };
       if (port.value) body.port = Number(port.value);
       const result = await patch(`/api/games/${id}`, body);
       game = result;
@@ -167,7 +173,7 @@ export default async function render({ root, params, cleanup, isCurrent, query }
           field("Room password", password, "Players need it to connect"),
           field("Remote admin password", adminPassword, "Lets clients use !admin; leave empty to disable"),
           field("Who can see this game", visibility)),
-        claimable, field("Notes", notes),
+        claimable, singleClaim, field("Notes", notes),
         h("h3", {}, "Server rules"), rules.node,
         h("div", { class: "row" }, save)));
   }

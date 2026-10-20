@@ -408,3 +408,36 @@ def test_passwords_the_server_would_read_as_no_password_are_refused(admin, word)
         assert admin.patch(f"/api/games/{gid}", json={"password": "nullable"}).status_code == 200  # only the exact words
     finally:
         admin.delete(f"/api/games/{gid}")
+
+
+def test_one_slot_each_when_the_game_says_so(uploaded, admin, make_user):
+    gid = uploaded["id"]
+    _a, alice = make_user()
+    _b, bob = make_user()
+    alice_id = alice.get("/api/auth/status").json()["user"]["id"]
+    admin.patch(f"/api/games/{gid}", json={"visibility": "all", "claimable": True})
+
+    # off (the default): one player may take several slots
+    assert alice.post(f"/api/games/{gid}/slots/1/claim").status_code == 200
+    assert alice.post(f"/api/games/{gid}/slots/2/claim").status_code == 200
+    assert len(alice.get(f"/api/games/{gid}").json()["my_slots"]) == 2
+    alice.post(f"/api/games/{gid}/slots/2/unclaim")
+
+    # on: the second claim is refused and no longer offered
+    r = admin.patch(f"/api/games/{gid}", json={"single_claim": True})
+    assert r.status_code == 200 and r.json()["single_claim"] is True
+    view = alice.get(f"/api/games/{gid}").json()
+    assert view["single_claim"] is True and not any(s["claimable"] for s in view["slots"])
+    r = alice.post(f"/api/games/{gid}/slots/2/claim")
+    assert r.status_code == 409 and "only one" in r.json()["detail"]
+    assert by_slot(bob.get(f"/api/games/{gid}").json())[2]["claimable"]  # others still can
+    assert bob.post(f"/api/games/{gid}/slots/2/claim").status_code == 200
+
+    # switching works by releasing first
+    bob.post(f"/api/games/{gid}/slots/2/unclaim")
+    assert alice.post(f"/api/games/{gid}/slots/1/unclaim").status_code == 200
+    assert alice.post(f"/api/games/{gid}/slots/2/claim").status_code == 200
+
+    # the limit is for claiming only: an admin may still give someone a second slot
+    r = admin.post(f"/api/games/{gid}/slots/1/assign", json={"user_id": alice_id})
+    assert r.status_code == 200 and len(alice.get(f"/api/games/{gid}").json()["my_slots"]) == 2

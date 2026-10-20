@@ -1,4 +1,5 @@
-"""Accounts, sessions and permissions. Runs without Archipelago."""
+"""Accounts, sessions, permissions and the database. Runs without Archipelago."""
+import pytest
 
 
 def login(server, name, password):
@@ -195,3 +196,46 @@ def test_oversized_uploads_are_rejected_before_they_are_stored(tmp_path):
         assert admin.get("/api/auth/status").status_code == 200  # the server is fine
     finally:
         server.stop()
+
+
+def test_a_database_from_the_first_version_is_upgraded(tmp_path):
+    """Schema v1 had no single_claim column; starting a newer manager on it must add it and keep the data."""
+    import sqlite3
+    from conftest import Server
+    server = Server(tmp_path / "data", ap=False)
+    server.start()
+    setup_admin(server)
+    server.stop()
+    db_path = tmp_path / "data" / "manager.sqlite3"
+    conn = sqlite3.connect(db_path)
+    conn.execute("INSERT INTO games(name, created_at, options) VALUES ('Old game', 0, '{}')")
+    conn.execute("ALTER TABLE games DROP COLUMN single_claim")  # what a v1 database looks like
+    conn.execute("PRAGMA user_version = 1")
+    conn.commit()
+    conn.close()
+
+    server.start()
+    try:
+        admin = server.client("boss", "bosspass123")  # users survived
+        games = admin.get("/api/games").json()
+        assert [(g["name"], g["single_claim"]) for g in games] == [("Old game", False)]
+        conn = sqlite3.connect(db_path)
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
+        conn.close()
+    finally:
+        server.stop()
+
+
+def test_a_database_from_a_newer_version_is_not_touched(tmp_path):
+    import sqlite3
+    from conftest import Server
+    server = Server(tmp_path / "data", ap=False)
+    server.start()
+    server.stop()
+    conn = sqlite3.connect(tmp_path / "data" / "manager.sqlite3")
+    conn.execute("PRAGMA user_version = 99")
+    conn.commit()
+    conn.close()
+    with pytest.raises(RuntimeError, match="exited early"):
+        server.start()
+    assert "Refusing to downgrade" in server.log()

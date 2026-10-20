@@ -80,7 +80,8 @@ by your players:
 
 - **Add a pregenerated game:** *Games → Add a game*, drop the zip. The slots are matched to users by player name
   (case-insensitive). If two users have a config with the same name the slot is left unassigned rather than guessed;
-  assign it from the slot's *Owner* drop-down. Turning on *claimable* in the game's settings lets players pick their own.
+  assign it from the slot's *Owner* drop-down. Turning on *claimable* in the game's settings lets players pick their own;
+  add *only one slot each* so nobody can take more than one (you can still assign extra slots by hand).
 - **Generate a game:** *Generate*, tick the configs, set the options, *Generate*. Slot owners are taken from the configs.
 - **Run a game:** *Start / Stop / Restart* on the game page. *Settings* holds the room password, the remote-admin
   password, hint cost, `!release`/`!collect`/`!remaining` rules and the idle shutdown. Passwords and rules apply to a

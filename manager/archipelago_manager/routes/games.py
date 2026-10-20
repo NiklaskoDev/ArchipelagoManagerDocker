@@ -91,6 +91,7 @@ def game_summary(row: sqlite3.Row, slots: list[sqlite3.Row], user: sqlite3.Row, 
         "games": games, "missing_games": apbridge.missing_games(games),
         "player_count": len(players), "claimed_count": sum(1 for s in players if s["user_id"] is not None),
         "visibility": row["visibility"], "claimable": bool(row["claimable"]),
+        "single_claim": bool(row["single_claim"]),
         "my_slots": [{"slot": s["slot"], "name": s["name"], "game": s["game"]} for s in mine],
         "my_file_count": db.query_one(
             "SELECT COUNT(*) AS n FROM game_files f JOIN game_slots s ON s.game_id = f.game_id AND s.slot = f.slot "
@@ -166,6 +167,8 @@ async def _detail(game_id: int, user: sqlite3.Row, request: Request) -> dict:
         if f["slot"] is not None and f["kind"] == "patch":
             files_by_slot.setdefault(f["slot"], []).append(_file_json(f))
 
+    # With "one slot each", someone who already has a slot cannot claim another one.
+    may_claim = bool(row["claimable"]) and not (row["single_claim"] and summary["my_slots"])
     slot_items = []
     for s in slots:
         p = progress.get(s["slot"], {})
@@ -173,7 +176,7 @@ async def _detail(game_id: int, user: sqlite3.Row, request: Request) -> dict:
             "slot": s["slot"], "name": s["name"], "game": s["game"], "type": s["type"],
             "locations": s["locations"], "user_id": s["user_id"], "owner": s["owner"],
             "mine": s["user_id"] == user["id"],
-            "claimable": bool(row["claimable"]) and s["user_id"] is None and s["type"] == 1,
+            "claimable": may_claim and s["user_id"] is None and s["type"] == 1,
             "checked": p.get("checked", 0), "hints_used": p.get("hints_used", 0),
             "last_activity": p.get("last_activity"),
             "status": status_label(p.get("status", 0), running) if s["type"] == 1 else None,
@@ -220,6 +223,7 @@ class GamePatch(BaseModel):
     options: dict | None = None
     visibility: str | None = None
     claimable: bool | None = None
+    single_claim: bool | None = None
     notes: str | None = Field(default=None, max_length=2000)
 
 
@@ -264,6 +268,8 @@ async def patch_game(game_id: int, body: GamePatch, request: Request, user: sqli
         changes["visibility"] = body.visibility
     if "claimable" in given and body.claimable is not None:
         changes["claimable"] = int(body.claimable)
+    if "single_claim" in given and body.single_claim is not None:
+        changes["single_claim"] = int(body.single_claim)
     if "notes" in given:
         changes["notes"] = (body.notes or "").strip() or None
 
@@ -384,7 +390,10 @@ async def claim_slot(game_id: int, slot: int, request: Request, user: sqlite3.Ro
     target = _get_slot(game_id, slot)
     if not row["claimable"] or target["type"] != 1:
         raise HTTPException(403, "Slots of this game cannot be claimed")
-    with db.connection() as conn:
+    with db.connection() as conn:  # one locked transaction: two quick clicks cannot both pass the check
+        if row["single_claim"] and conn.execute("SELECT 1 FROM game_slots WHERE game_id = ? AND user_id = ?",
+                                                (game_id, user["id"])).fetchone():
+            raise HTTPException(409, "You already have a slot in this game. Each player may claim only one.")
         claimed = conn.execute("UPDATE game_slots SET user_id = ? WHERE game_id = ? AND slot = ? AND user_id IS NULL",
                                (user["id"], game_id, slot)).rowcount
     if not claimed:
