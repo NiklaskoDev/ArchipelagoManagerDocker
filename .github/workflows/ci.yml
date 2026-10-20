@@ -140,10 +140,13 @@ jobs:
             docker logs smoke
             exit 1
           fi
-          echo "--- processes (docker top: the slim image has no ps of its own)"
-          docker top smoke -eo uid,args | grep -E "archipelago_manager|MultiServer" || true
-          docker top smoke -eo uid,args | grep "archipelago_manager" | grep -q "^ *99 " \
-            || { echo "the manager is not running as user 99"; exit 1; }
+          # docker top runs ps on the host (the slim image has none) and insists on a PID column. Only the python
+          # process counts: tini, running as root, carries the same words in its arguments.
+          echo "--- processes"
+          docker top smoke -eo pid,uid,args
+          docker top smoke -eo pid,uid,args | awk '
+            $3 ~ /(^|\/)python[0-9.]*$/ && $4 == "-m" && $5 == "archipelago_manager" { found = 1; if ($2 != 99) bad = 1 }
+            END { exit !(found && !bad) }' || { echo "the manager is not running as user 99"; exit 1; }
           echo "--- data folder ownership"
           docker exec smoke ls -ln /config
           docker exec smoke find /config ! -user 99 -print -quit | grep -q . && { echo "files not owned by 99"; exit 1; } || true
