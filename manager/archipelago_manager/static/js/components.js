@@ -1,5 +1,5 @@
 // Reusable pieces shared by several views.
-import { h, icon, copyText, openModal, toast, action, fmtBytes } from "./util.js";
+import { h, icon, copyText, openModal, toast, action, fmtBytes, fmtAgo } from "./util.js";
 import { api, post, state, isAdmin } from "./api.js";
 
 const STATE_LABELS = {
@@ -257,4 +257,34 @@ export function adminTabs(current) {
   return h("div", { class: "tabs", role: "navigation" },
     [["users", "Users"], ["settings", "Settings"]].map(([key, label]) =>
       h("a", { class: "tab", href: `#/admin/${key}`, "aria-current": key === current ? "page" : undefined }, label)));
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Archipelago updates (admins only: they come from /api/system)
+// ---------------------------------------------------------------------------------------------------------------------
+const README_UPDATING = "https://github.com/NiklaskoDev/ArchipelagoManagerDocker#updating";
+
+export function updateBanner(update) {
+  if (!update?.update_available) return null;
+  return banner("info", icon("package", 18), h("div", { class: "grow" },
+    h("strong", {}, `Archipelago ${update.latest} is available`), ` (this server runs ${update.installed}).`,
+    h("div", { class: "small" }, "Update the container image to get it: on Unraid, Docker → Check for updates → Apply. ",
+      "Users, configs and games are kept, and running games start again."),
+    h("div", { class: "small" },
+      update.url ? [h("a", { href: update.url, target: "_blank", rel: "noopener" }, "Release notes"), " · "] : null,
+      h("a", { href: README_UPDATING, target: "_blank", rel: "noopener" }, "No newer image offered yet?"))));
+}
+
+export function updateStatus(update) {
+  if (!update.enabled) return h("span", { class: "muted" }, "Not checked: turned off with UPDATE_CHECK=false");
+  if (update.update_available) {
+    return h("span", { class: "row" }, badge(`${update.latest} available`, "warn"),
+      update.url ? h("a", { href: update.url, target: "_blank", rel: "noopener" }, "release notes") : null);
+  }
+  if (update.latest) {
+    return h("span", { class: "row" }, badge("Up to date", "ok"),
+      h("span", { class: "muted small" }, `latest release ${update.latest}, checked ${fmtAgo(update.checked_at)}`));
+  }
+  if (update.error) return h("span", { class: "muted", title: update.error }, "Could not reach GitHub to check");
+  return h("span", { class: "muted" }, "Not checked yet");
 }

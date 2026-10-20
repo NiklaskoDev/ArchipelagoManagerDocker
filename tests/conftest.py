@@ -107,6 +107,7 @@ class Server:
             "PORT_RANGE": f"{self.game_port_start}-{self.game_port_start + 19}",
             "PUBLIC_HOST": "play.example.test",
             "PYTHONPATH": str(MANAGER_DIR),
+            "UPDATE_CHECK": "false",  # no calls to GitHub from tests; test_updates turns it on against a fake
         })
         env.pop("XDG_DATA_HOME", None)
         env.update(self.extra_env)

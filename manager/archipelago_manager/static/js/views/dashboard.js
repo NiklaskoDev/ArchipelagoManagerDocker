@@ -1,6 +1,6 @@
 import { h, clear, icon, fmtBytes } from "../util.js";
 import { get, state, isAdmin } from "../api.js";
-import { pageHeader, missingGamesPanel, gameCard, empty, loading } from "../components.js";
+import { pageHeader, missingGamesPanel, gameCard, empty, updateBanner } from "../components.js";
 
 export default async function render({ root, cleanup, isCurrent }) {
   const admin = isAdmin();
@@ -43,6 +43,7 @@ export default async function render({ root, cleanup, isCurrent }) {
 
   root.append(
     pageHeader(`Welcome, ${state.user.username}`, admin ? "Overview of this server." : "Your games and player configs."),
+    system?.update?.update_available ? h("div", { class: "page-banner" }, updateBanner(system.update)) : null,
     missingHost,
     system ? h("div", { class: "grid tiles" },
       tile(`${system.running_games} / ${system.games}`, "Games running"),

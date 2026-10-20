@@ -47,6 +47,9 @@ class Config:
     generation_timeout: int
     # Where Archipelago itself keeps its per-user data (host.yaml, logs, custom worlds when the install is read-only).
     ap_data_home: Path
+    # Look for newer Archipelago releases on GitHub (once at start, then twice a day) so admins know to update.
+    update_check: bool
+    releases_url: str
 
     # --- derived paths -------------------------------------------------------------------------------------------
     @property
@@ -100,6 +103,9 @@ def load_config() -> Config:
         max_extract_bytes=_int("MAX_EXTRACT_MB", 2048) * 1024 * 1024,
         generation_timeout=_int("GENERATION_TIMEOUT", 3600),
         ap_data_home=Path(os.environ.get("XDG_DATA_HOME") or (data_dir / "ap-data")).resolve(),
+        update_check=os.environ.get("UPDATE_CHECK", "true").strip().lower() not in ("0", "false", "no", "off"),
+        releases_url=os.environ.get("AP_RELEASES_URL",
+                                    "https://api.github.com/repos/ArchipelagoMW/Archipelago/releases/latest"),
     )
 
 

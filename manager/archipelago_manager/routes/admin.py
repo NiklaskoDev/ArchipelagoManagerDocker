@@ -11,7 +11,7 @@ import yaml
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from .. import __version__, apbridge, db, settings as app_settings
+from .. import __version__, apbridge, db, settings as app_settings, updates
 from ..config import CONFIG
 from ..rooms import ROOMS
 from ..security import admin_user
@@ -75,6 +75,7 @@ async def system_info(_admin: sqlite3.Row = Depends(admin_user)) -> dict:
         "world_count": len(apbridge.installed_games(include_hidden=True)),
         "failed_worlds": (apbridge.STATE.info or {}).get("failed", {}),
         "quarantined": apbridge.STATE.quarantined,
+        "update": updates.status(),
         "data_dir": str(CONFIG.data_dir),
         "disk": {"total": usage.total, "free": usage.free},
         "data_bytes": await asyncio.to_thread(_dir_size, CONFIG.data_dir),
@@ -83,6 +84,14 @@ async def system_info(_admin: sqlite3.Row = Depends(admin_user)) -> dict:
         "running_games": running,
         "users": db.query_one("SELECT COUNT(*) AS n FROM users")["n"],
     }
+
+
+@router.post("/system/check-updates")
+async def check_updates(_admin: sqlite3.Row = Depends(admin_user)) -> dict:
+    if not CONFIG.update_check:
+        raise HTTPException(409, "Update checks are turned off (UPDATE_CHECK=false)")
+    await updates.check_now()
+    return updates.status()
 
 
 @router.post("/system/reload-worlds")

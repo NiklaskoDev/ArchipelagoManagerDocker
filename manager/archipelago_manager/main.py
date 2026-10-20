@@ -10,7 +10,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import __version__, apbridge, db
+from . import __version__, apbridge, db, updates
 from .config import CONFIG
 from .generation import GENERATION
 from .rooms import ROOMS
@@ -49,9 +49,12 @@ async def lifespan(_app: FastAPI):
     ROOMS.reset()
     await GENERATION.start()
     init_task = asyncio.create_task(init_archipelago())
+    update_task = asyncio.create_task(updates.run_periodically()) if CONFIG.update_check else None
     log.info("Archipelago Manager %s listening, data in %s", __version__, CONFIG.data_dir)
     yield
     init_task.cancel()
+    if update_task:
+        update_task.cancel()
     await GENERATION.stop()
     await ROOMS.shutdown()
 

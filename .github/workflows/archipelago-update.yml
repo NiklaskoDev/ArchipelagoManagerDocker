@@ -1,0 +1,77 @@
+name: Archipelago update
+
+# Looks for a new Archipelago release every day. When there is one, it opens a pull request that bumps AP_VERSION in
+# the Dockerfile and starts CI for it. Merging the pull request publishes the new image, which Unraid then offers as
+# an update.
+#
+# One-time setup: Settings → Actions → General → Workflow permissions → tick
+# "Allow GitHub Actions to create and approve pull requests".
+
+on:
+  schedule:
+    - cron: "23 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write       # push the update branch
+  pull-requests: write  # open the pull request
+  actions: write        # start CI for the branch (see below)
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compare with the latest release
+        id: versions
+        run: |
+          current="$(sed -n 's/^ARG AP_VERSION=//p' Dockerfile | head -1)"
+          # Release tags look like 0.6.8; release candidates (0.6.9-rc1) and other tags are skipped.
+          latest="$(git ls-remote --tags --refs https://github.com/ArchipelagoMW/Archipelago.git \
+                      | sed 's#.*refs/tags/##' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)"
+          newest="$(printf '%s\n%s\n' "$current" "$latest" | sort -V | tail -1)"
+          echo "Dockerfile has $current, latest release is ${latest:-unknown}"
+          echo "current=$current" >> "$GITHUB_OUTPUT"
+          echo "latest=$latest" >> "$GITHUB_OUTPUT"
+          if [ -n "$latest" ] && [ "$latest" != "$current" ] && [ "$newest" = "$latest" ]; then
+            echo "update=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "update=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open a pull request
+        if: steps.versions.outputs.update == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CURRENT: ${{ steps.versions.outputs.current }}
+          LATEST: ${{ steps.versions.outputs.latest }}
+          BASE: ${{ github.event.repository.default_branch }}
+        run: |
+          branch="update/archipelago-$LATEST"
+          if git ls-remote --exit-code --heads origin "$branch" > /dev/null; then
+            echo "$branch already exists; nothing to do."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          sed -i "s/^ARG AP_VERSION=.*/ARG AP_VERSION=$LATEST/" Dockerfile
+          git commit -am "Update Archipelago to $LATEST"
+          git push -u origin "$branch"
+
+          cat > "$RUNNER_TEMP/body.md" <<BODY
+          Archipelago [$LATEST](https://github.com/ArchipelagoMW/Archipelago/releases/tag/$LATEST) is out; this
+          bumps the bundled version from $CURRENT.
+
+          CI has been started for this branch: it installs the new release, runs the tests against it and smoke tests
+          the image. Check that it passed (Actions tab), then merge. Merging publishes the new image; Unraid offers it
+          under *Docker → Check for updates*.
+
+          Custom APWorlds can stop loading on a new Archipelago version. After updating, look at *Custom games* and
+          *Admin → Settings → System* for worlds that failed to load.
+          BODY
+          gh pr create --base "$BASE" --head "$branch" --title "Update Archipelago to $LATEST" --body-file "$RUNNER_TEMP/body.md"
+
+          # Pull requests opened with the workflow token do not trigger other workflows, so start CI explicitly.
+          gh workflow run ci.yml --ref "$branch"

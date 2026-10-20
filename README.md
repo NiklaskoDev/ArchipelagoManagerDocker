@@ -122,6 +122,7 @@ Everything is optional except the volume. Set these as environment variables (Un
 | `MAX_EXTRACT_MB` | `2048` | Largest total size a game archive may unpack to. |
 | `GENERATION_TIMEOUT` | `3600` | Seconds before a generation is stopped. |
 | `TZ` | *(empty)* | Time zone for logs. |
+| `UPDATE_CHECK` | `true` | Ask GitHub for new Archipelago releases and show a notice to admins. |
 
 ## Data and backups
 
@@ -145,9 +146,23 @@ The image bundles one Archipelago release (shown under Admin → Settings → Sy
 version it needs; if the bundled Archipelago is older than that, the UI refuses the upload with a clear message
 instead of failing later.
 
-- **Update the manager and Archipelago:** pull the newer image (Unraid: *Check for updates → Apply*). Data and settings
-  stay; running games restart.
-- **Build with another Archipelago release:** `docker build --build-arg AP_VERSION=<tag> .`
+Archipelago is part of the image, so a new Archipelago version arrives as a new image. Nothing is installed inside a
+running container.
+
+**On the server:** when a newer Archipelago release exists, admins see a notice on the dashboard and under
+*Admin → Settings → System* (the manager asks GitHub once at start and then twice a day; `UPDATE_CHECK=false` turns
+that off). To update, pull the newer image: on Unraid, *Docker → Check for updates → Apply*. Users, configs, games and
+saves stay, and games that were running start again. Custom APWorlds can stop loading on a new Archipelago version;
+*Custom games* and the System page show which.
+
+**Where new images come from:** the `Archipelago update` workflow checks for a new release every day. When there is
+one, it opens a pull request that bumps `AP_VERSION` in the `Dockerfile` and starts CI for it, which tests the manager
+against the new release and smoke tests the image. Merging the pull request publishes the new image. This needs one
+setting in the repository: *Settings → Actions → General → Workflow permissions → Allow GitHub Actions to create and
+approve pull requests*. You can also run the workflow by hand (*Actions → Archipelago update → Run workflow*) or edit
+`AP_VERSION` yourself.
+
+**Building it yourself:** `docker build --build-arg AP_VERSION=<release> .`
 
 ## Security notes
 
@@ -179,7 +194,7 @@ instead of failing later.
 
 ```sh
 # run the manager against a local Archipelago checkout
-git clone --depth 1 --branch 0.6.8 https://github.com/ArchipelagoMW/Archipelago.git
+git clone --depth 1 --branch "$(sed -n 's/^ARG AP_VERSION=//p' Dockerfile)" https://github.com/ArchipelagoMW/Archipelago.git
 python -m venv ap-venv && ap-venv/bin/pip install -r <(grep -v -i -E '^(kivy|kivymd|pyshortcuts)' Archipelago/requirements.txt) "setuptools>=75,<81" requests
 for r in Archipelago/worlds/*/requirements.txt; do ap-venv/bin/pip install -r "$r"; done   # as the Dockerfile does
 

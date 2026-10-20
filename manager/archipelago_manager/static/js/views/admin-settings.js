@@ -1,6 +1,6 @@
 import { h, clear, icon, toast, action, fmtBytes } from "../util.js";
 import { get, patch, put, post } from "../api.js";
-import { pageHeader, field, checkbox, banner, adminTabs, serverOptionsForm } from "../components.js";
+import { pageHeader, field, checkbox, banner, adminTabs, serverOptionsForm, updateBanner, updateStatus } from "../components.js";
 
 export default async function render({ root, cleanup }) {
   const [settings, system] = await Promise.all([get("/api/settings"), get("/api/system")]);
@@ -51,10 +51,24 @@ export default async function render({ root, cleanup }) {
 
   // system --------------------------------------------------------------------------------------------------------------
   const failed = Object.entries(system.failed_worlds || {});
-  const systemCard = h("div", { class: "card stack" }, h("h2", {}, "System"),
+  const updateHost = h("dd");
+  const updateBannerHost = h("div");
+  const drawUpdate = (update) => {
+    clear(updateHost).append(h("div", { class: "row" }, updateStatus(update),
+      update.enabled ? h("button", { class: "btn sm", type: "button", onclick: action(async () => {
+        const fresh = await post("/api/system/check-updates");
+        drawUpdate(fresh);
+        toast(fresh.update_available ? `Archipelago ${fresh.latest} is available` : fresh.error ? fresh.error : "Archipelago is up to date",
+          fresh.error ? "error" : "success");
+      }) }, "Check now") : null));
+    clear(updateBannerHost).append(updateBanner(update) || "");
+  };
+  drawUpdate(system.update);
+  const systemCard = h("div", { class: "card stack" }, h("h2", {}, "System"), updateBannerHost,
     h("dl", { class: "kv" },
       h("dt", {}, "Manager"), h("dd", {}, system.manager_version),
       h("dt", {}, "Archipelago"), h("dd", {}, system.ap_version ? `${system.ap_version} (${system.world_count} games loaded)` : h("span", { class: "form-error" }, system.ap_error || "unavailable")),
+      h("dt", {}, "Updates"), updateHost,
       h("dt", {}, "Game ports"), h("dd", {}, `${system.port_range[0]}–${system.port_range[1]}`, h("span", { class: "muted" }, " (each must be published by Docker)")),
       h("dt", {}, "Data folder"), h("dd", {}, h("span", { class: "mono" }, system.data_dir), h("span", { class: "muted" }, ` · ${fmtBytes(system.data_bytes)} used, ${fmtBytes(system.disk.free)} free`)),
       h("dt", {}, "Custom worlds folder"), h("dd", { class: "mono" }, system.worlds_folder || "—")),

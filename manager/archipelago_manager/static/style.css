@@ -181,6 +181,7 @@ table.table { width: 100%; border-collapse: collapse; }
 .banner.error > .icon { color: var(--bad); }
 .banner.info { border-color: color-mix(in srgb, var(--info) 50%, transparent); background: color-mix(in srgb, var(--info) 8%, var(--surface)); }
 .banner.ok { border-color: color-mix(in srgb, var(--ok) 50%, transparent); background: color-mix(in srgb, var(--ok) 8%, var(--surface)); }
+.page-banner, .view > div > .missing-panel { margin-bottom: 16px; }
 .empty { text-align: center; padding: 36px 16px; display: flex; flex-direction: column; gap: 10px; align-items: center; background: var(--surface);
   border: 1px dashed var(--border); border-radius: var(--radius); }
 .loading { display: flex; align-items: center; gap: 10px; color: var(--muted); padding: 30px; justify-content: center; }
