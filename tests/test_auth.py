@@ -1,0 +1,197 @@
+"""Accounts, sessions and permissions. Runs without Archipelago."""
+
+
+def login(server, name, password):
+    client = server.client()
+    return client, client.post("/api/auth/login", json={"username": name, "password": password})
+
+
+def setup_admin(server):
+    c = server.client()
+    r = c.post("/api/auth/setup", json={"username": "boss", "password": "bosspass123"})
+    assert r.status_code == 200, r.text
+    return c
+
+
+def test_first_run_setup_flow(plain_server):
+    c = plain_server.client()
+    status = c.get("/api/auth/status").json()
+    assert status["needs_setup"] is True and status["user"] is None
+    assert c.get("/api/games").status_code == 401
+
+    assert c.post("/api/auth/setup", json={"username": "a", "password": "bosspass123"}).status_code == 400  # name too short
+    assert c.post("/api/auth/setup", json={"username": "boss", "password": "short"}).status_code == 400
+    r = c.post("/api/auth/setup", json={"username": "boss", "password": "bosspass123"})
+    assert r.status_code == 200 and r.json()["role"] == "admin"
+    assert c.get("/api/auth/status").json()["user"]["username"] == "boss"
+    # setup is a one-time door
+    assert plain_server.client().post("/api/auth/setup", json={"username": "evil", "password": "evilpass123"}).status_code == 409
+
+
+def test_state_changing_calls_need_the_csrf_header(plain_server):
+    setup_admin(plain_server)
+    import httpx
+    bare = httpx.Client(base_url=plain_server.base_url)
+    r = bare.post("/api/auth/login", json={"username": "boss", "password": "bosspass123"})
+    assert r.status_code == 403
+    assert bare.get("/api/auth/status").status_code == 200  # reads are fine
+
+
+def test_session_cookie_flags(plain_server):
+    c = plain_server.client()
+    r = c.post("/api/auth/setup", json={"username": "boss", "password": "bosspass123"})
+    cookie = r.headers["set-cookie"].lower()
+    assert "httponly" in cookie and "samesite=lax" in cookie
+
+
+def test_wrong_password_and_throttling(plain_server):
+    setup_admin(plain_server)
+    for _ in range(8):
+        _c, r = login(plain_server, "boss", "nope")
+        assert r.status_code == 401
+    _c, r = login(plain_server, "boss", "bosspass123")  # now locked out even with the right password
+    assert r.status_code == 429
+
+
+def test_logout_invalidates_the_session(plain_server):
+    c = setup_admin(plain_server)
+    assert c.post("/api/auth/logout", json={}).status_code == 200
+    assert c.get("/api/games").status_code == 401
+
+
+def test_registration_is_off_by_default_and_can_be_enabled(plain_server):
+    admin = setup_admin(plain_server)
+    anon = plain_server.client()
+    assert anon.post("/api/auth/register", json={"username": "newbie", "password": "newbiepass1"}).status_code == 403
+    assert admin.patch("/api/settings", json={"allow_registration": True}).status_code == 200
+    assert anon.get("/api/auth/status").json()["allow_registration"] is True
+    r = anon.post("/api/auth/register", json={"username": "newbie", "password": "newbiepass1"})
+    assert r.status_code == 200 and r.json()["role"] == "user"
+    assert anon.post("/api/auth/register", json={"username": "NEWBIE", "password": "newbiepass1"}).status_code == 409  # case-insensitive
+
+
+def test_regular_users_cannot_use_admin_endpoints(plain_server):
+    admin = setup_admin(plain_server)
+    admin.post("/api/users", json={"username": "plain", "password": "plainpass1"})
+    user = plain_server.client("plain", "plainpass1")
+    for method, path in [("get", "/api/users"), ("get", "/api/settings"), ("get", "/api/system"), ("get", "/api/host-yaml")]:
+        assert getattr(user, method)(path).status_code == 403, path
+    assert user.post("/api/users", json={"username": "x1", "password": "xxxxxxxx1"}).status_code == 403
+    assert user.patch("/api/settings", json={"allow_registration": True}).status_code == 403
+
+
+def test_last_admin_is_protected(plain_server):
+    admin = setup_admin(plain_server)
+    me = admin.get("/api/auth/status").json()["user"]["id"]
+    assert admin.patch(f"/api/users/{me}", json={"role": "user"}).status_code == 409
+    assert admin.patch(f"/api/users/{me}", json={"disabled": True}).status_code == 409
+    assert admin.delete(f"/api/users/{me}").status_code == 409
+    second = admin.post("/api/users", json={"username": "second", "password": "secondpass1", "role": "admin"}).json()
+    assert admin.patch(f"/api/users/{second['id']}", json={"role": "user"}).status_code == 200  # fine while boss remains
+
+
+def test_disabling_a_user_ends_their_sessions(plain_server):
+    admin = setup_admin(plain_server)
+    u = admin.post("/api/users", json={"username": "temp", "password": "temppass12"}).json()
+    user = plain_server.client("temp", "temppass12")
+    assert user.get("/api/games").status_code == 200
+    admin.patch(f"/api/users/{u['id']}", json={"disabled": True})
+    assert user.get("/api/games").status_code == 401
+    assert plain_server.client().post("/api/auth/login", json={"username": "temp", "password": "temppass12"}).status_code == 401
+    admin.patch(f"/api/users/{u['id']}", json={"disabled": False})
+    assert plain_server.client("temp", "temppass12").get("/api/games").status_code == 200
+
+
+def test_password_change_keeps_this_session_but_drops_others(plain_server):
+    admin = setup_admin(plain_server)
+    admin.post("/api/users", json={"username": "pw", "password": "oldpassword1"})
+    a = plain_server.client("pw", "oldpassword1")
+    b = plain_server.client("pw", "oldpassword1")
+    assert a.post("/api/auth/password", json={"current_password": "wrong", "new_password": "newpassword1"}).status_code == 403
+    assert a.post("/api/auth/password", json={"current_password": "oldpassword1", "new_password": "short"}).status_code == 400
+    assert a.post("/api/auth/password", json={"current_password": "oldpassword1", "new_password": "newpassword1"}).status_code == 200
+    assert a.get("/api/games").status_code == 200
+    assert b.get("/api/games").status_code == 401
+    assert plain_server.client("pw", "newpassword1").get("/api/games").status_code == 200
+
+
+def test_admin_password_reset_and_delete(plain_server):
+    admin = setup_admin(plain_server)
+    u = admin.post("/api/users", json={"username": "victim", "password": "victimpass1"}).json()
+    user = plain_server.client("victim", "victimpass1")
+    admin.patch(f"/api/users/{u['id']}", json={"password": "resetpassword1"})
+    assert user.get("/api/games").status_code == 401
+    assert plain_server.client("victim", "resetpassword1").get("/api/games").status_code == 200
+    assert admin.delete(f"/api/users/{u['id']}").status_code == 200
+    assert admin.delete(f"/api/users/{u['id']}").status_code == 404
+
+
+def test_username_rules(plain_server):
+    admin = setup_admin(plain_server)
+    for bad in ["x", "a" * 33, "bad/name", "semi;colon", "<script>"]:
+        assert admin.post("/api/users", json={"username": bad, "password": "password123"}).status_code == 400, bad
+    assert admin.post("/api/users", json={"username": "Good Name_1.x", "password": "password123"}).status_code == 200
+
+
+def test_env_bootstrap_admin(tmp_path):
+    from conftest import Server
+    server = Server(tmp_path / "data", ap=False, extra_env={"ADMIN_USER": "envadmin", "ADMIN_PASSWORD": "envpassword1"})
+    server.start()
+    try:
+        assert server.client().get("/api/auth/status").json()["needs_setup"] is False
+        assert server.client("envadmin", "envpassword1").get("/api/users").status_code == 200
+    finally:
+        server.stop()
+
+
+def test_settings_validation(plain_server):
+    admin = setup_admin(plain_server)
+    assert admin.patch("/api/settings", json={"default_server_options": {"hint_cost": 500}}).status_code == 400
+    assert admin.patch("/api/settings", json={"public_host": "bad host/"}).status_code == 400
+    r = admin.patch("/api/settings", json={"public_host": "games.example.org", "default_server_options": {"hint_cost": 25}})
+    assert r.status_code == 200 and r.json()["default_server_options"]["hint_cost"] == 25
+    assert admin.get("/api/settings").json()["public_host"] == "games.example.org"
+
+
+def test_security_headers_and_static_ui(plain_server):
+    c = plain_server.client()
+    r = c.get("/")
+    assert r.status_code == 200 and "Archipelago Manager" in r.text
+    assert r.headers["x-frame-options"] == "DENY" and "default-src 'self'" in r.headers["content-security-policy"]
+    assert c.get("/api/health").headers["cache-control"] == "no-store"
+    assert c.get("/js/app.js").status_code == 200
+    assert c.get("/..%2f..%2fetc/passwd").status_code in (400, 404)
+
+
+def test_host_yaml_editor_requires_a_working_archipelago(plain_server):
+    admin = setup_admin(plain_server)
+    r = admin.get("/api/host-yaml")
+    assert r.status_code == 503  # no Archipelago here, and the message says so rather than failing obscurely
+    assert "Archipelago" in r.json()["detail"]
+
+
+def test_rotating_usernames_does_not_bypass_the_login_limit(plain_server):
+    setup_admin(plain_server)
+    statuses = [login(plain_server, f"guess{i}", "wrong")[1].status_code for i in range(45)]
+    assert statuses[:40] == [401] * 40 and set(statuses[40:]) == {429}  # per-address limit, whatever the username
+    assert login(plain_server, "boss", "bosspass123")[1].status_code == 429
+
+
+def test_oversized_uploads_are_rejected_before_they_are_stored(tmp_path):
+    from conftest import Server
+    server = Server(tmp_path / "data", ap=False, extra_env={"MAX_UPLOAD_MB": "1"})
+    server.start()
+    try:
+        admin = server.client()
+        admin.post("/api/auth/setup", json={"username": "boss", "password": "bosspass123"})
+        big = b"x" * (3 * 1024 * 1024)
+        r = admin.post("/api/apworlds", files={"file": ("big.apworld", big)})  # upload endpoint: 1 MB + 1 MB overhead
+        assert r.status_code == 413 and "too large" in r.json()["detail"]
+        r = admin.post("/api/games", files={"file": ("big.zip", big)})
+        assert r.status_code == 413
+        r = admin.post("/api/configs", files=[("files", ("big.yaml", b"x" * (17 * 1024 * 1024)))])  # ordinary endpoint
+        assert r.status_code == 413
+        assert not list((tmp_path / "data" / "tmp").glob("*"))  # nothing was left behind
+        assert admin.get("/api/auth/status").status_code == 200  # the server is fine
+    finally:
+        server.stop()

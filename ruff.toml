@@ -1,0 +1,13 @@
+target-version = "py312"
+line-length = 120
+extend-exclude = ["manager/archipelago_manager/static"]
+
+[lint]
+select = ["E", "F", "W", "B", "UP"]
+ignore = [
+  "E501",  # long lines are fine where wrapping hurts readability
+  "B008",  # FastAPI's Depends() in argument defaults is the framework's idiom
+]
+
+[lint.per-file-ignores]
+"tests/*" = ["E741", "E731"]
