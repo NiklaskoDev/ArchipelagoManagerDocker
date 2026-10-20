@@ -1,0 +1,27 @@
+# Example for a plain Docker host. On Unraid, use the template in unraid/ instead (see the README).
+services:
+  archipelago-manager:
+    image: ghcr.io/niklaskodev/archipelagomanagerdocker:latest
+    # To build it yourself instead:
+    # build: .
+    container_name: archipelago-manager
+    restart: unless-stopped
+    stop_grace_period: 30s        # lets running game servers save before they are stopped
+    ports:
+      - "8080:8080"               # web UI
+      - "38281-38300:38281-38300" # one port per hosted game; keep in sync with PORT_RANGE below
+    environment:
+      PUID: "1000"                # who owns the files in ./config (Unraid: 99 and 100)
+      PGID: "1000"
+      TZ: "Europe/Berlin"
+      PORT_RANGE: "38281-38300"
+      # What players type to reach this server: a domain name or the LAN/WAN address. Empty = the address used to open
+      # the web UI, which is right for LAN-only setups. Can also be changed later under Admin > Settings.
+      PUBLIC_HOST: ""
+      # Optional: create the first administrator without the setup page.
+      # ADMIN_USER: "admin"
+      # ADMIN_PASSWORD: "change-me-please"
+      # Behind a reverse proxy: trust its X-Forwarded-* headers (use the proxy's address, not * on the open internet).
+      # FORWARDED_ALLOW_IPS: "172.18.0.2"
+    volumes:
+      - ./config:/config

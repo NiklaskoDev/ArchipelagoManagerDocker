@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+.env
+# local data when running docker compose from this folder
+/config/
+/data/
+node_modules/
+.nonroot-test/

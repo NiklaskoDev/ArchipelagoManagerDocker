@@ -1,0 +1,13 @@
+.git
+.github
+.nonroot-test
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.ruff_cache
+tests
+unraid
+config
+data
+*.md
+!README.md

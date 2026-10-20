@@ -1,0 +1,45 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>ArchipelagoManager</Name>
+  <Repository>ghcr.io/niklaskodev/archipelagomanagerdocker:latest</Repository>
+  <Registry>https://github.com/NiklaskoDev/ArchipelagoManagerDocker/pkgs/container/archipelagomanagerdocker</Registry>
+  <Network>bridge</Network>
+  <MyIP/>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/NiklaskoDev/ArchipelagoManagerDocker/issues</Support>
+  <Project>https://github.com/NiklaskoDev/ArchipelagoManagerDocker</Project>
+  <Overview>Host, generate and share Archipelago multiworld randomizers from a web UI.&#xD;
+&#xD;
+- Run several multiworlds at once, one server per game (pregenerated or generated here)&#xD;
+- Upload a pregenerated zip: patch files are extracted and linked to the players they belong to&#xD;
+- Every user keeps their own YAML configs; admins generate games from them&#xD;
+- Custom games (.apworld) are stored, and you are prompted to add them when one is missing&#xD;
+- Admin and player views, live server console, progress per slot&#xD;
+&#xD;
+Open the web UI after starting the container to create the administrator account. Every hosted game needs one port of the game port range, so publish the whole range.</Overview>
+  <Category>GameServers: Tools:</Category>
+  <WebUI>http://[IP]:[PORT:8080]/</WebUI>
+  <TemplateURL>https://raw.githubusercontent.com/NiklaskoDev/ArchipelagoManagerDocker/main/unraid/archipelago-manager.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/NiklaskoDev/ArchipelagoManagerDocker/main/unraid/icon.png</Icon>
+  <ExtraParams>--stop-timeout 30</ExtraParams>
+  <PostArgs/>
+  <CPUset/>
+  <DateInstalled/>
+  <DonateText/>
+  <DonateLink/>
+  <Requires/>
+  <Config Name="Web UI port" Target="8080" Default="8080" Mode="tcp" Description="Port of the web UI." Type="Port" Display="always" Required="true" Mask="false">8080</Config>
+  <Config Name="Game ports" Target="38281-38300" Default="38281-38300" Mode="tcp" Description="One port per hosted game. If you change this range, change 'Game port range' below to the same values." Type="Port" Display="always" Required="true" Mask="false">38281-38300</Config>
+  <Config Name="Data (appdata)" Target="/config" Default="/mnt/user/appdata/archipelago-manager" Mode="rw" Description="Database, player configs, games, patch files and Archipelago's host.yaml. Back this folder up." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/archipelago-manager</Config>
+  <Config Name="Public address" Target="PUBLIC_HOST" Default="" Mode="" Description="What players type to reach your server: a domain name or IP address. Leave empty to use the address you open the web UI with. Can be changed later in the web UI." Type="Variable" Display="always" Required="false" Mask="false"/>
+  <Config Name="Game port range" Target="PORT_RANGE" Default="38281-38300" Mode="" Description="Ports the manager hands out to games. Must match the published 'Game ports'." Type="Variable" Display="advanced" Required="true" Mask="false">38281-38300</Config>
+  <Config Name="Admin username" Target="ADMIN_USER" Default="" Mode="" Description="Optional. Creates the first administrator on start instead of showing the setup page. Only used while there are no users." Type="Variable" Display="advanced" Required="false" Mask="false"/>
+  <Config Name="Admin password" Target="ADMIN_PASSWORD" Default="" Mode="" Description="Optional password for the administrator above (at least 8 characters)." Type="Variable" Display="advanced" Required="false" Mask="true"/>
+  <Config Name="Trusted proxy IPs" Target="FORWARDED_ALLOW_IPS" Default="" Mode="" Description="Only when using a reverse proxy: its address, so the manager trusts X-Forwarded-Proto and marks cookies as secure over HTTPS." Type="Variable" Display="advanced" Required="false" Mask="false"/>
+  <Config Name="Max upload (MB)" Target="MAX_UPLOAD_MB" Default="512" Mode="" Description="Largest file accepted for multiworld zips and .apworld files." Type="Variable" Display="advanced" Required="false" Mask="false">512</Config>
+  <Config Name="PUID" Target="PUID" Default="99" Mode="" Description="User id the manager runs as. 99 is Unraid's 'nobody'." Type="Variable" Display="advanced" Required="true" Mask="false">99</Config>
+  <Config Name="PGID" Target="PGID" Default="100" Mode="" Description="Group id the manager runs as. 100 is Unraid's 'users'." Type="Variable" Display="advanced" Required="true" Mask="false">100</Config>
+  <Config Name="UMASK" Target="UMASK" Default="022" Mode="" Description="File creation mask." Type="Variable" Display="advanced" Required="false" Mask="false">022</Config>
+  <Config Name="Timezone" Target="TZ" Default="" Mode="" Description="For example Europe/Berlin. Affects timestamps in server logs." Type="Variable" Display="advanced" Required="false" Mask="false"/>
+</Container>
