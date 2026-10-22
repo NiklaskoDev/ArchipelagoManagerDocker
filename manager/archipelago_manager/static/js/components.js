@@ -161,6 +161,23 @@ export function missingGamesPanel(items, onChange) {
   }));
 }
 
+// Games that cannot be generated until an administrator puts their base ROM on the server. Takes missing_roms arrays
+// from the API ({game, file, folder, in_data_dir}), nested as deep as convenient; each game is shown once.
+export function missingRomsPanel(...lists) {
+  const items = [...new Map(lists.flat(Infinity).map((item) => [item.game, item])).values()];
+  if (!items.length) return null;
+  const admin = isAdmin();
+  return h("div", { class: "stack missing-panel" }, items.map((item) => banner("warn", icon("alert", 18), h("div", { class: "grow" },
+    h("strong", {}, item.game), " needs its base ROM on the server before it can be generated.",
+    admin
+      ? h("div", { class: "small" }, "Put ", h("code", {}, item.file), " into ",
+        h("code", {}, item.folder === "." ? "the data folder" : `${item.folder}/`),
+        item.in_data_dir && item.folder !== "." ? " in the data folder" : null,
+        item.in_data_dir ? " (on Unraid usually /mnt/user/appdata/archipelago-manager)" : null,
+        ". Use exactly this name; the game checks that the file is the right version.")
+      : h("div", { class: "small muted" }, "An administrator has to add it to the server.")))));
+}
+
 // Shown right after importing a seed or uploading a yaml that needs games the server does not have.
 // `items` look like the entries of /api/missing-games: {game, configs?, games?}.
 export function promptMissingGames(items, onChange) {

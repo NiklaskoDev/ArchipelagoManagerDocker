@@ -1,6 +1,6 @@
 import { h, clear, icon, toast, action, fmtAgo, fmtDuration } from "../util.js";
 import { api, get, isAdmin, state } from "../api.js";
-import { pageHeader, chips, banner, field, checkbox, select, jobBadge, missingGamesPanel, promptMissingGames, empty } from "../components.js";
+import { pageHeader, chips, banner, field, checkbox, select, jobBadge, missingGamesPanel, missingRomsPanel, promptMissingGames, empty } from "../components.js";
 
 const SPOILER_CHOICES = [[1, "Basic spoiler log"], [0, "No spoiler log"], [2, "With playthrough"], [3, "Playthrough and paths"]];
 const PLANDO = [["bosses", "Bosses"], ["connections", "Connections"], ["texts", "Texts"], ["items", "Items"]];
@@ -22,7 +22,7 @@ export default async function render({ root, cleanup, isCurrent }) {
     const missing = [...new Set(chosen.flatMap((c) => c.missing_games))];
     clear(missingHost).append(missingGamesPanel(missing.map((game) => ({
       game, pending: [], games: [], configs: chosen.filter((c) => c.missing_games.includes(game)).map((c) => ({ id: c.id, name: c.name, owner: c.owner })),
-    })), reloadConfigs) || "");
+    })), reloadConfigs) || "", missingRomsPanel(chosen.map((c) => c.missing_roms)));
   }
   async function reloadConfigs() {
     const fresh = await get(`/api/configs${admin ? "?all=true" : ""}`);

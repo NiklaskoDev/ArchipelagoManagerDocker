@@ -106,6 +106,10 @@ def check_players(players: list[PreparedPlayer]) -> None:
     missing = apbridge.missing_games({g for p in players for g in p.info.games})
     if missing:
         raise JobRequestError("These games are not installed: " + ", ".join(missing), 409, missing)
+    # Generate.py would stop at the same check, after a wait in the queue and with a less helpful message
+    absent = apbridge.missing_files({g for p in players for g in p.info.games})
+    if absent:
+        raise JobRequestError(" ".join(apbridge.missing_file_text(a) for a in absent), 409)
 
 
 def clean_meta(meta: str | None) -> str | None:
@@ -160,6 +164,26 @@ def create_job(user: sqlite3.Row, players: list[PreparedPlayer], *, name: str | 
 _NOISE_PREFIXES = ("Exception ignored in atexit", "EOFError")
 
 
+def _explain_failure(lines: list[str]) -> str | None:
+    """Plain words for failures with a known cause: a base ROM that is missing or the wrong version."""
+    for text in lines:
+        if "FileNotFoundError:" in text:
+            # worlds report the file as a bare path, "...: <path>", or "<path> does not exist, but <setting> is required"
+            missing = text.split("FileNotFoundError:", 1)[1].strip().split(" does not exist, but ")[0]
+            if ": " in missing and not os.path.isabs(missing):
+                missing = missing.rsplit(": ", 1)[-1]
+            if missing:
+                folder = (apbridge.STATE.where or {}).get("user_path") or str(CONFIG.ap_dir)
+                where = apbridge.file_location_text(apbridge.describe_file(Path(folder) / missing))
+                return (f"A file needed to generate is missing on the server. If a game in this multiworld needs its "
+                        f"base ROM, put {where}, named exactly like that.")
+        lowered = text.lower()
+        if "rom" in lowered and any(word in lowered for word in ("md5", "hash", "does not match")):
+            return ("The base ROM on the server is not the version the game needs. Its setup guide says which region "
+                    "and revision to use.")
+    return None
+
+
 def _summarize_failure(lines: list[str]) -> str:
     """Picks the lines of a generator log that explain the failure."""
     cleaned = []
@@ -170,7 +194,9 @@ def _summarize_failure(lines: list[str]) -> str:
     interesting = [text.strip() for text in cleaned if not text.startswith((" ", "\t", "Traceback"))
                    and any(w in text for w in ("Error", "Exception", "error", "Unsupported", "unbeatable", "Names have"))]
     chosen = interesting[-3:] or [text.strip() for text in cleaned][-3:]
-    return "\n".join(chosen)[:1500] or "The generator failed without output"
+    summary = "\n".join(chosen)[:1500] or "The generator failed without output"
+    explanation = _explain_failure(cleaned)
+    return f"{explanation}\n{summary}" if explanation else summary
 
 
 class GenerationManager:

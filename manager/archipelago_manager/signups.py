@@ -178,6 +178,9 @@ def _warnings(info: yamlinfo.YamlInfo) -> list[str]:
     if missing:
         warnings.append(f"Not installed on this server yet: {', '.join(missing)}. "
                         "The round can only be generated once an administrator adds it.")
+    for item in apbridge.missing_files(info.games):
+        warnings.append(f"{item['game']} needs its base ROM on the server to generate, and it is not there yet. "
+                        "The round can only be generated once an administrator adds it.")
     return warnings
 
 

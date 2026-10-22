@@ -1,7 +1,9 @@
 """Pure unit tests: no server, no Archipelago."""
 import pytest
 
-from archipelago_manager import settings, yamlinfo
+from archipelago_manager import apbridge, settings, yamlinfo
+from archipelago_manager.config import CONFIG
+from archipelago_manager.generation import _summarize_failure
 from archipelago_manager.gamestore import classify
 from archipelago_manager.security import hash_password, verify_password, LoginThrottle
 
@@ -126,3 +128,33 @@ class TestClassify:
     ])
     def test_classify(self, name, kind, slot):
         assert classify(name) == (kind, slot)
+
+
+class TestBaseRomMessages:
+    TRACEBACK = ["Traceback (most recent call last):", '  File "Generate.py", line 1, in <module>']
+
+    def test_a_missing_rom_says_which_file_goes_where(self):
+        error = _summarize_failure(self.TRACEBACK + [
+            "FileNotFoundError: Zelda no Densetsu - Kamigami no Triforce (Japan).sfc does not exist, but "
+            "ALTTPSettings.rom_file is required", "Press enter to close."])
+        first, rest = error.split("\n", 1)
+        assert first.startswith("A file needed to generate is missing on the server.")
+        assert '"Zelda no Densetsu - Kamigami no Triforce (Japan).sfc" into ' in first
+        assert "FileNotFoundError" in rest  # the generator's own words stay below
+
+    def test_a_wrong_rom_is_called_the_wrong_version(self):
+        error = _summarize_failure(self.TRACEBACK + [
+            "Exception: Supplied Base Rom does not match known MD5 for NA (1.0) release. Get the correct game and "
+            "version, then dump it"])
+        assert error.startswith("The base ROM on the server is not the version the game needs.")
+
+    def test_other_failures_are_left_alone(self):
+        error = _summarize_failure(["ValueError: player_sprite: banana is not a valid choice"])
+        assert error == "ValueError: player_sprite: banana is not a valid choice"
+
+    def test_files_in_the_data_folder_are_shown_relative_to_it(self):
+        inside = apbridge.describe_file(CONFIG.data_dir / "ap-data" / "Archipelago" / "Game (USA).sfc")
+        assert inside == {"file": "Game (USA).sfc", "folder": "ap-data/Archipelago", "in_data_dir": True}
+        assert apbridge.file_location_text(inside) == '"Game (USA).sfc" into ap-data/Archipelago/ in the data folder'
+        outside = apbridge.describe_file("/opt/archipelago/Game (USA).sfc")
+        assert apbridge.file_location_text(outside) == '"Game (USA).sfc" into /opt/archipelago/'

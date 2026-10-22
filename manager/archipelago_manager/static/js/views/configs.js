@@ -1,6 +1,6 @@
 import { h, clear, icon, toast, action, confirmDialog, fmtAgo, fmtBytes } from "../util.js";
 import { api, get, del, isAdmin } from "../api.js";
-import { pageHeader, empty, chips, badge, missingGamesPanel, promptMissingGames, checkbox } from "../components.js";
+import { pageHeader, empty, chips, badge, missingGamesPanel, missingRomsPanel, promptMissingGames, checkbox } from "../components.js";
 
 export default async function render({ root, cleanup, isCurrent }) {
   const admin = isAdmin();
@@ -11,7 +11,7 @@ export default async function render({ root, cleanup, isCurrent }) {
   async function load() {
     const [configs, missing] = await Promise.all([get(`/api/configs${showAll ? "?all=true" : ""}`), get("/api/missing-games")]);
     if (!isCurrent()) return;
-    clear(missingHost).append(missingGamesPanel(missing, load) || "");
+    clear(missingHost).append(missingGamesPanel(missing, load) || "", missingRomsPanel(configs.map((c) => c.missing_roms)));
     draw(configs);
   }
 

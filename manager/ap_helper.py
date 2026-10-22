@@ -74,10 +74,42 @@ def cmd_where(_args) -> dict:
 # --------------------------------------------------------------------------------------------------------------------
 # games: everything that was successfully (or unsuccessfully) loaded
 # --------------------------------------------------------------------------------------------------------------------
+def expected_path(error: FileNotFoundError) -> str | None:
+    """Where a world looked for a file, from the ways worlds report a missing base ROM."""
+    import Utils
+    text = error.filename or (str(error.args[0]) if error.args else "")
+    text = text.split(" does not exist, but ")[0]  # settings' message for a required file that is missing
+    if ": " in text and not os.path.isabs(text):  # "Could not find base ROM for <game>: <path>"
+        text = text.rsplit(": ", 1)[-1]
+    return os.path.abspath(Utils.user_path(text)) if text else None
+
+
+def generation_file_problem(world, probe) -> dict | None:
+    """Runs a world's own check before generating (stage_assert_generate), as Generate.py does, but without players.
+
+    Worlds that need a base ROM to generate raise FileNotFoundError there when it is missing. Anything else is left to
+    the real generation, which runs the check again with the players' options.
+    """
+    from worlds.AutoWorld import World
+    if getattr(world.stage_assert_generate, "__func__", None) is World.stage_assert_generate.__func__:
+        return None  # the default check does nothing
+    try:
+        world.stage_assert_generate(probe)
+    except FileNotFoundError as e:
+        return {"path": expected_path(e), "message": str(e)}
+    except Exception:  # noqa: BLE001 - checks that need players, or a broken world: not ours to judge here
+        return None
+    return None
+
+
 def cmd_games(args) -> dict:
     where = cmd_where(args)
+    import settings
     import worlds
+    from BaseClasses import MultiWorld
     from worlds.AutoWorld import AutoWorldRegister
+    settings.no_gui = True  # a missing ROM must raise instead of opening a file dialog
+    probe = MultiWorld(0)
 
     games = []
     for name, world in sorted(AutoWorldRegister.world_types.items(), key=lambda kv: kv[0].lower()):
@@ -96,6 +128,7 @@ def cmd_games(args) -> dict:
             "hidden": bool(getattr(world, "hidden", False)),
             "items": len(getattr(world, "item_name_to_id", {})),
             "locations": len(getattr(world, "location_name_to_id", {})),
+            "needs_file": generation_file_problem(world, probe),
         })
     return {
         **where,

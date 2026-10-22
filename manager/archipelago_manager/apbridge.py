@@ -130,6 +130,43 @@ def installed_games(*, include_hidden: bool = False) -> dict[str, dict[str, Any]
     return {g["name"]: g for g in STATE.info["games"] if include_hidden or not g["hidden"]}
 
 
+def describe_file(path: str | Path) -> dict[str, Any]:
+    """A file's name and folder, the folder relative to the data folder when it is inside it."""
+    path = Path(path)
+    try:
+        folder, in_data_dir = path.parent.relative_to(CONFIG.data_dir).as_posix(), True
+    except ValueError:
+        folder, in_data_dir = path.parent.as_posix(), False
+    return {"file": path.name, "folder": folder, "in_data_dir": in_data_dir}
+
+
+def file_location_text(item: dict[str, Any]) -> str:
+    if not item["in_data_dir"]:
+        return f'"{item["file"]}" into {item["folder"]}/'
+    if item["folder"] == ".":
+        return f'"{item["file"]}" into the data folder'
+    return f'"{item["file"]}" into {item["folder"]}/ in the data folder'
+
+
+def missing_files(games: list[str] | set[str]) -> list[dict[str, Any]]:
+    """Games among these that cannot be generated yet because a file they need, their base ROM, is not on the server.
+
+    Archipelago told us where each game looks for its file when the games were loaded. Whether the file is there is
+    checked now, so a ROM put into place counts at once.
+    """
+    installed = installed_games(include_hidden=True)
+    result = []
+    for game in sorted(set(games)):
+        need = (installed.get(game) or {}).get("needs_file")
+        if need and need.get("path") and not os.path.exists(need["path"]):
+            result.append({"game": game, **describe_file(need["path"])})
+    return result
+
+
+def missing_file_text(item: dict[str, Any]) -> str:
+    return f"{item['game']} needs its base ROM on the server to generate: put {file_location_text(item)}."
+
+
 def missing_games(games: list[str] | set[str]) -> list[str]:
     """Games that are not installed. Empty if we cannot tell (Archipelago unavailable)."""
     if not STATE.info:

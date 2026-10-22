@@ -1,6 +1,6 @@
 import { h, clear, icon, toast, action, confirmDialog, openModal, fmtAgo, fmtDate, fmtUntil, toLocalInput, fromLocalInput } from "../util.js";
 import { api, get, post, patch, del, isAdmin } from "../api.js";
-import { banner, badge, chips, field, checkbox, select, missingGamesPanel, promptMissingGames } from "../components.js";
+import { banner, badge, chips, field, checkbox, select, missingGamesPanel, missingRomsPanel, promptMissingGames } from "../components.js";
 
 const SPOILER_CHOICES = [[1, "Basic spoiler log"], [0, "No spoiler log"], [2, "With playthrough"], [3, "Playthrough and paths"]];
 const PLANDO = [["bosses", "Bosses"], ["connections", "Connections"], ["texts", "Texts"], ["items", "Items"]];
@@ -276,7 +276,9 @@ export default async function render({ root, params, cleanup, isCurrent }) {
         e.outdated && editable ? banner("info", icon("edit", 16), h("div", { class: "grow" }, "You changed this config after entering it. The round still has the old version."),
           h("button", { class: "btn sm primary", type: "button", onclick: action(() => run("POST", `/api/signups/${id}/entries/${e.id}/refresh`)) }, "Use the new version")) : null,
         e.issues.map((issue) => h("div", { class: "form-error" }, issue))))) : h("p", { class: "muted" }, "You have not entered yet."),
-      missing.length ? missingGamesPanel(missing.map((game) => ({ game, configs: [], games: [], pending: [] })), reloadConfigs) : null,
+      // admins see these for every entry at the top of the page
+      !admin && missing.length ? missingGamesPanel(missing.map((game) => ({ game, configs: [], games: [], pending: [] })), reloadConfigs) : null,
+      admin ? null : missingRomsPanel(mine.map((e) => e.missing_roms)),
       canEnter ? h("div", { class: "stack tight" },
         h("span", { class: "field-label" }, mine.length ? "Enter another config" : "Enter with one of your configs"),
         h("div", { class: "row" }, picker ? h("div", { class: "grow" }, picker) : h("span", { class: "muted" }, configs.length ? "You have no other configs." : "You have no configs yet."), enter,
@@ -304,8 +306,18 @@ export default async function render({ root, params, cleanup, isCurrent }) {
           }) }, icon("trash", 14)) : null)))))));
   }
 
+  // What has to be on the server before the round can be generated, for the admin who will generate it
+  function adminWarnings() {
+    if (!admin || !["open", "closed"].includes(signup.status)) return null;
+    const missing = [...new Set(signup.entries.flatMap((e) => e.missing_games))];
+    return [
+      missing.length ? missingGamesPanel(missing.map((game) => ({ game, configs: [], games: [], pending: [] })), () => refresh(true)) : null,
+      missingRomsPanel(signup.entries.map((e) => e.missing_roms)),
+    ];
+  }
+
   function draw() {
-    clear(host).append(header(), h("div", { class: "stack" }, stateBanner(), rulesCard(), myCard(),
+    clear(host).append(header(), h("div", { class: "stack" }, stateBanner(), adminWarnings(), rulesCard(), myCard(),
       h("div", { class: "section" }, h("div", { class: "section-head" }, h("h2", {}, "Entries")), entriesCard())));
   }
 

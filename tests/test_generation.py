@@ -1,4 +1,6 @@
 """Generating multiworlds with the real Generate.py."""
+from pathlib import Path
+
 import pytest
 
 from helpers import player_yaml, run_job, upload_yaml, wait_for, wait_state
@@ -111,6 +113,42 @@ def test_generation_failure_is_reported_readably(admin):
     assert job["game_id"] is None
     log = [l["text"] for l in admin.get(f"/api/jobs/{job['id']}/log").json()["lines"]]
     assert any("Traceback" in l or "Exception" in l for l in log)
+
+
+def test_games_that_need_a_base_rom_are_caught_before_generating(admin, make_user):
+    """The test Archipelago has no ROMs, which is exactly the case: Zelda 1 needs its ROM to generate."""
+    zelda = "The Legend of Zelda"
+    needs = next(g for g in admin.get("/api/worlds").json()["games"] if g["name"] == zelda)["needs_file"]
+    rom = Path(needs["path"])
+    assert rom.name == "Legend of Zelda, The (U) (PRG0) [!].nes" and not rom.exists()
+    assert next(g for g in admin.get("/api/worlds").json()["games"] if g["name"] == "ChecksFinder")["needs_file"] is None
+
+    config_id = cfg(admin, "Linky", content=f"name: Linky\ngame: {zelda}\n{zelda}: {{}}\n")
+    config = admin.get(f"/api/configs/{config_id}").json()
+    assert config["missing_roms"] == [{"game": zelda, "file": rom.name, "folder": rom.parent.as_posix(),
+                                       "in_data_dir": False}]
+    r = admin.post("/api/jobs", json={"config_ids": [config_id], "host_after": False})
+    assert r.status_code == 409
+    assert r.json()["detail"] == f'{zelda} needs its base ROM on the server to generate: put "{rom.name}" into {rom.parent.as_posix()}/.'
+
+    # sign-up rounds take the entry but say what is missing before the deadline, not at it
+    _name, player = make_user("linky")
+    signup = admin.post("/api/signups", json={"name": "Zelda night", "auto_generate": False}).json()
+    entry = player.post(f"/api/signups/{signup['id']}/entries",
+                        json={"config_id": cfg(player, "Link2", content=f"name: Link2\ngame: {zelda}\n{zelda}: {{}}\n")})
+    assert entry.status_code == 200 and any("needs its base ROM" in w for w in entry.json()["warnings"])
+    assert entry.json()["entries"][0]["missing_roms"][0]["game"] == zelda
+    admin.delete(f"/api/signups/{signup['id']}")
+
+    # with a file in place the check passes at once; a file that is not the right dump fails in plain words
+    rom.write_bytes(b"not really a ROM" * 4096)
+    try:
+        assert admin.get(f"/api/configs/{config_id}").json()["missing_roms"] == []
+        job = run_job(admin, [config_id])
+        assert job["status"] == "failed"
+        assert job["error"].startswith("The base ROM on the server is not the version the game needs."), job["error"]
+    finally:
+        rom.unlink()
 
 
 def test_users_need_permission_and_can_only_use_their_own_configs(admin, make_user):

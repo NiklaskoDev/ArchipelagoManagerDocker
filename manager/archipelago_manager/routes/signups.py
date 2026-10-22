@@ -48,7 +48,8 @@ def entry_json(row: sqlite3.Row, user: sqlite3.Row, issues: list[str]) -> dict:
     result = {
         "id": row["id"], "user_id": row["user_id"], "username": row["username"], "mine": mine,
         "player_names": db.jloads(row["player_names"], []), "games": games,
-        "missing_games": apbridge.missing_games(games), "issues": issues,
+        "missing_games": apbridge.missing_games(games), "missing_roms": apbridge.missing_files(games),
+        "issues": issues,
         "created_at": row["created_at"], "updated_at": row["updated_at"],
     }
     if mine or is_admin(user):

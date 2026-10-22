@@ -29,6 +29,7 @@ def config_json(row: sqlite3.Row, *, owner: str | None = None) -> dict:
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
         "missing_games": apbridge.missing_games(games),
+        "missing_roms": apbridge.missing_files(games),
     }
     if owner is not None:
         result["owner"] = owner

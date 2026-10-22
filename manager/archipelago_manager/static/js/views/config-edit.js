@@ -1,6 +1,6 @@
 import { h, clear, icon, toast, action, confirmDialog, fmtAgo } from "../util.js";
 import { get, post, put, del, isAdmin, state } from "../api.js";
-import { pageHeader, chips, banner, field, loading, missingGamesPanel, badge } from "../components.js";
+import { pageHeader, chips, banner, field, loading, missingGamesPanel, missingRomsPanel, badge } from "../components.js";
 
 export default async function render({ root, params, query, cleanup, setDirtyCheck, isCurrent }) {
   const id = params[0] ? Number(params[0]) : null;
@@ -52,7 +52,8 @@ export default async function render({ root, params, query, cleanup, setDirtyChe
         h("dt", {}, "Updated"), h("dd", {}, fmtAgo(c.updated_at))),
       ...warnings.map((w) => banner("info", icon("alert", 16), w)),
       c.missing_games.length ? missingGamesPanel(c.missing_games.map((g) => ({ game: g, configs: [{ id: c.id, name: c.name, owner: c.owner }], games: [], pending: [] })),
-        async () => drawInfo(await get(`/api/configs/${c.id}`), warnings)) : null);
+        async () => drawInfo(await get(`/api/configs/${c.id}`), warnings)) : null,
+      missingRomsPanel(c.missing_roms || []));
   }
 
   const save = h("button", { class: "btn primary", type: "button" }, icon("check", 14), "Save");

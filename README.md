@@ -125,6 +125,20 @@ Games that are not part of Archipelago itself come as `.apworld` files.
 > **An `.apworld` is code that runs on your server.** Only install files from sources you trust. This is why users
 > can only submit, never install.
 
+### Games that need a base ROM
+
+Some games need their original ROM on the server to *generate* (for example A Link to the Past, Ocarina of Time,
+Super Mario World, Secret of Evermore, The Legend of Zelda); others only make a patch file and do not. Hosting a
+pregenerated seed never needs a ROM, and players always need their own to patch.
+
+The manager asks each game whether its ROM is in place, using the same check Archipelago runs before generating. When
+one is missing, the generate page, the config and the sign-up round say which file is needed and where it goes, and
+generating is refused right away instead of failing in the queue (or at a round's deadline). Put the ROM into
+`ap-data/Archipelago/` in the data folder (on Unraid `/mnt/user/appdata/archipelago-manager/ap-data/Archipelago/`) under
+exactly the name shown, or point the game's entry in `host.yaml` (Admin → Settings) at it. The warnings disappear as
+soon as the file is there. Some games also check that it is the right dump (region and revision); a wrong one fails
+with a message that says so.
+
 ## Configuration
 
 Everything is optional except the volume. Set these as environment variables (Unraid: the template's fields).
@@ -209,8 +223,8 @@ approve pull requests*. You can also run the workflow by hand (*Actions → Arch
 - **A custom world shows "Not loaded".** The tooltip and the System page show the reason, usually an incompatible
   Archipelago version. A file that is not a valid zip is moved to `quarantine/` in the data folder, because
   Archipelago refuses to start with such a file in its worlds folder.
-- **Generation fails.** The job page shows the generator's output and the relevant error. Some games need extra files
-  such as a base ROM, configured in `host.yaml` (Admin → Settings).
+- **Generation fails.** The job page shows the generator's output and the relevant error. A missing or wrong base ROM
+  is explained in plain words; see [Games that need a base ROM](#games-that-need-a-base-rom).
 - **Edits to `host.yaml` are lost.** That happens when running as root (`PUID=0`); use a regular user.
 
 ## Development
@@ -240,4 +254,5 @@ DATA_DIR=../data AP_DIR=$PWD/../Archipelago AP_PYTHON=$PWD/../ap-venv/bin/python
 
 - One Archipelago version at a time; images are published for `linux/amd64`.
 - Game ports are served by Archipelago's own server and are not behind TLS.
-- Games that need extra setup to generate (for example a base ROM) must be configured through `host.yaml` yourself.
+- Base ROMs are not uploaded through the web UI: copy them into the data folder (see
+  [Games that need a base ROM](#games-that-need-a-base-rom)).
