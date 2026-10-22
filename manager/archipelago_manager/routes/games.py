@@ -12,10 +12,11 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPExcepti
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from .. import apbridge, backups, db, gamepaths, gamestore, settings as app_settings
+from .. import apbridge, backups, db, gamepaths, gamestore, settings as app_settings, textclient
 from ..config import CONFIG
 from ..rooms import ROOMS, STATUS_GOAL, RoomError, valid_password
 from ..security import admin_user, current_user, is_admin
+from ..textclient import TEXT_CLIENTS
 
 router = APIRouter(prefix="/api")
 
@@ -432,6 +433,63 @@ async def slot_tracker(game_id: int, slot: int, user: sqlite3.Row = Depends(curr
     if not row or row["type"] != 1 or (row["user_id"] != user["id"] and not is_admin(user)):
         raise HTTPException(404, "No such slot")
     return await ROOMS.tracker(game_id, slot)
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+# text client: the manager connects to the server as the player (textclient.py)
+# ----------------------------------------------------------------------------------------------------------------------
+def _own_slot(game_id: int, slot: int, user: sqlite3.Row) -> None:
+    """Only the player of a slot talks in its name; admins have the console."""
+    get_game(game_id, user)
+    row = db.query_one("SELECT user_id, type FROM game_slots WHERE game_id = ? AND slot = ?", (game_id, slot))
+    if not row or row["type"] != 1 or row["user_id"] != user["id"]:
+        raise HTTPException(404, "No such slot")
+
+
+class ClientPoll(BaseModel):
+    after: int = 0
+
+
+@router.post("/games/{game_id}/slots/{slot}/client")
+async def text_client(game_id: int, slot: int, body: ClientPoll, user: sqlite3.Row = Depends(current_user)) -> dict:
+    """Keeps the connection open (opening it if needed) and returns the messages after `after`."""
+    _own_slot(game_id, slot, user)
+    session = TEXT_CLIENTS.session(game_id, slot, user["id"])
+    after = body.after if body.after <= session.seq else 0  # a new connection numbers its messages from 1 again
+    connected = session.state == "connected"
+    return {"state": session.state, "error": session.error, "last": session.seq,
+            "messages": [m for m in session.messages if m["seq"] > after],
+            "hint_points": session.hint_points if connected else None,
+            "hint_cost": session.hint_cost if connected else None}
+
+
+class ClientSay(BaseModel):
+    text: str = Field(max_length=textclient.MAX_MESSAGE_LENGTH * 2)
+
+
+@router.post("/games/{game_id}/slots/{slot}/client/say")
+async def text_client_say(game_id: int, slot: int, body: ClientSay, user: sqlite3.Row = Depends(current_user)) -> dict:
+    _own_slot(game_id, slot, user)
+    try:
+        await TEXT_CLIENTS.say(TEXT_CLIENTS.session(game_id, slot, user["id"]), body.text)
+    except textclient.TextClientError as e:
+        raise HTTPException(e.status, e.message) from None
+    return {"ok": True}
+
+
+@router.get("/games/{game_id}/slots/{slot}/client/names")
+async def text_client_names(game_id: int, slot: int, user: sqlite3.Row = Depends(current_user)) -> dict:
+    """The slot's items and locations, to suggest them after !hint and !hint_location."""
+    _own_slot(game_id, slot, user)
+    session = TEXT_CLIENTS.sessions.get((game_id, slot, user["id"]))
+    return textclient.suggestions(session) if session else {"items": [], "locations": []}
+
+
+@router.delete("/games/{game_id}/slots/{slot}/client")
+async def text_client_close(game_id: int, slot: int, user: sqlite3.Row = Depends(current_user)) -> dict:
+    _own_slot(game_id, slot, user)
+    await TEXT_CLIENTS.close((game_id, slot, user["id"]))
+    return {"ok": True}
 
 
 @router.post("/games/{game_id}/slots/{slot}/assign")

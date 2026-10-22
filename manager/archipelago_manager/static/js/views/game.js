@@ -3,6 +3,7 @@ import { api, get, post, patch, del, isAdmin, state } from "../api.js";
 import { stateBadge, badge, chips, progressBar, copyField, copyButton, controlButtons, banner, field, checkbox, select,
          missingGamesPanel, isActive, serverOptionsForm } from "../components.js";
 import { t, tServer, plural } from "../i18n.js";
+import { textClientSection } from "../textclient.js";
 
 // what a backup was made for, and the kind of a game file, as the server names them
 const BACKUP_REASONS = { auto: t("automatic"), manual: t("made by hand"), "before-reset": t("before a reset"), "before-restore": t("before a restore") };
@@ -17,6 +18,7 @@ export default async function render({ root, params, cleanup, isCurrent, query }
   const headerHost = h("div");
   const infoHost = h("div");
   const trackerHost = h("div");
+  const textClientHost = h("div");
   const slotsHost = h("div");
   const adminHost = h("div", { class: "stack section" });
   let drawnSignature = "";
@@ -140,6 +142,23 @@ export default async function render({ root, params, cleanup, isCurrent, query }
     drawInfo();
     drawSlots();
     syncTracker();
+    syncTextClient();
+  }
+
+  // The text client, for the player's own slots only: it speaks in their name
+  let textClientKey = null, textClientCleanup = () => {};
+  cleanup(() => textClientCleanup());
+  function syncTextClient() {
+    const slots = game.slots.filter((s) => s.type === 1 && s.mine);
+    const key = slots.map((s) => s.slot).join(",");
+    if (key === textClientKey) return;
+    textClientKey = key;
+    textClientCleanup();
+    clear(textClientHost);
+    if (!slots.length) return;
+    const stops = [];
+    textClientCleanup = () => stops.splice(0).forEach((fn) => fn());
+    textClientHost.append(textClientSection({ gameId: id, slots, cleanup: (fn) => stops.push(fn), isCurrent }));
   }
 
   // -------------------------------------------------------------------------------------------------------------------
@@ -457,7 +476,7 @@ export default async function render({ root, params, cleanup, isCurrent, query }
   }
 
   // -------------------------------------------------------------------------------------------------------------------
-  root.append(headerHost, infoHost, trackerHost, slotsHost, adminHost);
+  root.append(headerHost, infoHost, trackerHost, textClientHost, slotsHost, adminHost);
   drawLive();
   if (admin) {
     adminHost.append(settingsSection(), filesSection(), consoleSection(), backupsSection(), dangerSection());
