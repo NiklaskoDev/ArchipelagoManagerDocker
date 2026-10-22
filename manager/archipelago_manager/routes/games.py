@@ -11,7 +11,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPExcepti
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from .. import apbridge, db, gamepaths, gamestore, settings as app_settings
+from .. import apbridge, backups, db, gamepaths, gamestore, settings as app_settings
 from ..config import CONFIG
 from ..rooms import ROOMS, STATUS_GOAL, RoomError, valid_password
 from ..security import admin_user, current_user, is_admin
@@ -328,9 +328,62 @@ async def reset_save(game_id: int, request: Request, user: sqlite3.Row = Depends
     get_game(game_id, user)
     if ROOMS.is_active(game_id):
         raise HTTPException(409, "Stop the server before resetting its progress")
+    backups.create(game_id, "before-reset")  # so a reset can be undone
     gamepaths.save_path(game_id).unlink(missing_ok=True)
     ROOMS.forget_progress(game_id)
     return await _detail(game_id, user, request)
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+# backups of the save
+# ----------------------------------------------------------------------------------------------------------------------
+@router.get("/games/{game_id}/backups")
+def list_backups(game_id: int, user: sqlite3.Row = Depends(admin_user)) -> dict:
+    get_game(game_id, user)
+    return {"backups": backups.listing(game_id), "has_save": gamepaths.save_path(game_id).is_file(),
+            "interval_minutes": backups.AUTO_INTERVAL // 60, "keep_auto": backups.KEEP_AUTO}
+
+
+@router.post("/games/{game_id}/backups")
+def create_backup(game_id: int, user: sqlite3.Row = Depends(admin_user)) -> dict:
+    get_game(game_id, user)
+    entry = backups.create(game_id, "manual")
+    if entry is None:
+        raise HTTPException(409, "This game has no saved progress yet")
+    return list_backups(game_id, user)
+
+
+@router.post("/games/{game_id}/backups/{name}/restore")
+async def restore_backup(game_id: int, name: str, request: Request, user: sqlite3.Row = Depends(admin_user)) -> dict:
+    get_game(game_id, user)
+    if ROOMS.is_active(game_id):
+        raise HTTPException(409, "Stop the server before restoring a backup")
+    try:
+        backups.restore(game_id, name)
+    except backups.BackupError as e:
+        raise HTTPException(404, str(e)) from None
+    ROOMS.forget_progress(game_id)
+    return await _detail(game_id, user, request)
+
+
+@router.get("/games/{game_id}/backups/{name}")
+def download_backup(game_id: int, name: str, user: sqlite3.Row = Depends(admin_user)) -> FileResponse:
+    get_game(game_id, user)
+    try:
+        path = backups.path_of(game_id, name)
+    except backups.BackupError as e:
+        raise HTTPException(404, str(e)) from None
+    return FileResponse(path, media_type="application/octet-stream", filename=name)
+
+
+@router.delete("/games/{game_id}/backups/{name}")
+def delete_backup(game_id: int, name: str, user: sqlite3.Row = Depends(admin_user)) -> dict:
+    get_game(game_id, user)
+    try:
+        backups.delete(game_id, name)
+    except backups.BackupError as e:
+        raise HTTPException(404, str(e)) from None
+    return list_backups(game_id, user)
 
 
 class Command(BaseModel):
@@ -365,6 +418,16 @@ def _get_slot(game_id: int, slot: int) -> sqlite3.Row:
     if not row:
         raise HTTPException(404, "No such slot")
     return row
+
+
+@router.get("/games/{game_id}/slots/{slot}/tracker")
+async def slot_tracker(game_id: int, slot: int, user: sqlite3.Row = Depends(current_user)) -> dict:
+    """What a slot has received, which of its locations are checked, and its hints. For its owner and admins."""
+    get_game(game_id, user)
+    row = db.query_one("SELECT user_id, type FROM game_slots WHERE game_id = ? AND slot = ?", (game_id, slot))
+    if not row or row["type"] != 1 or (row["user_id"] != user["id"] and not is_admin(user)):
+        raise HTTPException(404, "No such slot")
+    return await ROOMS.tracker(game_id, slot)
 
 
 @router.post("/games/{game_id}/slots/{slot}/assign")

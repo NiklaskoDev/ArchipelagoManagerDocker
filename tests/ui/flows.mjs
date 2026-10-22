@@ -228,6 +228,10 @@ await admin.getByRole("button", { name: "Save settings" }).click();
 await expectText(admin, "Settings saved");
 log("claiming (one slot each) enabled and game made visible to everyone");
 
+await admin.locator("details", { hasText: "Backups" }).first().locator("summary").click();
+await expectText(admin, "No backups yet");
+log("the game's backups section opens");
+
 // delete via danger zone --------------------------------------------------------------------------------------------------
 await admin.locator("details", { hasText: "Danger zone" }).first().locator("summary").click();
 const claimGameUrl = admin.url();
@@ -256,6 +260,12 @@ log("user claims a slot and gets their files");
 await expectText(user, "Each player can claim one slot");
 if (await user.getByRole("button", { name: "This is mine" }).count()) problems.push("a second slot is still offered for claiming");
 log("with one slot each, no further slot is offered");
+await expectText(user, "Your tracker");
+await user.getByRole("tab", { name: /Locations/ }).click();
+await expectText(user, "Still to check");
+await user.getByRole("tab", { name: /Hints/ }).click();
+await expectText(user, "No hints yet");
+log("the player's tracker shows their locations and hints");
 if (await user.locator("details", { hasText: "Console" }).count()) problems.push("regular user can see the console");
 await shot(user, "claimed");
 await nav(user, "#/");

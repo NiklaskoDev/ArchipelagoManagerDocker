@@ -11,6 +11,7 @@ export default async function render({ root, params, cleanup, isCurrent, query }
 
   const headerHost = h("div");
   const infoHost = h("div");
+  const trackerHost = h("div");
   const slotsHost = h("div");
   const adminHost = h("div", { class: "stack section" });
   let drawnSignature = "";
@@ -128,6 +129,123 @@ export default async function render({ root, params, cleanup, isCurrent, query }
     drawHeader();
     drawInfo();
     drawSlots();
+    syncTracker();
+  }
+
+  // -------------------------------------------------------------------------------------------------------------------
+  // tracker: what a slot received, which of its locations are checked, and its hints
+  // -------------------------------------------------------------------------------------------------------------------
+  let trackerKey = null, trackerTimer = null;
+  cleanup(() => clearInterval(trackerTimer));
+
+  // Players get their own slots, admins every player slot; rebuilt only when that list changes (a claim, an assignment).
+  function syncTracker() {
+    const slots = game.slots.filter((s) => s.type === 1 && (admin || s.mine));
+    const key = slots.map((s) => s.slot).join(",");
+    if (key === trackerKey) return;
+    trackerKey = key;
+    clearInterval(trackerTimer);
+    clear(trackerHost);
+    if (slots.length) trackerHost.append(trackerSection(slots));
+  }
+
+  function trackerSection(slots) {
+    let current = (slots.find((s) => s.mine) || slots[0]).slot;
+    let tab = "items", data = null, loaded = "";
+    const picker = slots.length > 1 ? select(slots.map((s) => [s.slot, `${s.name} (${s.game})${s.mine ? " · you" : ""}`]), current) : null;
+    if (picker) picker.style.maxWidth = "320px";
+    const search = h("input", { class: "input", type: "search", placeholder: "Filter…", "aria-label": "Filter the tracker" });
+    const summary = h("div", { class: "muted small" });
+    const tabs = h("div", { class: "tabs", role: "tablist" });
+    const content = h("div");
+    const byName = (a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
+    const matches = (...texts) => {
+      const q = search.value.trim().toLowerCase();
+      return !q || texts.some((t) => (t || "").toLowerCase().includes(q));
+    };
+    const itemLabel = (name, flags) => h("span", { class: flags & 1 ? "slot-name" : "" }, name,
+      flags & 4 ? [" ", badge("trap", "bad")] : flags & 1 ? null : flags & 2 ? [" ", badge("useful", "muted")] : null);
+
+    function itemsTab() {
+      const groups = new Map();
+      for (const it of data.items) {
+        const g = groups.get(it.item) || { name: it.item, count: 0, flags: it.flags, last: it };
+        g.count += 1;
+        g.last = it;
+        groups.set(it.item, g);
+      }
+      const rows = [...groups.values()].filter((g) => matches(g.name, g.last.from, g.last.location)).sort((a, b) => byName(a.name, b.name));
+      if (!data.items.length) return h("p", { class: "muted" }, "Nothing received yet.");
+      return h("div", { class: "table-wrap" }, h("table", { class: "table" },
+        h("thead", {}, h("tr", {}, ["Item", "Count", "Last one from"].map((t) => h("th", {}, t)))),
+        h("tbody", {}, rows.map((g) => h("tr", {},
+          h("td", {}, itemLabel(g.name, g.flags)), h("td", {}, g.count > 1 ? `× ${g.count}` : ""),
+          h("td", { class: "muted" }, g.last.start ? "Starting inventory"
+            : g.last.from === data.name ? `Your own world · ${g.last.location}` : `${g.last.from} · ${g.last.location}`))))));
+    }
+
+    function locationsTab() {
+      const open = data.locations.filter((l) => !l.checked && matches(l.location)).map((l) => l.location).sort(byName);
+      const done = data.locations.filter((l) => l.checked && matches(l.location)).map((l) => l.location).sort(byName);
+      const list = (names) => h("div", { class: "chips" }, names.map((n) => h("span", { class: "chip" }, n)));
+      return h("div", { class: "stack" },
+        h("div", { class: "stack tight" }, h("strong", {}, `Still to check (${open.length})`),
+          open.length ? list(open) : h("span", { class: "muted" }, data.locations.some((l) => !l.checked) ? "Nothing matches." : "Everything is checked.")),
+        done.length ? h("details", {}, h("summary", { class: "muted" }, `Checked (${done.length})`), h("div", { style: { marginTop: "8px" } }, list(done))) : null);
+    }
+
+    function hintsTab() {
+      const label = { 0: "Not found yet", 10: "No priority", 20: "Avoid", 30: "Priority" };
+      const table = (hints, mine) => h("div", { class: "table-wrap" }, h("table", { class: "table" },
+        h("thead", {}, h("tr", {}, ["Item", mine ? "Is at" : "For", "Status"].map((t) => h("th", {}, t)))),
+        h("tbody", {}, hints.map((x) => h("tr", { style: x.found ? { opacity: 0.6 } : undefined },
+          h("td", {}, itemLabel(x.item, x.flags)),
+          h("td", {}, mine ? [x.location, h("div", { class: "muted small" }, x.finder === data.name ? "in your own world" : `in ${x.finder}'s world`,
+            x.entrance ? ` · ${x.entrance}` : "")] : [x.receiver, h("div", { class: "muted small" }, `at ${x.location}`, x.entrance ? ` · ${x.entrance}` : "")]),
+          h("td", {}, x.found ? badge("Found", "ok") : x.status === 30 ? badge("Priority", "warn") : h("span", { class: "muted" }, label[x.status] || "Not found yet")))))));
+      const forMe = data.hints.filter((x) => x.for_me && matches(x.item, x.location, x.finder, x.entrance));
+      const inMine = data.hints.filter((x) => !x.for_me && x.in_my_world && matches(x.item, x.location, x.receiver, x.entrance));
+      if (!data.hints.length) return h("p", { class: "muted" }, "No hints yet. Ask for one in your client with !hint followed by an item name.");
+      return h("div", { class: "stack" },
+        h("div", { class: "stack tight" }, h("strong", {}, "Where your items are"), forMe.length ? table(forMe, true) : h("span", { class: "muted" }, "None.")),
+        h("div", { class: "stack tight" }, h("strong", {}, "Other players' items in your world"), inMine.length ? table(inMine, false) : h("span", { class: "muted" }, "None.")));
+    }
+
+    function draw() {
+      if (!data) return;
+      const checked = data.locations.filter((l) => l.checked).length;
+      const openHints = data.hints.filter((x) => !x.found && x.for_me).length;
+      clear(summary).append(`${data.items.length} items received · ${checked} of ${data.locations.length} locations checked · ${openHints} open ${openHints === 1 ? "hint" : "hints"}`,
+        data.goal ? [" · ", badge("Goal complete", "ok")] : null);
+      const counts = { items: data.items.length, locations: `${checked}/${data.locations.length}`, hints: data.hints.length };
+      clear(tabs).append(["items", "locations", "hints"].map((key) => h("button", { class: "tab", type: "button", role: "tab",
+        "aria-selected": String(key === tab), "aria-current": key === tab ? "page" : undefined,
+        onclick: () => { tab = key; draw(); } }, `${key[0].toUpperCase()}${key.slice(1)} (${counts[key]})`)));
+      clear(content).append({ items: itemsTab, locations: locationsTab, hints: hintsTab }[tab]());
+    }
+
+    async function load() {
+      try {
+        const fresh = await get(`/api/games/${id}/slots/${current}/tracker`);
+        const sig = JSON.stringify(fresh);
+        if (!isCurrent() || sig === loaded) return;
+        loaded = sig;
+        data = fresh;
+        draw();
+      } catch (err) {
+        clear(content).append(banner("error", icon("alert", 16), err.message));
+      }
+    }
+    search.oninput = draw;
+    if (picker) picker.onchange = () => { current = Number(picker.value); loaded = ""; data = null; clear(content).append(h("span", { class: "muted" }, "Loading…")); load(); };
+    content.append(h("span", { class: "muted" }, "Loading…"));
+    load();
+    // the server reads the save again only when it changed, so asking often is cheap
+    trackerTimer = setInterval(() => { if (!document.hidden) load(); }, 10000);
+    return h("div", { class: "section" }, h("div", { class: "card stack" },
+      h("div", { class: "card-head" }, h("h2", {}, admin && !slots.some((s) => s.mine) ? "Tracker" : "Your tracker"), picker),
+      summary, h("div", { class: "row spread" }, tabs, h("div", { style: { minWidth: "200px" } }, search)), content,
+      h("p", { class: "muted small" }, "Read from the server's save, so it can be up to a minute behind the game.")));
   }
   function applyGame(next) {
     game = next;
@@ -268,13 +386,50 @@ export default async function render({ root, params, cleanup, isCurrent, query }
     return details;
   }
 
+  function backupsSection() {
+    const host = h("div", { class: "stack" });
+    const reasons = { auto: "automatic", manual: "made by hand", "before-reset": "before a reset", "before-restore": "before a restore" };
+    const draw = (data) => {
+      clear(host).append(
+        h("p", { class: "muted small" }, `While the save changes, a copy is kept every ${data.interval_minutes} minutes (the latest ${data.keep_auto}), `,
+          "and one before every reset or restore. Restoring needs the server stopped; the current progress is kept as a backup first."),
+        data.backups.length ? h("div", { class: "table-wrap" }, h("table", { class: "table" },
+          h("thead", {}, h("tr", {}, ["Progress as of", "Kind", "Size", ""].map((t) => h("th", {}, t)))),
+          h("tbody", {}, data.backups.map((b) => h("tr", {},
+            h("td", {}, fmtDate(b.saved_at), h("div", { class: "muted small" }, fmtAgo(b.saved_at))),
+            h("td", {}, reasons[b.reason] || b.reason),
+            h("td", { class: "muted" }, fmtBytes(b.size)),
+            h("td", { class: "actions" }, h("div", { class: "row", style: { justifyContent: "flex-end" } },
+              h("button", { class: "btn sm", type: "button", disabled: isActive(game), title: isActive(game) ? "Stop the server first" : undefined,
+                onclick: action(async () => {
+                  if (!(await confirmDialog(`The game goes back to its progress of ${fmtDate(b.saved_at)}. The current progress is kept as a backup.`,
+                    { title: "Restore this backup?", confirmText: "Restore" }))) return;
+                  applyGame(await post(`/api/games/${id}/backups/${encodeURIComponent(b.name)}/restore`));
+                  toast("Backup restored. Start the server to continue from there.", "success");
+                  await load();
+                }) }, icon("restart", 14), "Restore"),
+              h("a", { class: "btn sm ghost icon-only", href: `/api/games/${id}/backups/${encodeURIComponent(b.name)}`, title: "Download", "aria-label": "Download" }, icon("download", 14)),
+              h("button", { class: "btn sm ghost icon-only", type: "button", title: "Delete", "aria-label": "Delete", onclick: action(async () => {
+                if (await confirmDialog("Delete this backup?", { danger: true, confirmText: "Delete" })) draw(await del(`/api/games/${id}/backups/${encodeURIComponent(b.name)}`));
+              }) }, icon("trash", 14))))))))) : h("p", { class: "muted" }, data.has_save ? "No backups yet." : "No backups yet: the game has no saved progress."),
+        h("div", { class: "row" }, h("button", { class: "btn", type: "button", disabled: !data.has_save, onclick: action(async () => {
+          draw(await post(`/api/games/${id}/backups`));
+          toast("Backup made", "success");
+        }) }, icon("download", 14), "Back up now")));
+    };
+    const load = async () => draw(await get(`/api/games/${id}/backups`));
+    const details = h("details", { class: "card" }, h("summary", {}, "Backups"), host);
+    details.addEventListener("toggle", () => { if (details.open) load().catch((err) => toast(err.message, "error")); });
+    return details;
+  }
+
   function dangerSection() {
     return h("details", { class: "card" }, h("summary", {}, "Danger zone"),
       h("div", { class: "stack" },
         h("div", { class: "row spread" },
-          h("div", {}, h("strong", {}, "Reset progress"), h("div", { class: "muted small" }, "Deletes the server's save so the game starts from zero. The server must be stopped.")),
+          h("div", {}, h("strong", {}, "Reset progress"), h("div", { class: "muted small" }, "Deletes the server's save so the game starts from zero. The server must be stopped. A backup is made first, so this can be undone under Backups.")),
           h("button", { class: "btn danger", type: "button", disabled: isActive(game) || !game.has_save, onclick: action(async () => {
-            if (!(await confirmDialog("All progress, received items and hints of this game will be lost.", { title: "Reset progress?", danger: true, confirmText: "Reset" }))) return;
+            if (!(await confirmDialog("All progress, received items and hints go back to zero. A backup of the current progress is made first.", { title: "Reset progress?", danger: true, confirmText: "Reset" }))) return;
             applyGame(await post(`/api/games/${id}/reset-save`));
             toast("Progress reset", "success");
           }) }, "Reset progress")),
@@ -289,10 +444,10 @@ export default async function render({ root, params, cleanup, isCurrent, query }
   }
 
   // -------------------------------------------------------------------------------------------------------------------
-  root.append(headerHost, infoHost, slotsHost, adminHost);
+  root.append(headerHost, infoHost, trackerHost, slotsHost, adminHost);
   drawLive();
   if (admin) {
-    adminHost.append(settingsSection(), filesSection(), consoleSection(), dangerSection());
+    adminHost.append(settingsSection(), filesSection(), consoleSection(), backupsSection(), dangerSection());
     if (query.get("tab") === "console") adminHost.querySelector("details:nth-of-type(3)")?.setAttribute("open", "");
   }
   const timer = setInterval(() => { if (!document.hidden) refresh().catch(() => {}); }, 4000);

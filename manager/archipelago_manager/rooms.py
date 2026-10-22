@@ -12,7 +12,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from . import apbridge, db, gamepaths, notify, settings as app_settings
+from . import apbridge, backups, db, gamepaths, notify, settings as app_settings
 from .config import CONFIG
 
 log = logging.getLogger(__name__)
@@ -153,12 +153,14 @@ class RoomManager:
         # locations per slot. Notifications are about the difference to the next look.
         self._seen: dict[int, tuple[set[int], dict[int, set[int]]]] = {}
         self._background: set[asyncio.Task] = set()
+        self._trackers: dict[tuple[int, int], tuple[tuple[float, int] | None, dict]] = {}
 
     def reset(self) -> None:
         """Forget all in-process state. Only matters when the application starts more than once per process."""
         self.rooms.clear()
         self._progress.clear()
         self._seen.clear()
+        self._trackers.clear()
         self.closing = False
 
     def room(self, game_id: int) -> Room:
@@ -476,12 +478,36 @@ class RoomManager:
         return state
 
     def forget_progress(self, game_id: int) -> None:
+        """For a save that was replaced or removed: read it afresh, and take it as the new starting point."""
         self._progress.pop(game_id, None)
+        self._seen.pop(game_id, None)
+        for key in [k for k in self._trackers if k[0] == game_id]:
+            del self._trackers[key]
+
+    async def tracker(self, game_id: int, slot: int) -> dict:
+        """One slot's items, locations and hints with names (see ap_helper.cmd_tracker). Read again only when the save
+        changed. Raises apbridge.APBridgeError if Archipelago cannot read the game."""
+        path = gamepaths.save_path(game_id)
+        try:
+            stat = path.stat()
+            key: tuple[float, int] | None = (stat.st_mtime, stat.st_size)
+        except FileNotFoundError:
+            key = None
+        cached = self._trackers.get((game_id, slot))
+        if cached and cached[0] == key:
+            return cached[1]
+        data = await apbridge.run_helper("tracker", str(gamepaths.multidata_path(game_id)), str(path), str(slot),
+                                         timeout=60)
+        data.pop("ok", None)
+        self._trackers[game_id, slot] = (key, data)
+        return data
 
     def forget(self, game_id: int) -> None:
         self.rooms.pop(game_id, None)
         self._progress.pop(game_id, None)
         self._seen.pop(game_id, None)
+        for key in [k for k in self._trackers if k[0] == game_id]:
+            del self._trackers[key]
 
     # ------------------------------------------------------------------------------------------------------------
     # notifications
@@ -515,6 +541,7 @@ class RoomManager:
                     continue
                 try:
                     await self._check_progress(game_id)
+                    backups.maybe_auto(game_id)
                 except Exception:  # noqa: BLE001 - one broken game must not stop the others
                     log.exception("Checking the progress of game %s failed", game_id)
 

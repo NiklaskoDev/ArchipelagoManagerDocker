@@ -199,9 +199,7 @@ def cmd_multidata(args) -> dict:
 # --------------------------------------------------------------------------------------------------------------------
 def cmd_progress(args) -> dict:
     cmd_where(args)
-    import Utils
-    with open(args.save, "rb") as f:
-        save = Utils.restricted_loads(zlib.decompress(f.read()))
+    save = load_save(args.save)
 
     slots: dict[int, dict] = {}
 
@@ -232,37 +230,90 @@ def cmd_progress(args) -> dict:
     return {"slots": slots, "hints": sorted(hints), "checks": checks}
 
 
-def cmd_names(args) -> dict:
-    """Player, item and location names for ids, from the multidata's own data package (custom games included).
+class Namer:
+    """Player, item and location names of one multiworld, from its own data package (custom games included)."""
 
-    The request lists [slot, id] pairs: items in the game of the slot receiving them, locations in the game of the
-    slot they are in.
-    """
+    def __init__(self, md) -> None:
+        self.md = md
+        self.package = md.get("datapackage", {})
+        self.reverse: dict[tuple[str, str], dict[int, str]] = {}
+
+    def _names(self, kind: str, game: str) -> dict[int, str]:
+        if (kind, game) not in self.reverse:
+            mapping = self.package.get(game, {}).get(f"{kind}_name_to_id", {})
+            self.reverse[kind, game] = {value: name for name, value in mapping.items()}
+        return self.reverse[kind, game]
+
+    def lookup(self, kind: str, slot: int, ident: int) -> str:
+        """An item id in the game of the slot receiving it, or a location id in the game of the slot it is in."""
+        info = self.md["slot_info"].get(slot)
+        # ids below zero (the server, cheats, starting inventory) belong to the "Archipelago" pseudo game
+        for game in ((info.game,) if info else ()) + ("Archipelago",):
+            if ident in self._names(kind, game):
+                return self._names(kind, game)[ident]
+        return f"{kind.capitalize()} {ident}"
+
+    def player(self, slot: int) -> str:
+        info = self.md["slot_info"].get(slot)
+        return info.name if info else "Archipelago"
+
+
+def load_save(path: str) -> dict:
+    import Utils
+    with open(path, "rb") as f:
+        return Utils.restricted_loads(zlib.decompress(f.read()))
+
+
+def cmd_names(args) -> dict:
+    """Names for ids. The request lists [slot, id] pairs: items in the game of the slot receiving them, locations in
+    the game of the slot they are in."""
     cmd_where(args)
     md = decode_multidata(args.path)
     request = json.loads(args.request)
-    package = md.get("datapackage", {})
-    reverse: dict[tuple[str, str], dict[int, str]] = {}
-
-    def names_of(kind: str, game: str) -> dict[int, str]:
-        if (kind, game) not in reverse:
-            mapping = package.get(game, {}).get(f"{kind}_name_to_id", {})
-            reverse[kind, game] = {value: name for name, value in mapping.items()}
-        return reverse[kind, game]
-
-    def lookup(kind: str, slot: int, ident: int) -> str:
-        info = md["slot_info"].get(slot)
-        # ids below zero (the server, cheats) belong to the "Archipelago" pseudo game
-        for game in ((info.game,) if info else ()) + ("Archipelago",):
-            if ident in names_of(kind, game):
-                return names_of(kind, game)[ident]
-        return f"{kind.capitalize()} {ident}"
-
+    names = Namer(md)
     return {
         "players": {int(slot): info.name for slot, info in md["slot_info"].items()},
-        "items": [[slot, ident, lookup("item", slot, ident)] for slot, ident in request.get("items", [])],
-        "locations": [[slot, ident, lookup("location", slot, ident)] for slot, ident in request.get("locations", [])],
+        "items": [[slot, ident, names.lookup("item", slot, ident)] for slot, ident in request.get("items", [])],
+        "locations": [[slot, ident, names.lookup("location", slot, ident)]
+                      for slot, ident in request.get("locations", [])],
     }
+
+
+def cmd_tracker(args) -> dict:
+    """One slot's view of a game, with names: the items it received (who sent them from where), its locations and
+    whether they are checked, and the hints that concern it. Works before the first save, too."""
+    cmd_where(args)
+    md = decode_multidata(args.path)
+    save = load_save(args.save) if os.path.exists(args.save) else {}
+    names = Namer(md)
+    slot = args.slot
+    info = md["slot_info"].get(slot)
+    if info is None:
+        raise ValueError(f"There is no slot {slot} in this multiworld")
+
+    items = [{"item": names.lookup("item", slot, item), "from": None, "location": None, "flags": 0, "start": True}
+             for item in md.get("precollected_items", {}).get(slot, [])]
+    for received in save.get("received_items", {}).get((0, slot, True), []):
+        items.append({"item": names.lookup("item", slot, received.item), "from": names.player(received.player),
+                      "location": names.lookup("location", received.player, received.location),
+                      "flags": int(received.flags), "start": False})
+
+    checked = save.get("location_checks", {}).get((0, slot), set())
+    locations = [{"location": names.lookup("location", slot, location), "checked": location in checked}
+                 for location in sorted(md.get("locations", {}).get(slot, {}))]
+
+    hints = []
+    for h in save.get("hints", {}).get((0, slot), set()):
+        hints.append({"item": names.lookup("item", h.receiving_player, h.item),
+                      "receiver": names.player(h.receiving_player), "for_me": h.receiving_player == slot,
+                      "location": names.lookup("location", h.finding_player, h.location),
+                      "finder": names.player(h.finding_player), "in_my_world": h.finding_player == slot,
+                      "entrance": str(h.entrance or ""), "found": bool(h.found), "flags": int(h.item_flags),
+                      "status": int(getattr(h, "status", 0))})
+    hints.sort(key=lambda h: (h["found"], h["item"].lower()))
+    status = save.get("client_game_state", {}).get((0, slot), 0)
+    return {"slot": slot, "name": info.name, "game": info.game, "goal": int(status) == 30,
+            "items": items, "locations": locations, "hints": hints}
 
 
 # --------------------------------------------------------------------------------------------------------------------
@@ -319,6 +370,7 @@ COMMANDS = {
     "multidata": cmd_multidata,
     "progress": cmd_progress,
     "names": cmd_names,
+    "tracker": cmd_tracker,
     "templates": cmd_templates,
 }
 
@@ -336,6 +388,10 @@ def main() -> None:
     p = sub.add_parser("names")
     p.add_argument("path")
     p.add_argument("request", help='JSON: {"items": [[slot, id], ...], "locations": [[slot, id], ...]}')
+    p = sub.add_parser("tracker")
+    p.add_argument("path", help="the multidata")
+    p.add_argument("save", help="the server's save; need not exist yet")
+    p.add_argument("slot", type=int)
     p = sub.add_parser("templates")
     p.add_argument("out")
     sub.add_parser("host-yaml")

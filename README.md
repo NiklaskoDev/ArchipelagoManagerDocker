@@ -80,6 +80,9 @@ by your players:
    **Games** with the server address, password, your slot name and your files. If the game allows it you can *claim*
    a slot yourself ("This is mine").
 3. Download your patch file(s), patch your game, and connect with the Archipelago client of your game.
+4. While you play, **Your tracker** on the game page shows the items you received (and from whom), the locations you
+   still have to check, and your hints: where your items are, and which items of other players are in your world. It
+   is read from the server's save, so it can be up to a minute behind.
 
 **Sign-ups:** open rounds are on the dashboard and under **Sign-ups**. *Join* → pick one of your configs or upload a
 YAML. It is checked against the round's rules right away (allowed games, unique player names, how many configs each
@@ -107,7 +110,12 @@ You can withdraw until the round closes.
   running server immediately; the port and a few startup options need a restart (the UI tells you).
 - **Console:** every server's log, plus a command line for Archipelago's server commands (`/send`, `/hint`, `/help`, …).
 - **Progress:** per slot checks and whether a player is online, read from the server's save (refreshed about once a
-  minute while the game is running).
+  minute while the game is running). The tracker on the game page lets you pick any slot and see its items, locations
+  and hints.
+- **Backups of a game's progress:** *Backups* on the game page. While the save changes, a copy is kept every 30 minutes
+  (the latest 48, about a day of play), plus one before every *Reset progress* and every restore, and whenever you
+  press *Back up now* (the latest 20 of those). *Restore* puts a copy back while the server is stopped, after keeping
+  the current progress as a copy, so a reset or a restore can always be undone.
 - **Users and settings:** *Admin* has users, registration, what players may do, defaults for new games, Archipelago's
   `host.yaml`, and system information.
 
@@ -175,13 +183,15 @@ Everything lives in the `/config` volume:
 | `manager.sqlite3` | Users, settings, config and game metadata |
 | `configs/` | Player YAMLs, one folder per user |
 | `games/<id>/` | Multiworld data, the server's save file (`multidata.apsave`), patch files, log |
+| `games/<id>/backups/` | Copies of the save (see below) |
 | `apworlds/` | The custom world library |
 | `jobs/` | Generation inputs and logs (older ones are pruned at startup, keeping the latest 50) |
 | `signups/<id>/` | The YAMLs entered in a sign-up round |
 | `ap-data/Archipelago/` | Archipelago's `host.yaml`, logs and the custom worlds folder |
 
 Back up the whole folder. Game saves are written every minute and when a server stops, so stopping the container
-(`docker stop`, allow 30 s) saves everything.
+(`docker stop`, allow 30 s) saves everything. The copies under `games/<id>/backups/` protect against mistakes inside
+the manager (a reset, a restore); they live in the same folder, so they are no replacement for backing it up.
 
 ## Updating
 

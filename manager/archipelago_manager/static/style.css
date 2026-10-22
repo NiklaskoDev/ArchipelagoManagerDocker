@@ -228,6 +228,8 @@ table.table { width: 100%; border-collapse: collapse; }
 .tab { padding: 9px 14px; color: var(--muted); border-bottom: 2px solid transparent; font-weight: 550; white-space: nowrap; }
 .tab:hover { color: var(--text); text-decoration: none; }
 .tab[aria-current="page"] { color: var(--text); border-bottom-color: var(--accent); }
+button.tab { background: none; border: 0; border-bottom: 2px solid transparent; font: inherit; font-weight: 550; cursor: pointer; }
+button.tab:hover { color: var(--text); }
 hr { border: 0; border-top: 1px solid var(--border); margin: 6px 0; width: 100%; }
 
 /* Set by fitNav() in app.js when the links do not fit: first the brand name goes, then the link labels. */
