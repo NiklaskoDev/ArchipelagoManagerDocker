@@ -11,7 +11,7 @@ import re
 import time
 import urllib.request
 
-from . import __version__, apbridge
+from . import __version__, apbridge, notify, settings as app_settings
 from .config import CONFIG
 
 log = logging.getLogger(__name__)
@@ -53,6 +53,18 @@ async def check_now() -> None:
         STATE.error = f"Could not check for updates: {e}"
         log.info(STATE.error)
     STATE.checked_at = time.time()
+    _announce()
+
+
+def _announce() -> None:
+    """Tells Discord about each new release once. It counts as told only once a message was actually queued."""
+    current = status()
+    if not current["update_available"] or app_settings.get_state("announced_update") == current["latest"]:
+        return
+    if notify.emit("ap_update", f"Archipelago {current['latest']} is available",
+                   f"This server runs {current['installed']}. Update the container image to get it: on Unraid, "
+                   "Docker → Check for updates → Apply.", url=current["url"], color="info"):
+        app_settings.set_state("announced_update", current["latest"])
 
 
 async def run_periodically() -> None:

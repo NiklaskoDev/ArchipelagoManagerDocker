@@ -10,11 +10,12 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import __version__, apbridge, db, updates
+from . import __version__, apbridge, db, notify, signups, updates
 from .config import CONFIG
 from .generation import GENERATION
 from .rooms import ROOMS
 from .routes import admin, apworlds, auth, configs, games, jobs
+from .routes import signups as signup_routes
 from .security import CSRF_HEADER, CSRF_VALUE
 
 log = logging.getLogger("archipelago_manager")
@@ -47,16 +48,19 @@ async def lifespan(_app: FastAPI):
     db.init_db()
     auth.bootstrap_admin()
     ROOMS.reset()
+    notify.start()
     await GENERATION.start()
-    init_task = asyncio.create_task(init_archipelago())
-    update_task = asyncio.create_task(updates.run_periodically()) if CONFIG.update_check else None
+    tasks = [asyncio.create_task(init_archipelago()), asyncio.create_task(ROOMS.watch_goals()),
+             asyncio.create_task(signups.run_periodically())]
+    if CONFIG.update_check:
+        tasks.append(asyncio.create_task(updates.run_periodically()))
     log.info("Archipelago Manager %s listening, data in %s", __version__, CONFIG.data_dir)
     yield
-    init_task.cancel()
-    if update_task:
-        update_task.cancel()
+    for task in tasks:
+        task.cancel()
     await GENERATION.stop()
     await ROOMS.shutdown()
+    notify.stop()
 
 
 class BodyLimit:
@@ -158,7 +162,7 @@ def health() -> dict:
             "ready": apbridge.STATE.info is not None, "archipelago_error": apbridge.STATE.error}
 
 
-for module in (auth, configs, apworlds, games, jobs, admin):
+for module in (auth, configs, apworlds, games, jobs, signup_routes, admin):
     app.include_router(module.router)
 
 app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")

@@ -3,8 +3,11 @@ from __future__ import annotations
 
 import io
 import json
+import subprocess
+import threading
 import time
 import zipfile
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from websockets.sync.client import connect
@@ -162,3 +165,73 @@ def multidata_requiring_server(multidata: bytes, version: tuple[int, int, int]) 
         env = {"SKIP_REQUIREMENTS_UPDATE": "true", "XDG_DATA_HOME": f"{tmp}/xdg", "PATH": "/usr/bin:/bin"}
         subprocess.run([AP_PYTHON, "-c", script, source, target], check=True, env=env, cwd=AP_DIR, capture_output=True)
         return open(target, "rb").read()
+
+
+def server_pid(game_id: int, ap_server) -> int | None:
+    """pid of the MultiServer process for a game (matched by its multidata path, unique per game)."""
+    marker = str(ap_server.data_dir / "games" / str(game_id) / "multidata.archipelago")
+    out = subprocess.run(["pgrep", "-f", marker], capture_output=True, text=True).stdout.split()
+    for pid in out:
+        try:
+            cmd = open(f"/proc/{pid}/cmdline", "rb").read().split(b"\0")
+        except OSError:
+            continue
+        if any(a.endswith(b"MultiServer.py") for a in cmd):
+            return int(pid)
+    return None
+
+
+class FakeWebhook:
+    """Stands in for a Discord webhook and records what is posted to it.
+
+    `answers` holds (status, json body) pairs to answer with first; after that every post gets Discord's 204.
+    """
+
+    def __init__(self) -> None:
+        self.posts: list[dict] = []
+        self.answers: list[tuple[int, dict]] = []
+        self.lock = threading.Lock()
+        fake = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_POST(self):
+                body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
+                with fake.lock:
+                    status, answer = fake.answers.pop(0) if fake.answers else (204, None)
+                    fake.posts.append({"path": self.path, "user_agent": self.headers.get("User-Agent"), "body": body,
+                                       "status": status})
+                data = json.dumps(answer).encode() if answer is not None else b""
+                self.send_response(status)
+                if data:
+                    self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+            def log_message(self, *args):
+                pass
+
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.url = f"http://127.0.0.1:{self.server.server_address[1]}/api/webhooks/1/secret-token"
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    @property
+    def embeds(self) -> list[dict]:
+        """The messages that were accepted (answered 204), oldest first."""
+        with self.lock:
+            return [p["body"]["embeds"][0] for p in self.posts if p["status"] < 300]
+
+    def titles(self) -> list[str]:
+        return [e["title"] for e in self.embeds]
+
+    def wait_for(self, title_part: str, timeout: float = 60) -> dict:
+        return wait_for(lambda: next((e for e in self.embeds if title_part in e["title"]), None), timeout=timeout,
+                        message=f"a notification titled like {title_part!r} (got {self.titles()})")
+
+    def clear(self) -> None:
+        with self.lock:
+            self.posts.clear()
+
+    def close(self) -> None:
+        self.server.shutdown()
+        self.server.server_close()  # refuse connections from now on instead of leaving them hanging

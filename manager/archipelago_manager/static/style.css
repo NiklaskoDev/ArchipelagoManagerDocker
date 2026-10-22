@@ -77,6 +77,7 @@ code, .mono { font-family: var(--mono); font-size: .9em; }
 .menu-item { display: flex; width: 100%; align-items: center; gap: 8px; padding: 8px 10px; border: 0; background: none; color: var(--text);
   border-radius: 6px; font: inherit; cursor: pointer; text-align: left; }
 .menu-item:hover { background: var(--surface-2); }
+.page { display: contents; }
 .view { max-width: 1180px; margin: 0 auto; padding: 24px 16px 48px; min-height: calc(100vh - 110px); outline: none; }
 .footer { text-align: center; padding: 16px; }
 .page-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; margin-bottom: 20px; }
@@ -181,7 +182,7 @@ table.table { width: 100%; border-collapse: collapse; }
 .banner.error > .icon { color: var(--bad); }
 .banner.info { border-color: color-mix(in srgb, var(--info) 50%, transparent); background: color-mix(in srgb, var(--info) 8%, var(--surface)); }
 .banner.ok { border-color: color-mix(in srgb, var(--ok) 50%, transparent); background: color-mix(in srgb, var(--ok) 8%, var(--surface)); }
-.page-banner, .view > div > .missing-panel { margin-bottom: 16px; }
+.page-banner, .page > div > .missing-panel { margin-bottom: 16px; }
 .empty { text-align: center; padding: 36px 16px; display: flex; flex-direction: column; gap: 10px; align-items: center; background: var(--surface);
   border: 1px dashed var(--border); border-radius: var(--radius); }
 .loading { display: flex; align-items: center; gap: 10px; color: var(--muted); padding: 30px; justify-content: center; }
@@ -229,8 +230,12 @@ table.table { width: 100%; border-collapse: collapse; }
 .tab[aria-current="page"] { color: var(--text); border-bottom-color: var(--accent); }
 hr { border: 0; border-top: 1px solid var(--border); margin: 6px 0; width: 100%; }
 
+/* Set by fitNav() in app.js when the links do not fit: first the brand name goes, then the link labels. */
+.topbar.no-brand .brand-name { display: none; }
+.topbar.icons-only .nav-link span { display: none; }
+.topbar.icons-only .nav-link { padding: 8px 10px; }
+
 @media (max-width: 720px) {
-  .brand-name { display: none; }
   .view { padding: 16px 12px 40px; }
   h1 { font-size: 1.35rem; }
   .nav-link span { display: none; }

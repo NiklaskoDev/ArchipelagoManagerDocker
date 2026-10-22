@@ -186,3 +186,20 @@ def make_user(ap_server, admin):
         return name, ap_server.client(name, "password123")
 
     return _make
+
+
+@pytest.fixture
+def discord(admin):
+    """A fake Discord webhook set up on the shared server for one test, with links to a made-up address."""
+    from helpers import FakeWebhook
+    hook = FakeWebhook()
+    r = admin.patch("/api/settings", json={"discord_webhook_url": hook.url, "notify_link_url": "http://manager.test:8080"})
+    assert r.status_code == 200, r.text
+    yield hook
+    admin.patch("/api/settings", json={"discord_webhook_url": "", "notify_link_url": "",
+                                       "notify_events": r.json()["notify_events"]})
+    # Let messages still on their way reach this hook, so they do not hold up the next test's
+    from helpers import wait_for
+    wait_for(lambda: admin.get("/api/settings").json()["notify_status"]["queued"] == 0, timeout=60,
+             message="queued notifications to be sent")
+    hook.close()

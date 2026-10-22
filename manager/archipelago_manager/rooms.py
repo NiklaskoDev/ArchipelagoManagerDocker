@@ -11,7 +11,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from . import apbridge, db, gamepaths, settings as app_settings
+from . import apbridge, db, gamepaths, notify, settings as app_settings
 from .config import CONFIG
 
 log = logging.getLogger(__name__)
@@ -22,6 +22,8 @@ STOP_GRACE_SECONDS = 20
 READY_TIMEOUT = 90
 CRASH_RESTART_WINDOW = 10 * 60
 CRASH_RESTART_LIMIT = 3
+GOAL_CHECK_INTERVAL = 20
+STATUS_GOAL = 30  # ClientStatus.CLIENT_GOAL
 
 # A password is handed to the server as a console argument, so it must survive being split on whitespace.
 _PASSWORD_OK = re.compile(r"^[^\s\x00-\x1f\x7f]{1,64}$")
@@ -56,6 +58,7 @@ class Room:
     tasks: set = field(default_factory=set)
     restart_handle: asyncio.TimerHandle | None = None
     log_loaded: bool = False
+    announce: bool = False  # tell Discord once the server accepts connections
 
     @property
     def active(self) -> bool:
@@ -132,16 +135,27 @@ def build_command(game: Any) -> list[str]:
     return cmd
 
 
+def player_list(game_id: int) -> str:
+    """The players of a game as lines for a notification: slot name, game and owner."""
+    rows = db.query("SELECT s.name, s.game, u.username FROM game_slots s LEFT JOIN users u ON u.id = s.user_id "
+                    "WHERE s.game_id = ? AND s.type = 1 ORDER BY s.slot", (game_id,))
+    return "\n".join(f"{notify.md(r['name'])} ({notify.md(r['game'])})"
+                     + (f" · {notify.md(r['username'])}" if r["username"] else "") for r in rows)
+
+
 class RoomManager:
     def __init__(self) -> None:
         self.rooms: dict[int, Room] = {}
         self.closing = False
         self._progress: dict[int, tuple[tuple[float, int], dict]] = {}
+        self._goals: dict[int, set[int]] = {}  # slots known to have reached their goal, per game
+        self._background: set[asyncio.Task] = set()
 
     def reset(self) -> None:
         """Forget all in-process state. Only matters when the application starts more than once per process."""
         self.rooms.clear()
         self._progress.clear()
+        self._goals.clear()
         self.closing = False
 
     def room(self, game_id: int) -> Room:
@@ -202,7 +216,8 @@ class RoomManager:
     # ------------------------------------------------------------------------------------------------------------
     # lifecycle
     # ------------------------------------------------------------------------------------------------------------
-    async def start(self, game_id: int) -> None:
+    async def start(self, game_id: int, *, announce: bool = False) -> None:
+        """Starts the server of a game. `announce` sends a Discord message once players can connect."""
         room = self.room(game_id)
         async with room.lock:
             if room.active:
@@ -210,7 +225,14 @@ class RoomManager:
             if room.restart_handle:
                 room.restart_handle.cancel()
                 room.restart_handle = None
+            room.announce = announce
             await self._spawn(room)
+        if game_id not in self._goals:
+            # Goals already in the save are old news. Note them now: the first regular check may come only after a
+            # player has finished in this run.
+            task = asyncio.create_task(self._note_goals(game_id))
+            self._background.add(task)
+            task.add_done_callback(self._background.discard)
 
     async def _spawn(self, room: Room) -> None:
         game = db.query_one("SELECT * FROM games WHERE id = ?", (room.game_id,))
@@ -290,6 +312,9 @@ class RoomManager:
             if room.proc is proc and room.state == "starting":
                 room.state = "running"
                 self._append_log(room, f"--- server is accepting connections on port {room.port} ---")
+                if room.announce:
+                    room.announce = False
+                    self._announce_online(room)
             return
         if proc.returncode is None and room.proc is proc and room.state == "starting":
             self._append_log(room, "--- server did not open its port in time; stopping it ---")
@@ -314,16 +339,18 @@ class RoomManager:
         tail = [t for _s, t in list(room.lines)[-8:] if t and not t.startswith("---")]
         room.state = "crashed"
         room.error = room.error or (tail[-1][:300] if tail else f"The server exited with code {code}")
-        self._schedule_restart(room)
+        next_step = self._schedule_restart(room)
+        self._announce_crash(room, next_step)
 
-    def _schedule_restart(self, room: Room) -> None:
+    def _schedule_restart(self, room: Room) -> str:
+        """Plans an automatic restart if allowed. Returns what happens next, in words."""
         if not app_settings.get_setting("auto_restart_crashed"):
-            return
+            return "Automatic restarts are turned off."
         now = time.monotonic()
         room.crash_times = [t for t in room.crash_times if now - t < CRASH_RESTART_WINDOW] + [now]
         if len(room.crash_times) > CRASH_RESTART_LIMIT:
             self._append_log(room, "--- crashed too often, not restarting automatically ---")
-            return
+            return "It crashed too often, so it is not restarted automatically."
         delay = 5 * 2 ** (len(room.crash_times) - 1)
         self._append_log(room, f"--- restarting in {delay}s (crash {len(room.crash_times)}/{CRASH_RESTART_LIMIT}) ---")
 
@@ -333,6 +360,7 @@ class RoomManager:
                 asyncio.ensure_future(self._restart_after_crash(room))
 
         room.restart_handle = asyncio.get_running_loop().call_later(delay, restart)
+        return f"Restarting automatically in {delay} seconds (attempt {len(room.crash_times)} of {CRASH_RESTART_LIMIT})."
 
     async def _restart_after_crash(self, room: Room) -> None:
         try:
@@ -414,6 +442,14 @@ class RoomManager:
     # progress (read from the server's save file)
     # ------------------------------------------------------------------------------------------------------------
     async def progress(self, game_id: int) -> dict[int, dict]:
+        slots = await self._read_progress(game_id)
+        if slots is None:
+            cached = self._progress.get(game_id)
+            return cached[1] if cached else {}
+        return slots
+
+    async def _read_progress(self, game_id: int) -> dict[int, dict] | None:
+        """The save's progress per slot ({} before the first save), or None if the save could not be read."""
         path = gamepaths.save_path(game_id)
         try:
             stat = path.stat()
@@ -428,7 +464,7 @@ class RoomManager:
             result = await apbridge.run_helper("progress", str(path), timeout=60)
         except apbridge.APBridgeError as e:
             log.warning("Could not read progress of game %s: %s", game_id, e)
-            return cached[1] if cached else {}
+            return None
         slots = {int(k): v for k, v in result["slots"].items()}
         self._progress[game_id] = (key, slots)
         return slots
@@ -439,6 +475,77 @@ class RoomManager:
     def forget(self, game_id: int) -> None:
         self.rooms.pop(game_id, None)
         self._progress.pop(game_id, None)
+        self._goals.pop(game_id, None)
+
+    # ------------------------------------------------------------------------------------------------------------
+    # notifications
+    # ------------------------------------------------------------------------------------------------------------
+    def _announce_online(self, room: Room) -> None:
+        game = db.query_one("SELECT name, password FROM games WHERE id = ?", (room.game_id,))
+        if not game:
+            return
+        address = notify.game_address(room.port)
+        fields = [("Server", f"`{address}`" if address else f"Port {room.port}", True)]
+        if game["password"]:
+            fields.append(("Password", "Shown on the game page", True))
+        fields.append(("Players", player_list(room.game_id)))
+        notify.emit("game_online", f"{game['name']} is online", url=notify.link(f"/games/{room.game_id}"),
+                    fields=fields, color="success")
+
+    def _announce_crash(self, room: Room, next_step: str) -> None:
+        game = db.query_one("SELECT name FROM games WHERE id = ?", (room.game_id,))
+        if game:
+            notify.emit("game_crashed", f"{game['name']} crashed",
+                        f"The server stopped unexpectedly (exit code {room.exit_code}).\n```\n{room.error}\n```\n"
+                        f"{next_step}",
+                        url=notify.link(f"/games/{room.game_id}"), color="error")
+
+    async def watch_goals(self) -> None:
+        """Announces players who reach their goal. The server records goals in its save, at the latest a minute later."""
+        while True:
+            await asyncio.sleep(GOAL_CHECK_INTERVAL)
+            for game_id, room in list(self.rooms.items()):
+                if room.started_at is None:  # did not run since the manager started, so its save cannot have changed
+                    continue
+                try:
+                    await self._check_goals(game_id)
+                except Exception:  # noqa: BLE001 - one broken game must not stop the others
+                    log.exception("Checking the goals of game %s failed", game_id)
+
+    async def _note_goals(self, game_id: int) -> None:
+        slots = await self._read_progress(game_id)
+        if slots is not None and game_id not in self._goals:
+            self._goals[game_id] = {slot for slot, p in slots.items() if p.get("status") == STATUS_GOAL}
+
+    async def _check_goals(self, game_id: int) -> None:
+        slots = await self._read_progress(game_id)
+        if slots is None:
+            return
+        done = {slot for slot, p in slots.items() if p.get("status") == STATUS_GOAL}
+        known = self._goals.get(game_id)
+        self._goals[game_id] = done
+        if known is None:  # the first look is the starting point: goals from before were announced back then
+            return
+        new = done - known
+        if not new:
+            return
+        game = db.query_one("SELECT name FROM games WHERE id = ?", (game_id,))
+        players = {r["slot"]: r for r in db.query(
+            "SELECT s.slot, s.name, s.game, u.username FROM game_slots s LEFT JOIN users u ON u.id = s.user_id "
+            "WHERE s.game_id = ? AND s.type = 1", (game_id,))}
+        if not game or not players:
+            return
+        finished = len(players.keys() & done)
+        url = notify.link(f"/games/{game_id}")
+        for slot in sorted(new & players.keys()):
+            p = players[slot]
+            who = notify.md(p["name"]) + (f" ({notify.md(p['username'])})" if p["username"] else "")
+            notify.emit("player_goal", f"{p['name']} reached their goal",
+                        f"{who} finished **{notify.md(p['game'])}** in {notify.md(game['name'])}.",
+                        url=url, fields=[("Done", f"{finished} of {len(players)} players", True)], color="success")
+        if players.keys() <= done and not players.keys() <= known:
+            notify.emit("player_goal", f"Everyone finished {game['name']}!",
+                        f"All {len(players)} players reached their goal. Congratulations!", url=url, color="success")
 
 
 ROOMS = RoomManager()

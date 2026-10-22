@@ -1,28 +1,13 @@
 """Server process lifecycle: crashes, console exits, and the manager itself restarting (a container restart)."""
 import os
 import signal
-import subprocess
 import time
 
 import pytest
 
-from helpers import APClient, make_game, wait_state
+from helpers import APClient, make_game, server_pid, wait_state
 
 pytestmark = pytest.mark.ap
-
-
-def server_pid(game_id: int, ap_server) -> int | None:
-    """pid of the MultiServer process for a game (matched by its multidata path, unique per game)."""
-    marker = str(ap_server.data_dir / "games" / str(game_id) / "multidata.archipelago")
-    out = subprocess.run(["pgrep", "-f", marker], capture_output=True, text=True).stdout.split()
-    for pid in out:
-        try:
-            cmd = open(f"/proc/{pid}/cmdline", "rb").read().split(b"\0")
-        except OSError:
-            continue
-        if any(a.endswith(b"MultiServer.py") for a in cmd):
-            return int(pid)
-    return None
 
 
 def test_a_crashed_server_is_restarted_automatically(admin, ap_server):

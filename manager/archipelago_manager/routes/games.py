@@ -13,13 +13,12 @@ from pydantic import BaseModel, Field
 
 from .. import apbridge, db, gamepaths, gamestore, settings as app_settings
 from ..config import CONFIG
-from ..rooms import ROOMS, RoomError, valid_password
+from ..rooms import ROOMS, STATUS_GOAL, RoomError, valid_password
 from ..security import admin_user, current_user, is_admin
 
 router = APIRouter(prefix="/api")
 
-# ClientStatus values from NetUtils
-STATUS_GOAL = 30
+# ClientStatus values from NetUtils (besides STATUS_GOAL)
 STATUS_ONLINE = (5, 10, 20)
 # Server options that cannot be changed on a running server (everything else is applied with /option)
 RESTART_OPTIONS = {"loglevel", "auto_shutdown_minutes", "use_embedded_options"}
@@ -143,7 +142,7 @@ async def upload_game(request: Request, file: UploadFile = File(...), name: str 
     start_error = None
     if start:
         try:
-            await ROOMS.start(game_id)
+            await ROOMS.start(game_id, announce=True)
         except RoomError as e:
             start_error = str(e)
     return {**await _detail(game_id, user, request), "start_error": start_error}
@@ -301,7 +300,7 @@ def _controllable(game_id: int, user: sqlite3.Row) -> sqlite3.Row:
 async def start_game(game_id: int, request: Request, user: sqlite3.Row = Depends(current_user)) -> dict:
     _controllable(game_id, user)
     try:
-        await ROOMS.start(game_id)
+        await ROOMS.start(game_id, announce=True)
     except RoomError as e:
         raise HTTPException(409, str(e)) from None
     return await _detail(game_id, user, request)

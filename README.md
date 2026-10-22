@@ -16,6 +16,10 @@ players log in to keep their YAML configs, see their games and download their pa
 - **Generates games.** Pick configs, choose spoiler level, seed, race mode, plando and an optional `meta.yaml`, and
   generate with the real `Generate.py`. The result is imported as a game, with slots linked to the configs' owners, and
   can be hosted straight away. Jobs queue, show a live log and can be cancelled.
+- **Runs sign-up rounds.** An admin opens a round with a deadline; players enter their YAMLs, which are checked on the
+  spot. When the deadline passes the game is generated from all entries and everyone is added to it.
+- **Posts to Discord.** A webhook message when a game goes online or crashes, a player reaches their goal, a game is
+  generated, sign-ups open or close, a custom game waits for approval, or a new Archipelago version is out.
 - **Keeps custom games.** `.apworld` files are stored. If a config or a seed needs a game the server does not have, the
   UI says so and offers to add it. Regular users can *submit* an APWorld; an admin approves it.
 - **One UI for admins and players.** Players see only their games, can start and stop them (if allowed) and download
@@ -76,6 +80,11 @@ by your players:
    a slot yourself ("This is mine").
 3. Download your patch file(s), patch your game, and connect with the Archipelago client of your game.
 
+**Sign-ups:** open rounds are on the dashboard and under **Sign-ups**. *Join* → pick one of your configs or upload a
+YAML. It is checked against the round's rules right away (allowed games, unique player names, how many configs each
+player may enter). Your entry is a copy: if you edit the config afterwards, the round page offers to use the new version.
+You can withdraw until the round closes.
+
 ### As an admin
 
 - **Add a pregenerated game:** *Games → Add a game*, drop the zip. The slots are matched to users by player name
@@ -83,6 +92,14 @@ by your players:
   assign it from the slot's *Owner* drop-down. Turning on *claimable* in the game's settings lets players pick their own;
   add *only one slot each* so nobody can take more than one (you can still assign extra slots by hand).
 - **Generate a game:** *Generate*, tick the configs, set the options, *Generate*. Slot owners are taken from the configs.
+- **Run a sign-up round:** *Sign-ups → New round*: a name, a deadline (or none, to close it by hand), optionally the
+  allowed games and how many configs each player may enter, and the generation options. At the deadline the sign-ups
+  close and the game is generated and started; switch that off to generate by hand. If generating fails (for example a
+  game is not installed), the round stays closed with the error: fix the entries, then *Generate* again or *Reopen*.
+- **Discord notifications:** *Admin → Settings → Discord notifications*. In Discord, open the channel's settings →
+  *Integrations* → *Webhooks* → *New Webhook* → *Copy Webhook URL*, paste it, and *Send a test message*. Set *Address of
+  this web UI* so messages link to the right page, and untick the kinds of messages you do not want. Goals are read from
+  the server's save, so they are posted up to a minute after they happen.
 - **Run a game:** *Start / Stop / Restart* on the game page. *Settings* holds the room password, the remote-admin
   password, hint cost, `!release`/`!collect`/`!remaining` rules and the idle shutdown. Passwords and rules apply to a
   running server immediately; the port and a few startup options need a restart (the UI tells you).
@@ -136,6 +153,7 @@ Everything lives in the `/config` volume:
 | `games/<id>/` | Multiworld data, the server's save file (`multidata.apsave`), patch files, log |
 | `apworlds/` | The custom world library |
 | `jobs/` | Generation inputs and logs (older ones are pruned at startup, keeping the latest 50) |
+| `signups/<id>/` | The YAMLs entered in a sign-up round |
 | `ap-data/Archipelago/` | Archipelago's `host.yaml`, logs and the custom worlds folder |
 
 Back up the whole folder. Game saves are written every minute and when a server stops, so stopping the container
@@ -174,6 +192,8 @@ approve pull requests*. You can also run the workflow by hand (*Actions → Arch
 - The web UI speaks plain HTTP. Do not expose it to the internet without an HTTPS reverse proxy.
 - Spoiler logs, bundled YAMLs and other players' files are visible to admins only, unless an admin shares them.
 - The console is admin-only and runs real server commands. Remote admin (`!admin`) is off unless you set a password.
+- Discord messages never contain passwords and cannot mention anyone (`@everyone` in a player name stays plain text).
+  Treat the webhook address like a password: anyone who has it can post to the channel.
 
 ## Troubleshooting
 

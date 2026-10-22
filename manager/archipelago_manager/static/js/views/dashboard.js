@@ -1,14 +1,24 @@
 import { h, clear, icon, fmtBytes } from "../util.js";
 import { get, state, isAdmin } from "../api.js";
 import { pageHeader, missingGamesPanel, gameCard, empty, updateBanner } from "../components.js";
+import { signupCard } from "./signups.js";
 
 export default async function render({ root, cleanup, isCurrent }) {
   const admin = isAdmin();
-  const [games, missing, configs, system] = await Promise.all([
-    get("/api/games"), get("/api/missing-games"), get("/api/configs"), admin ? get("/api/system") : null,
+  const [games, missing, configs, system, rounds] = await Promise.all([
+    get("/api/games"), get("/api/missing-games"), get("/api/configs"), admin ? get("/api/system") : null, get("/api/signups"),
   ]);
 
   const gridHost = h("div");
+  const signupsHost = h("div");
+  const drawSignups = (list) => {
+    const open = list.filter((s) => s.status === "open");
+    clear(signupsHost);
+    if (open.length) {
+      signupsHost.append(h("div", { class: "section" }, h("div", { class: "section-head" }, h("h2", {}, "Open sign-ups"),
+        h("a", { href: "#/signups" }, "See all")), h("div", { class: "grid" }, open.map(signupCard))));
+    }
+  };
   const missingHost = h("div");
   const drawMissing = (items) => clear(missingHost).append(missingGamesPanel(items, load) || "");
   const drawGames = (list) => {
@@ -35,10 +45,11 @@ export default async function render({ root, cleanup, isCurrent }) {
     }
   };
   async function load() {
-    const [g, m] = await Promise.all([get("/api/games"), get("/api/missing-games")]);
+    const [g, m, s] = await Promise.all([get("/api/games"), get("/api/missing-games"), get("/api/signups")]);
     if (!isCurrent()) return;
     drawGames(g);
     drawMissing(m);
+    drawSignups(s);
   }
 
   root.append(
@@ -50,8 +61,10 @@ export default async function render({ root, cleanup, isCurrent }) {
       tile(system.users, "Users"),
       tile(system.ap_version ? `${system.ap_version}` : "unavailable", `Archipelago · ${system.world_count} games`),
       tile(fmtBytes(system.disk.free), "Disk free")) : null,
+    signupsHost,
     gridHost);
   drawMissing(missing);
+  drawSignups(rounds);
   drawGames(games);
 
   if (!configs.length) {

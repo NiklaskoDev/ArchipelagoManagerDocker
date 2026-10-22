@@ -8,7 +8,7 @@ export function h(tag, props, ...children) {
     else if (key === "style" && typeof value === "object") Object.assign(el.style, value);
     else if (key === "for") el.htmlFor = value;
     else if (key.startsWith("on") && typeof value === "function") el.addEventListener(key.slice(2).toLowerCase(), value);
-    else if (key in el) el[key] = value;
+    else if (key in el && key !== "list") el[key] = value;  // input.list is a read-only property; the attribute sets it
     else el.setAttribute(key, value === true ? "" : value);
   }
   append(el, children);
@@ -64,6 +64,8 @@ const ICONS = {
   home: '<path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>',
   key: '<path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.78 7.78 5.5 5.5 0 0 1 7.78-7.78zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/>',
   external: '<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>',
+  calendar: '<rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>',
+  bell: '<path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>',
 };
 
 export function icon(name, size = 16) {
@@ -112,6 +114,30 @@ export function fmtAgo(ts) {
   if (s < 3600) return `${Math.floor(s / 60)} min ago`;
   if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
   return `${Math.floor(s / 86400)} d ago`;
+}
+
+// "in 2 d 4 h", for deadlines
+export function fmtUntil(ts) {
+  const s = ts - Date.now() / 1000;
+  if (s <= 0) return "passed";
+  if (s < 3600) return `in ${Math.max(1, Math.round(s / 60))} min`;
+  if (s < 86400) return `in ${Math.round(s / 3600)} h`;
+  const days = Math.floor(s / 86400), hours = Math.round((s % 86400) / 3600);
+  return days < 3 && hours ? `in ${days} d ${hours} h` : `in ${days} d`;
+}
+
+// <input type="datetime-local"> works in local time without a zone; these convert to and from Unix seconds.
+export function toLocalInput(ts) {
+  if (!ts) return "";
+  const d = new Date(ts * 1000);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+export function fromLocalInput(value) {
+  if (!value) return null;
+  const time = new Date(value).getTime();
+  return Number.isNaN(time) ? null : time / 1000;
 }
 
 export function fmtDuration(seconds) {

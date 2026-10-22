@@ -11,6 +11,8 @@ const ROUTES = [
   [/^\/configs\/(\d+)$/, () => import("./views/config-edit.js"), "configs"],
   [/^\/generate$/, () => import("./views/generate.js"), "generate"],
   [/^\/jobs\/(\d+)$/, () => import("./views/job.js"), "generate"],
+  [/^\/signups$/, () => import("./views/signups.js"), "signups"],
+  [/^\/signups\/(\d+)$/, () => import("./views/signup.js"), "signups"],
   [/^\/worlds$/, () => import("./views/worlds.js"), "worlds"],
   [/^\/admin\/users$/, () => import("./views/admin-users.js"), "admin"],
   [/^\/admin\/settings$/, () => import("./views/admin-settings.js"), "admin"],
@@ -56,12 +58,15 @@ async function route() {
     return;
   }
   const [m, load] = match;
+  // Each page renders into its own element. A page that is still loading when the user moves on can then only fill
+  // its own, already removed element, never the next page.
+  const page = h("div", { class: "page" });
   try {
     const module = await load();
     if (token !== navToken) return;
-    clear(view);
+    clear(view).append(page);
     await module.default({
-      root: view,
+      root: page,
       params: m.slice(1),
       query: new URLSearchParams(queryString),
       cleanup: (fn) => cleanups.push(fn),
@@ -87,7 +92,8 @@ function highlightNav(section) {
 // shell
 // ---------------------------------------------------------------------------------------------------------------------
 function navLink(href, section, label, iconName) {
-  return h("a", { href, "data-section": section, class: "nav-link" }, icon(iconName, 16), h("span", {}, label));
+  // The label is hidden on narrow screens; title and aria-label keep the icon understandable.
+  return h("a", { href, "data-section": section, class: "nav-link", title: label, "aria-label": label }, icon(iconName, 16), h("span", {}, label));
 }
 
 function renderShell() {
@@ -96,6 +102,7 @@ function renderShell() {
     navLink("#/", "home", "Dashboard", "home"),
     navLink("#/games", "games", "Games", "server"),
     navLink("#/configs", "configs", "My configs", "file"),
+    navLink("#/signups", "signups", "Sign-ups", "calendar"),
     (isAdmin() || perms.generate) ? navLink("#/generate", "generate", "Generate", "zap") : null,
     navLink("#/worlds", "worlds", "Custom games", "package"),
     isAdmin() ? navLink("#/admin/users", "admin", "Admin", "settings") : null,
@@ -109,15 +116,34 @@ function renderShell() {
     h("button", { class: "menu-item", type: "button", role: "menuitem", onclick: logout }, icon("logout", 14), "Sign out"));
   userButton.onclick = (e) => { e.stopPropagation(); menu.hidden = !menu.hidden; };
   document.addEventListener("click", () => { menu.hidden = true; });
-  clear(app).append(
-    h("header", { class: "topbar" },
+  const topbar = h("header", { class: "topbar" },
       h("div", { class: "topbar-inner" },
         h("a", { class: "brand", href: "#/" }, h("span", { class: "brand-mark" }, "AP"), h("span", { class: "brand-name" }, "Archipelago Manager")),
         h("nav", { class: "nav", "aria-label": "Main" }, links),
-        h("div", { class: "user-menu" }, userButton, menu))),
-    view,
-    h("footer", { class: "footer muted small" }, `Archipelago Manager ${state.status.version}`));
+        h("div", { class: "user-menu" }, userButton, menu)));
+  clear(app).append(topbar, view, h("footer", { class: "footer muted small" }, `Archipelago Manager ${state.status.version}`));
+  fitNav();
+  document.fonts?.ready.then(fitNav);
 }
+
+// The nav scrolls sideways when its links do not fit, which would hide the last ones (Admin, for administrators).
+// Measure instead of guessing a breakpoint: link count and font widths differ.
+function fitNav() {
+  const topbar = app.querySelector(".topbar");
+  const nav = topbar?.querySelector(".nav");
+  if (!nav) return;
+  topbar.classList.remove("no-brand", "icons-only");
+  for (const step of ["no-brand", "icons-only"]) {
+    if (nav.scrollWidth <= nav.clientWidth) return;
+    topbar.classList.add(step);
+  }
+}
+let fitPending = false;
+window.addEventListener("resize", () => {
+  if (fitPending) return;
+  fitPending = true;
+  requestAnimationFrame(() => { fitPending = false; fitNav(); });
+});
 
 async function logout() {
   await api("POST", "/api/auth/logout", {}).catch(() => {});

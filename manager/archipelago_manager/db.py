@@ -10,7 +10,46 @@ from collections.abc import Iterable, Iterator
 
 from .config import CONFIG
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
+
+# Added in schema version 3
+_SIGNUPS = """
+-- A sign-up round: players enter configs until the deadline, then one multiworld is generated from all of them.
+CREATE TABLE signups (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    name             TEXT NOT NULL,
+    description      TEXT,
+    created_by       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    created_at       REAL NOT NULL,
+    deadline         REAL,
+    status           TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'closed', 'generating', 'done')),
+    configs_per_user INTEGER NOT NULL DEFAULT 1,
+    allowed_games    TEXT NOT NULL DEFAULT '[]',
+    auto_generate    INTEGER NOT NULL DEFAULT 1,
+    options          TEXT NOT NULL DEFAULT '{}',
+    closed_at        REAL,
+    reminded         INTEGER NOT NULL DEFAULT 0,
+    job_id           INTEGER,
+    game_id          INTEGER,
+    error            TEXT
+);
+
+-- An entry is a copy of the player's config taken when they entered, so what gets generated is what they submitted.
+-- config_id remembers which library config it came from, to offer an update when that one changes.
+CREATE TABLE signup_entries (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    signup_id    INTEGER NOT NULL REFERENCES signups(id) ON DELETE CASCADE,
+    user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    config_id    INTEGER REFERENCES configs(id) ON DELETE SET NULL,
+    name         TEXT NOT NULL,
+    player_names TEXT NOT NULL DEFAULT '[]',
+    games        TEXT NOT NULL DEFAULT '[]',
+    sha256       TEXT NOT NULL,
+    created_at   REAL NOT NULL,
+    updated_at   REAL NOT NULL
+);
+CREATE INDEX signup_entries_signup ON signup_entries(signup_id);
+"""
 
 SCHEMA = """
 CREATE TABLE users (
@@ -138,13 +177,14 @@ CREATE TABLE job_players (
     games        TEXT NOT NULL DEFAULT '[]'
 );
 CREATE INDEX job_players_job ON job_players(job_id);
-"""
+""" + _SIGNUPS
 
 
 # Upgrades for databases created by older versions: MIGRATIONS[n] turns schema n - 1 into schema n. New databases get
 # the current SCHEMA directly.
 MIGRATIONS: dict[int, str] = {
     2: "ALTER TABLE games ADD COLUMN single_claim INTEGER NOT NULL DEFAULT 0;",
+    3: _SIGNUPS,
 }
 
 

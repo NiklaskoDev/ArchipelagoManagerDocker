@@ -1,4 +1,4 @@
-import { h, clear, icon, toast, action, fmtBytes } from "../util.js";
+import { h, clear, icon, toast, action, fmtBytes, fmtAgo } from "../util.js";
 import { get, patch, put, post } from "../api.js";
 import { pageHeader, field, checkbox, banner, adminTabs, serverOptionsForm, updateBanner, updateStatus } from "../components.js";
 
@@ -16,11 +16,13 @@ export default async function render({ root, cleanup }) {
     auto_restart_crashed: checkbox("Restart game servers that crash", settings.auto_restart_crashed, "Gives up after three crashes in ten minutes."),
   };
   const rules = serverOptionsForm(settings.default_server_options);
+  const discord = notificationsCard(settings);
   const saveSettings = h("button", { class: "btn primary", type: "button" }, "Save settings");
   saveSettings.onclick = action(async () => {
-    const body = { public_host: publicHost.value.trim(), default_server_options: rules.read() };
+    const body = { public_host: publicHost.value.trim(), default_server_options: rules.read(), ...discord.read() };
     for (const [key, box] of Object.entries(toggles)) body[key] = box.input.checked;
-    await patch("/api/settings", body);
+    const saved = await patch("/api/settings", body);
+    discord.drawStatus(saved.notify_status);
     toast("Settings saved", "success");
   });
 
@@ -89,7 +91,57 @@ export default async function render({ root, cleanup }) {
         h("div", { class: "stack tight" }, Object.values(toggles))),
       h("div", { class: "card stack" }, h("h2", {}, "Defaults for new games"),
         h("p", { class: "muted small" }, "Applied when a game is added. Each game can override them."), rules.node),
+      discord.node,
       hostDetails, systemCard));
+}
+
+const EVENTS = [
+  ["game_online", "A game goes online", "When someone starts it; not when it comes back after a crash or a restart of the container."],
+  ["game_crashed", "A game server crashes"],
+  ["player_goal", "A player reaches their goal, and when everyone has"],
+  ["generation", "A new game is generated, or generating fails"],
+  ["signup", "Sign-up rounds open, close soon and close"],
+  ["apworld_pending", "A custom game waits for approval"],
+  ["ap_update", "A new Archipelago version is out"],
+];
+
+// Discord webhook settings. Saved with the page's "Save settings" button; read() returns their part of the request.
+function notificationsCard(settings) {
+  const webhook = h("input", { class: "input", type: "url", value: settings.discord_webhook_url, autocomplete: "off",
+    placeholder: "https://discord.com/api/webhooks/…" });
+  const linkBase = h("input", { class: "input", type: "url", value: settings.notify_link_url, placeholder: location.origin });
+  const useThisPage = h("button", { class: "btn sm", type: "button", onclick: () => { linkBase.value = location.origin; } }, "Use this page's address");
+  const boxes = EVENTS.map(([key, label, hint]) => ({ key, box: checkbox(label, settings.notify_events.includes(key), hint) }));
+  const statusHost = h("div");
+  const drawStatus = (status) => {
+    clear(statusHost);
+    if (status.last_error && (!status.last_ok_at || status.last_error_at > status.last_ok_at)) {
+      statusHost.append(banner("error", icon("alert", 16), h("div", { class: "grow" },
+        h("strong", {}, `A message could not be sent (${fmtAgo(status.last_error_at)}): `), status.last_error)));
+    } else if (status.last_ok_at) {
+      statusHost.append(h("p", { class: "muted small" }, `Last message delivered ${fmtAgo(status.last_ok_at)}.`));
+    }
+  };
+  drawStatus(settings.notify_status);
+  const test = h("button", { class: "btn", type: "button" }, icon("bell", 14), "Send a test message");
+  test.onclick = action(async () => {
+    const result = await post("/api/settings/test-notification", { discord_webhook_url: webhook.value.trim() || null });
+    drawStatus(result.notify_status);
+    toast("Test message sent. Check your Discord channel.", "success");
+  });
+  const node = h("div", { class: "card stack" }, h("h2", {}, "Discord notifications"),
+    h("p", { class: "muted small" }, "Posts a message to a Discord channel when something happens. In Discord: channel settings → Integrations → Webhooks → New Webhook → Copy Webhook URL. Leave the address empty to turn notifications off."),
+    field("Webhook address", webhook),
+    field("Address of this web UI", h("div", { class: "row" }, h("div", { class: "grow" }, linkBase), useThisPage),
+      "Messages link to pages here. Leave empty to leave the links out."),
+    h("div", { class: "stack tight" }, h("span", { class: "field-label" }, "Send a message when…"), boxes.map((b) => b.box)),
+    statusHost,
+    h("div", { class: "row" }, test));
+  const read = () => ({
+    discord_webhook_url: webhook.value.trim(), notify_link_url: linkBase.value.trim(),
+    notify_events: boxes.filter((b) => b.box.input.checked).map((b) => b.key),
+  });
+  return { node, read, drawStatus };
 }
 
 function action2(fn) {

@@ -16,7 +16,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 
-from .. import apbridge, db, settings as app_settings
+from .. import apbridge, db, notify, settings as app_settings
 from ..config import CONFIG
 from ..security import admin_user, current_user, is_admin
 
@@ -218,6 +218,12 @@ async def upload_apworld(file: UploadFile = File(...), user: sqlite3.Row = Depen
     replaced: list[dict] = []
     if status == "installed":
         replaced = await _install(apworld_id)
+    else:
+        version = f" {meta['version']}" if meta["version"] else ""
+        notify.emit("apworld_pending", f"Custom game waiting for approval: {meta['game']}",
+                    f"{notify.md(user['username'])} submitted **{notify.md(meta['game'])}**{notify.md(version)} "
+                    f"({notify.md(filename)}). An administrator has to approve it before it can be used.",
+                    url=notify.link("/worlds"), color="warning")
     row = db.query_one("SELECT a.*, u.username AS uploader FROM apworlds a LEFT JOIN users u ON u.id = a.uploaded_by "
                        "WHERE a.id = ?", (apworld_id,))
     return {**_row_json(row, uploader=row["uploader"]), "replaced": replaced}

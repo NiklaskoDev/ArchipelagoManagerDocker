@@ -1,6 +1,7 @@
 """Global manager settings and validation of Archipelago server options."""
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from . import db
@@ -10,6 +11,9 @@ RELEASE_MODES = ("auto", "enabled", "disabled", "goal", "auto-enabled")
 REMAINING_MODES = ("enabled", "disabled", "goal")
 COUNTDOWN_MODES = ("enabled", "disabled", "auto")
 LOG_LEVELS = ("debug", "info", "warning", "error", "critical")
+# Kinds of Discord notifications an admin can switch on and off
+NOTIFY_EVENTS = ("game_online", "game_crashed", "player_goal", "generation", "signup", "apworld_pending", "ap_update")
+_URL = re.compile(r"^https?://[^\s/?#]+[^\s]*$")
 
 # Per-game options handed to MultiServer.py. auto_shutdown is stored in minutes (the server takes seconds).
 DEFAULT_SERVER_OPTIONS: dict[str, Any] = {
@@ -34,6 +38,9 @@ DEFAULTS: dict[str, Any] = {
     "users_can_upload_apworlds": True,
     "auto_restart_crashed": True,
     "default_server_options": DEFAULT_SERVER_OPTIONS,
+    "discord_webhook_url": "",
+    "notify_link_url": "",  # address of this web UI, for links in notifications
+    "notify_events": list(NOTIFY_EVENTS),
 }
 
 _BOOL_KEYS = {"allow_registration", "users_can_start_rooms", "users_can_generate", "users_can_upload_apworlds",
@@ -78,6 +85,10 @@ def clean_server_options(options: dict[str, Any] | None, *, base: dict[str, Any]
     return result
 
 
+def valid_url(value: str) -> bool:
+    return len(value) <= 512 and bool(_URL.match(value))
+
+
 def get_settings() -> dict[str, Any]:
     stored = {row["key"]: db.jloads(row["value"]) for row in db.query("SELECT key, value FROM settings")}
     result = dict(DEFAULTS)
@@ -106,9 +117,29 @@ def update_settings(patch: dict[str, Any]) -> dict[str, Any]:
             value = value.strip()
         elif key == "default_server_options":
             value = clean_server_options(value, base=get_settings()["default_server_options"])
+        elif key in ("discord_webhook_url", "notify_link_url"):
+            value = value.strip() if isinstance(value, str) else value
+            if not isinstance(value, str) or (value and not valid_url(value)):
+                raise SettingsError(f"{key} must be an http:// or https:// address")
+        elif key == "notify_events":
+            if not isinstance(value, list) or any(v not in NOTIFY_EVENTS for v in value):
+                raise SettingsError(f"notify_events may only contain: {', '.join(NOTIFY_EVENTS)}")
+            value = [e for e in NOTIFY_EVENTS if e in value]
         clean[key] = value
     with db.connection() as conn:
         for key, value in clean.items():
             conn.execute("INSERT INTO settings(key, value) VALUES (?, ?) "
                          "ON CONFLICT(key) DO UPDATE SET value = excluded.value", (key, db.jdumps(value)))
     return get_settings()
+
+
+# Values the manager remembers for itself (such as which update it already announced). They share the settings table
+# but are not settings: the API neither shows nor accepts them.
+def get_state(key: str, default: Any = None) -> Any:
+    row = db.query_one("SELECT value FROM settings WHERE key = ?", (f"state:{key}",))
+    return db.jloads(row["value"], default) if row else default
+
+
+def set_state(key: str, value: Any) -> None:
+    db.execute("INSERT INTO settings(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+               (f"state:{key}", db.jdumps(value)))

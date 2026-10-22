@@ -16,9 +16,9 @@ from typing import Any
 
 import yaml
 
-from . import apbridge, configstore, db, gamestore, yamlinfo
+from . import apbridge, configstore, db, gamestore, notify, yamlinfo
 from .config import CONFIG
-from .rooms import ROOMS, RoomError
+from .rooms import ROOMS, RoomError, player_list
 
 log = logging.getLogger(__name__)
 
@@ -35,7 +35,9 @@ class JobRequestError(Exception):
 
 @dataclass
 class PreparedPlayer:
-    config: sqlite3.Row
+    config_id: int | None
+    user_id: int | None
+    label: str  # the config's name, for messages
     filename: str
     data: bytes
     info: yamlinfo.YamlInfo
@@ -64,36 +66,46 @@ def prepare_players(config_ids: list[int], user: sqlite3.Row, *, is_admin: bool)
             data = configstore.config_path(row["user_id"], row["id"]).read_bytes()
         except FileNotFoundError:
             raise JobRequestError(f"The file for '{row['name']}' is missing from disk", 410) from None
-        stem = yamlinfo.safe_filename(Path(row["name"]).stem, "player")
-        filename, counter = f"{stem}.yaml", 2
-        while filename.lower() in used_filenames or filename.lower() in ("meta.yaml", "weights.yaml"):
-            filename = f"{stem}-{counter}.yaml"
-            counter += 1
-        used_filenames.add(filename.lower())
-        try:
-            info = yamlinfo.analyze(yamlinfo.decode_text(data), fallback_name=Path(filename).stem)
-        except yamlinfo.YamlError as e:
-            raise JobRequestError(f"'{row['name']}' is not valid: {e}") from None
-        if info.problems:
-            raise JobRequestError(f"'{row['name']}' cannot be generated: {info.problems[0]}")
-        players.append(PreparedPlayer(row, filename, data, info))
+        players.append(prepare_player(row["id"], row["user_id"], row["name"], data, used_filenames))
+    check_players(players)
+    return players
 
+
+def prepare_player(config_id: int | None, user_id: int | None, label: str, data: bytes,
+                   used_filenames: set[str]) -> PreparedPlayer:
+    """Checks one player file on its own. `used_filenames` collects the file names given out so far."""
+    stem = yamlinfo.safe_filename(Path(label).stem, "player")
+    filename, counter = f"{stem}.yaml", 2
+    while filename.lower() in used_filenames or filename.lower() in ("meta.yaml", "weights.yaml"):
+        filename = f"{stem}-{counter}.yaml"
+        counter += 1
+    used_filenames.add(filename.lower())
+    try:
+        info = yamlinfo.analyze(yamlinfo.decode_text(data), fallback_name=Path(filename).stem)
+    except yamlinfo.YamlError as e:
+        raise JobRequestError(f"'{label}' is not valid: {e}") from None
+    if info.problems:
+        raise JobRequestError(f"'{label}' cannot be generated: {info.problems[0]}")
+    return PreparedPlayer(config_id, user_id, label, filename, data, info)
+
+
+def check_players(players: list[PreparedPlayer]) -> None:
+    """Checks the players together: unique names, and every game installed."""
     names: dict[str, str] = {}
     for p in players:
         for name in p.info.player_names:
             if name.casefold() == "archipelago":
-                raise JobRequestError(f"'{p.config['name']}': a player cannot be named Archipelago")
+                raise JobRequestError(f"'{p.label}': a player cannot be named Archipelago")
             if name.casefold() in names:
                 raise JobRequestError(f"Two players are named '{name}' ('{names[name.casefold()]}' and "
-                                      f"'{p.config['name']}'). Player names must be unique.")
-            names[name.casefold()] = p.config["name"]
+                                      f"'{p.label}'). Player names must be unique.")
+            names[name.casefold()] = p.label
 
     if apbridge.STATE.info is None:
         raise JobRequestError(f"Archipelago is unavailable: {apbridge.STATE.error or 'not loaded yet'}", 503)
     missing = apbridge.missing_games({g for p in players for g in p.info.games})
     if missing:
         raise JobRequestError("These games are not installed: " + ", ".join(missing), 409, missing)
-    return players
 
 
 def clean_meta(meta: str | None) -> str | None:
@@ -134,7 +146,7 @@ def create_job(user: sqlite3.Row, players: list[PreparedPlayer], *, name: str | 
             for p in players:
                 conn.execute("INSERT INTO job_players(job_id, config_id, user_id, filename, player_names, games) "
                              "VALUES (?,?,?,?,?,?)",
-                             (job_id, p.config["id"], p.config["user_id"], p.filename,
+                             (job_id, p.config_id, p.user_id, p.filename,
                               db.jdumps(p.info.player_names), db.jdumps(p.info.games)))
     except BaseException:
         db.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
@@ -165,12 +177,14 @@ class GenerationManager:
     def __init__(self) -> None:
         self.queue: asyncio.Queue[int] = asyncio.Queue()
         self.worker: asyncio.Task | None = None
+        self.loop: asyncio.AbstractEventLoop | None = None
         self.current: tuple[int, asyncio.subprocess.Process] | None = None
         self.cancelled: set[int] = set()
         self.logs: dict[int, collections.deque] = {}
         self.seq: dict[int, int] = collections.defaultdict(int)
 
     async def start(self) -> None:
+        self.loop = asyncio.get_running_loop()
         db.execute("UPDATE jobs SET status = 'failed', finished_at = ?, "
                    "error = 'The manager was restarted while this job was running' WHERE status = 'running'",
                    (time.time(),))
@@ -188,7 +202,9 @@ class GenerationManager:
             self._kill_group(self.current[1], signal.SIGKILL)
 
     def enqueue(self, job_id: int) -> None:
-        self.queue.put_nowait(job_id)
+        """Safe to call from the worker threads that run the API's plain (non-async) routes."""
+        assert self.loop is not None
+        self.loop.call_soon_threadsafe(self.queue.put_nowait, job_id)
 
     def queue_position(self, job_id: int) -> int | None:
         waiting = [r["id"] for r in db.query("SELECT id FROM jobs WHERE status = 'queued' ORDER BY id")]
@@ -246,6 +262,10 @@ class GenerationManager:
     def _finish(self, job_id: int, status: str, error: str | None = None, game_id: int | None = None) -> None:
         db.execute("UPDATE jobs SET status = ?, finished_at = ?, error = ?, game_id = ? WHERE id = ?",
                    (status, time.time(), error, game_id, job_id))
+        if status == "failed":
+            name, origin = _describe_job(job_id)
+            notify.emit("generation", f"Generation failed: {name}", f"{origin}\n```\n{error}\n```",
+                        url=notify.link(f"/jobs/{job_id}"), color="error")
 
     @staticmethod
     def _kill_group(proc: asyncio.subprocess.Process, sig: int) -> None:
@@ -340,12 +360,27 @@ class GenerationManager:
         self._log(job_id, f"Imported as game #{game_id}")
         self._finish(job_id, "succeeded", None, game_id)
 
+        started = False
         if job["host_after"]:
             try:
                 await ROOMS.start(game_id)
                 self._log(job_id, "Server started")
+                started = True
             except RoomError as e:
                 self._log(job_id, f"Could not start the server: {e}")
+
+        game = db.query_one("SELECT name, port, password FROM games WHERE id = ?", (game_id,))
+        name, origin = _describe_job(job_id)
+        fields = []
+        if started:
+            address = notify.game_address(game["port"])
+            fields.append(("Server", f"`{address}`" if address else f"Port {game['port']}", True))
+            if game["password"]:
+                fields.append(("Password", "Shown on the game page", True))
+        fields.append(("Players", player_list(game_id)))
+        notify.emit("generation", f"New game ready: {game['name'] or name}",
+                    origin + ("" if started else "\nAn administrator or player can start it from the game page."),
+                    url=notify.link(f"/games/{game_id}"), fields=fields, color="success")
 
     async def cancel(self, job_id: int) -> bool:
         row = db.query_one("SELECT status FROM jobs WHERE id = ?", (job_id,))
@@ -364,6 +399,17 @@ class GenerationManager:
                 self._kill_group(proc, signal.SIGKILL)
             return True
         return False
+
+
+def _describe_job(job_id: int) -> tuple[str, str]:
+    """The name of a job and where it came from, for notifications."""
+    job = db.query_one("SELECT j.name, u.username FROM jobs j LEFT JOIN users u ON u.id = j.created_by WHERE j.id = ?",
+                       (job_id,))
+    signup = db.query_one("SELECT name FROM signups WHERE job_id = ?", (job_id,))
+    name = (job["name"] if job else None) or f"Job #{job_id}"
+    if signup:
+        return name, f"From the sign-up round **{notify.md(signup['name'])}**."
+    return name, f"Generated by {notify.md(job['username'])}." if job and job["username"] else "Generated."
 
 
 GENERATION = GenerationManager()
