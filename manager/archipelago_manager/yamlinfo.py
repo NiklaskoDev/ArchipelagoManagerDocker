@@ -16,8 +16,11 @@ class YamlError(ValueError):
     pass
 
 
-class _UniqueKeyLoader(yaml.SafeLoader):
-    """Same duplicate-key check as Utils.UniqueKeyLoader, which Archipelago applies to every player file."""
+class UniqueKeyLoader(getattr(yaml, "CSafeLoader", yaml.SafeLoader)):
+    """Same duplicate-key check as Utils.UniqueKeyLoader, which Archipelago applies to every player file.
+
+    Parsed by libyaml where available: the pure-Python parser needs seconds for a large file.
+    """
 
     def construct_mapping(self, node, deep=False):
         seen: set[Any] = set()
@@ -91,7 +94,7 @@ def analyze(text: str, fallback_name: str) -> YamlInfo:
     """Parses `text`. `fallback_name` stands in for the file name stem, which is what AP uses if a yaml has no name."""
     text = text.lstrip("﻿")
     try:
-        documents = list(yaml.load_all(text, Loader=_UniqueKeyLoader))
+        documents = list(yaml.load_all(text, Loader=UniqueKeyLoader))
     except yaml.MarkedYAMLError as e:
         mark = e.problem_mark
         where = f" (line {mark.line + 1}, column {mark.column + 1})" if mark else ""

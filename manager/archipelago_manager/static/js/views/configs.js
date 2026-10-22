@@ -1,6 +1,7 @@
 import { h, clear, icon, toast, action, confirmDialog, fmtAgo, fmtBytes } from "../util.js";
 import { api, get, del, isAdmin } from "../api.js";
 import { pageHeader, empty, chips, badge, missingGamesPanel, missingRomsPanel, promptMissingGames, checkbox } from "../components.js";
+import { t, tServer, plural } from "../i18n.js";
 
 export default async function render({ root, cleanup, isCurrent }) {
   const admin = isAdmin();
@@ -19,30 +20,31 @@ export default async function render({ root, cleanup, isCurrent }) {
     clear(listHost);
     if (!configs.length) {
       listHost.append(dropArea(
-        h("h3", {}, "No configs yet"),
-        h("p", { class: "muted" }, "A config (YAML file) tells the randomizer which game you play and how it should be set up. Drop files here, or:"),
+        h("h3", {}, t("No configs yet")),
+        h("p", { class: "muted" }, t("A config (YAML file) tells the randomizer which game you play and how it should be set up. Drop files here, or:")),
         h("div", { class: "row center" },
-          h("button", { class: "btn primary", type: "button", onclick: pickFiles }, icon("upload", 14), "Upload YAML files"),
-          h("a", { class: "btn", href: "#/configs/new" }, icon("file", 14), "Create from template"))));
+          h("button", { class: "btn primary", type: "button", onclick: pickFiles }, icon("upload", 14), t("Upload YAML files")),
+          h("a", { class: "btn", href: "#/configs/new" }, icon("file", 14), t("Create from template")))));
       return;
     }
     listHost.append(dropArea(null), h("div", { class: "card flush table-wrap", style: { marginTop: "14px" } }, h("table", { class: "table" },
-      h("thead", {}, h("tr", {}, [showAll ? "Owner" : null, "File", "Player name", "Games", "Updated", ""].filter((t) => t !== null).map((t) => h("th", {}, t)))),
+      h("thead", {}, h("tr", {}, [showAll ? t("Owner") : null, t("File"), t("Player name"), t("Games"), t("Updated"), ""]
+        .filter((text) => text !== null).map((text) => h("th", {}, text)))),
       h("tbody", {}, configs.map((c) => h("tr", {},
         showAll ? h("td", {}, c.owner) : null,
         h("td", {}, h("a", { href: `#/configs/${c.id}`, class: "slot-name" }, c.name),
-          c.source_game_id ? [" ", h("a", { href: `#/games/${c.source_game_id}` }, badge("from a game", "accent"))] : null,
+          c.source_game_id ? [" ", h("a", { href: `#/games/${c.source_game_id}` }, badge(t("from a game"), "accent"))] : null,
           h("div", { class: "muted small" }, fmtBytes(c.size))),
-        h("td", {}, c.player_names.length ? c.player_names.join(", ") : h("span", { class: "muted" }, "from file name")),
+        h("td", {}, c.player_names.length ? c.player_names.join(", ") : h("span", { class: "muted" }, t("from file name"))),
         h("td", {}, chips(c.games, c.missing_games)),
         h("td", { class: "muted" }, fmtAgo(c.updated_at)),
         h("td", { class: "actions" }, h("div", { class: "row", style: { justifyContent: "flex-end" } },
-          h("a", { class: "btn sm", href: `#/configs/${c.id}` }, icon("edit", 14), "Edit"),
-          h("a", { class: "btn sm ghost icon-only", href: `/api/configs/${c.id}/download`, "aria-label": "Download", title: "Download" }, icon("download", 14)),
-          h("button", { class: "btn sm ghost icon-only", type: "button", "aria-label": "Delete", title: "Delete", onclick: action(async () => {
-            if (!(await confirmDialog(`Delete ${c.name}?`, { danger: true, confirmText: "Delete" }))) return;
+          h("a", { class: "btn sm", href: `#/configs/${c.id}` }, icon("edit", 14), t("Edit")),
+          h("a", { class: "btn sm ghost icon-only", href: `/api/configs/${c.id}/download`, "aria-label": t("Download"), title: t("Download") }, icon("download", 14)),
+          h("button", { class: "btn sm ghost icon-only", type: "button", "aria-label": t("Delete"), title: t("Delete"), onclick: action(async () => {
+            if (!(await confirmDialog(t("Delete {name}?", { name: c.name }), { danger: true, confirmText: t("Delete") }))) return;
             await del(`/api/configs/${c.id}`);
-            toast("Config deleted", "success");
+            toast(t("Config deleted"), "success");
             await load();
           }) }, icon("trash", 14))))))))));
   }
@@ -56,8 +58,8 @@ export default async function render({ root, cleanup, isCurrent }) {
     for (const f of files) form.append("files", f);
     try {
       const result = await api("POST", "/api/configs", form);
-      if (result.created.length) toast(`Added ${result.created.length} config${result.created.length > 1 ? "s" : ""}`, "success");
-      for (const e of result.errors) toast(`${e.filename}: ${e.error}`, "error");
+      if (result.created.length) toast(plural(result.created.length, "Added {n} config", "Added {n} configs"), "success");
+      for (const e of result.errors) toast(`${e.filename}: ${tServer(e.error)}`, "error");
       const games = [...new Set(result.created.flatMap((c) => c.missing_games))];
       promptMissingGames(games.map((game) => ({
         game, configs: result.created.filter((c) => c.missing_games.includes(game)).map((c) => ({ id: c.id, name: c.name })),
@@ -70,7 +72,7 @@ export default async function render({ root, cleanup, isCurrent }) {
   fileInput.onchange = () => { upload([...fileInput.files]); fileInput.value = ""; };
 
   function dropArea(...content) {
-    const zone = h("div", { class: "dropzone" }, content.filter(Boolean).length ? content : "Drop YAML files here to add them");
+    const zone = h("div", { class: "dropzone" }, content.filter(Boolean).length ? content : t("Drop YAML files here to add them"));
     zone.ondragover = (e) => { e.preventDefault(); zone.classList.add("over"); };
     zone.ondragleave = () => zone.classList.remove("over");
     zone.ondrop = (e) => { e.preventDefault(); zone.classList.remove("over"); upload([...e.dataTransfer.files]); };
@@ -78,14 +80,14 @@ export default async function render({ root, cleanup, isCurrent }) {
     return zone;
   }
 
-  const allToggle = admin ? checkbox("Show everyone's configs", false) : null;
+  const allToggle = admin ? checkbox(t("Show everyone's configs"), false) : null;
   if (allToggle) allToggle.input.onchange = () => { showAll = allToggle.input.checked; load(); };
 
   root.append(
-    pageHeader(admin ? "Player configs" : "My configs", "YAML files that describe how each player's game is randomized.",
+    pageHeader(admin ? t("Player configs") : t("My configs"), t("YAML files that describe how each player's game is randomized."),
       allToggle,
-      h("button", { class: "btn", type: "button", onclick: pickFiles }, icon("upload", 14), "Upload YAML"),
-      h("a", { class: "btn primary", href: "#/configs/new" }, icon("plus", 14), "New from template")),
+      h("button", { class: "btn", type: "button", onclick: pickFiles }, icon("upload", 14), t("Upload YAML")),
+      h("a", { class: "btn primary", href: "#/configs/new" }, icon("plus", 14), t("New from template"))),
     fileInput, missingHost, listHost);
   await load();
 }

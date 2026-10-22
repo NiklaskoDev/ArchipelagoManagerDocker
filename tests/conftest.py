@@ -193,10 +193,10 @@ def discord(admin):
     """A fake Discord webhook set up on the shared server for one test, with links to a made-up address."""
     from helpers import FakeWebhook
     hook = FakeWebhook()
-    r = admin.patch("/api/settings", json={"discord_webhook_url": hook.url, "notify_link_url": "http://manager.test:8080"})
+    r = admin.patch("/api/settings", json={"discord_webhook_url": hook.url, "site_url": "http://manager.test:8080"})
     assert r.status_code == 200, r.text
     yield hook
-    admin.patch("/api/settings", json={"discord_webhook_url": "", "notify_link_url": "",
+    admin.patch("/api/settings", json={"discord_webhook_url": "", "site_url": "",
                                        "notify_events": r.json()["notify_events"]})
     # Let messages still on their way reach this hook, so they do not hold up the next test's
     from helpers import wait_for

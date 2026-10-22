@@ -2,6 +2,7 @@ import { h, clear, icon, fmtBytes } from "../util.js";
 import { get, state, isAdmin } from "../api.js";
 import { pageHeader, missingGamesPanel, gameCard, empty, updateBanner } from "../components.js";
 import { signupCard } from "./signups.js";
+import { t } from "../i18n.js";
 
 export default async function render({ root, cleanup, isCurrent }) {
   const admin = isAdmin();
@@ -15,8 +16,8 @@ export default async function render({ root, cleanup, isCurrent }) {
     const open = list.filter((s) => s.status === "open");
     clear(signupsHost);
     if (open.length) {
-      signupsHost.append(h("div", { class: "section" }, h("div", { class: "section-head" }, h("h2", {}, "Open sign-ups"),
-        h("a", { href: "#/signups" }, "See all")), h("div", { class: "grid" }, open.map(signupCard))));
+      signupsHost.append(h("div", { class: "section" }, h("div", { class: "section-head" }, h("h2", {}, t("Open sign-up rounds")),
+        h("a", { href: "#/signups" }, t("See all"))), h("div", { class: "grid" }, open.map(signupCard))));
     }
   };
   const missingHost = h("div");
@@ -27,20 +28,20 @@ export default async function render({ root, cleanup, isCurrent }) {
     const onUpdate = () => load();
     clear(gridHost);
     if (!list.length) {
-      gridHost.append(empty("No games yet",
-        admin ? "Upload a pregenerated multiworld or generate a new one." : "When an administrator adds you to a game, it shows up here.",
-        admin ? h("a", { class: "btn primary", href: "#/games" }, icon("upload", 14), "Add a game") : null,
-        admin ? h("a", { class: "btn", href: "#/generate" }, icon("zap", 14), "Generate") : null));
+      gridHost.append(empty(t("No games yet"),
+        admin ? t("Upload a pregenerated multiworld or generate a new one.") : t("When an administrator adds you to a game, it shows up here."),
+        admin ? h("a", { class: "btn primary", href: "#/games" }, icon("upload", 14), t("Add a game")) : null,
+        admin ? h("a", { class: "btn", href: "#/generate" }, icon("zap", 14), t("Generate")) : null));
       return;
     }
     if (mine.length) {
-      gridHost.append(h("div", { class: "section" }, h("div", { class: "section-head" }, h("h2", {}, "Your games")),
+      gridHost.append(h("div", { class: "section" }, h("div", { class: "section-head" }, h("h2", {}, t("Your games"))),
         h("div", { class: "grid" }, mine.map((g) => gameCard(g, onUpdate)))));
     }
     if (others.length) {
       gridHost.append(h("div", { class: "section" },
-        h("div", { class: "section-head" }, h("h2", {}, mine.length ? "Other games" : "Games"),
-          h("a", { href: "#/games" }, "See all")),
+        h("div", { class: "section-head" }, h("h2", {}, mine.length ? t("Other games") : t("Games")),
+          h("a", { href: "#/games" }, t("See all"))),
         h("div", { class: "grid" }, others.slice(0, 6).map((g) => gameCard(g, onUpdate)))));
     }
   };
@@ -53,14 +54,14 @@ export default async function render({ root, cleanup, isCurrent }) {
   }
 
   root.append(
-    pageHeader(`Welcome, ${state.user.username}`, admin ? "Overview of this server." : "Your games and player configs."),
+    pageHeader(t("Welcome, {name}", { name: state.user.username }), admin ? t("Overview of this server.") : t("Your games and player configs.")),
     system?.update?.update_available ? h("div", { class: "page-banner" }, updateBanner(system.update)) : null,
     missingHost,
     system ? h("div", { class: "grid tiles" },
-      tile(`${system.running_games} / ${system.games}`, "Games running"),
-      tile(system.users, "Users"),
-      tile(system.ap_version ? `${system.ap_version}` : "unavailable", `Archipelago · ${system.world_count} games`),
-      tile(fmtBytes(system.disk.free), "Disk free")) : null,
+      tile(`${system.running_games} / ${system.games}`, t("Games running")),
+      tile(system.users, t("Users")),
+      tile(system.ap_version ? `${system.ap_version}` : t("unavailable"), t("Archipelago · {n} games", { n: system.world_count })),
+      tile(fmtBytes(system.disk.free), t("Disk free"))) : null,
     signupsHost,
     gridHost);
   drawMissing(missing);
@@ -69,11 +70,11 @@ export default async function render({ root, cleanup, isCurrent }) {
 
   if (!configs.length) {
     root.append(h("div", { class: "section" }, h("div", { class: "card stack" },
-      h("h2", {}, "Get started"),
-      h("p", {}, "Players need a YAML file that describes how their game should be randomized. Upload yours or start from a template."),
+      h("h2", {}, t("Get started")),
+      h("p", {}, t("Players need a YAML file that describes how their game should be randomized. Upload yours or start from a template.")),
       h("div", { class: "row" },
-        h("a", { class: "btn primary", href: "#/configs" }, icon("upload", 14), "Upload a YAML"),
-        h("a", { class: "btn", href: "#/configs/new" }, icon("file", 14), "Create from template")))));
+        h("a", { class: "btn primary", href: "#/configs" }, icon("upload", 14), t("Upload a YAML")),
+        h("a", { class: "btn", href: "#/configs/new" }, icon("file", 14), t("Create from template"))))));
   }
 
   const timer = setInterval(() => { if (!document.hidden) load().catch(() => {}); }, 6000);

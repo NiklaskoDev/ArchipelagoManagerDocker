@@ -52,6 +52,9 @@ class Config:
     releases_url: str
     # GitHub's API, for custom games that come from a repository's releases (replaced by a fake in tests)
     github_api: str
+    # Discord's OAuth2 endpoints, for signing in with Discord (replaced by a fake in tests)
+    discord_api: str
+    discord_authorize: str
 
     # --- derived paths -------------------------------------------------------------------------------------------
     @property
@@ -109,6 +112,8 @@ def load_config() -> Config:
         releases_url=os.environ.get("AP_RELEASES_URL",
                                     "https://api.github.com/repos/ArchipelagoMW/Archipelago/releases/latest"),
         github_api=os.environ.get("GITHUB_API_URL", "https://api.github.com").rstrip("/"),
+        discord_api=os.environ.get("DISCORD_API_URL", "https://discord.com/api/v10").rstrip("/"),
+        discord_authorize=os.environ.get("DISCORD_AUTHORIZE_URL", "https://discord.com/oauth2/authorize"),
     )
 
 

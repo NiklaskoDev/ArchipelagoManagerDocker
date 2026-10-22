@@ -1,4 +1,5 @@
 // Small DOM helpers. Everything user-supplied goes through text nodes, never innerHTML.
+import { t, plural, locale } from "./i18n.js";
 
 export function h(tag, props, ...children) {
   const el = document.createElement(tag);
@@ -35,6 +36,13 @@ export function clear(el) {
   return el;
 }
 
+// A translated sentence with elements in it, such as a game name in <strong>: withNodes(text, { game: h("strong", {}, name) })
+// puts the element where the text has {game}. Translate the text without values, so its placeholders are still there.
+export function withNodes(text, nodes) {
+  return text.split(/\{(\w+)\}/).map((piece, i) => (i % 2 ? (piece in nodes ? nodes[piece] : `{${piece}}`) : piece))
+    .filter((piece) => piece !== "");
+}
+
 // ---------------------------------------------------------------------------------------------------------------------
 // icons (Feather-style, 24x24 stroke icons)
 // ---------------------------------------------------------------------------------------------------------------------
@@ -66,6 +74,8 @@ const ICONS = {
   external: '<path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>',
   calendar: '<rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>',
   bell: '<path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>',
+  login: '<path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/>',
+  link: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
 };
 
 export function icon(name, size = 16) {
@@ -92,7 +102,8 @@ export function fmtBytes(n) {
   const units = ["B", "KB", "MB", "GB", "TB"];
   let i = 0;
   while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
-  return `${n >= 10 || i === 0 ? Math.round(n) : n.toFixed(1)} ${units[i]}`;
+  const digits = n >= 10 || i === 0 ? 0 : 1;
+  return `${n.toLocaleString(locale, { minimumFractionDigits: digits, maximumFractionDigits: digits })} ${units[i]}`;
 }
 
 // Shortens a long file name in the middle so the extension, which says what opens the file, stays visible.
@@ -104,26 +115,27 @@ export function shortName(name, max = 34) {
 }
 
 export function fmtDate(ts) {
-  return ts ? new Date(ts * 1000).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) : "—";
+  return ts ? new Date(ts * 1000).toLocaleString(locale, { dateStyle: "medium", timeStyle: "short" }) : "—";
 }
 
+// "3 min ago". The singular of the days has its own text: German says "vor 1 Tag" but "vor 4 Tagen".
 export function fmtAgo(ts) {
-  if (!ts) return "never";
+  if (!ts) return t("never");
   const s = Math.max(0, Date.now() / 1000 - ts);
-  if (s < 60) return "just now";
-  if (s < 3600) return `${Math.floor(s / 60)} min ago`;
-  if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
-  return `${Math.floor(s / 86400)} d ago`;
+  if (s < 60) return t("just now");
+  if (s < 3600) return t("{n} min ago", { n: Math.floor(s / 60) });
+  if (s < 86400) return t("{n} h ago", { n: Math.floor(s / 3600) });
+  return plural(Math.floor(s / 86400), "1 d ago", "{n} d ago");
 }
 
 // "in 2 d 4 h", for deadlines
 export function fmtUntil(ts) {
   const s = ts - Date.now() / 1000;
-  if (s <= 0) return "passed";
-  if (s < 3600) return `in ${Math.max(1, Math.round(s / 60))} min`;
-  if (s < 86400) return `in ${Math.round(s / 3600)} h`;
+  if (s <= 0) return t("passed");
+  if (s < 3600) return t("in {n} min", { n: Math.max(1, Math.round(s / 60)) });
+  if (s < 86400) return t("in {n} h", { n: Math.round(s / 3600) });
   const days = Math.floor(s / 86400), hours = Math.round((s % 86400) / 3600);
-  return days < 3 && hours ? `in ${days} d ${hours} h` : `in ${days} d`;
+  return days < 3 && hours ? plural(days, "in 1 d {hours} h", "in {n} d {hours} h", { hours }) : plural(days, "in 1 d", "in {n} d");
 }
 
 // <input type="datetime-local"> works in local time without a zone; these convert to and from Unix seconds.
@@ -143,7 +155,7 @@ export function fromLocalInput(value) {
 export function fmtDuration(seconds) {
   seconds = Math.max(0, Math.round(seconds));
   const m = Math.floor(seconds / 60), s = seconds % 60;
-  return m ? `${m}m ${String(s).padStart(2, "0")}s` : `${s}s`;
+  return m ? t("{m}m {s}s", { m, s: String(s).padStart(2, "0") }) : t("{s}s", { s });
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -172,7 +184,7 @@ export function openModal({ title, body, actions = [], wide = false, onClose }) 
   const onKey = (e) => { if (e.key === "Escape") close(); };
   const dialog = h("div", { class: `modal ${wide ? "wide" : ""}`, role: "dialog", "aria-modal": "true", "aria-label": title },
     h("div", { class: "modal-head" }, h("h2", {}, title),
-      h("button", { class: "btn ghost icon-only", type: "button", "aria-label": "Close", onclick: close }, icon("x"))),
+      h("button", { class: "btn ghost icon-only", type: "button", "aria-label": t("Close"), onclick: close }, icon("x"))),
     h("div", { class: "modal-body" }, body),
     actions.length ? h("div", { class: "modal-actions" }, actions) : null);
   const overlay = h("div", { class: "overlay", onmousedown: (e) => { if (e.target === overlay) close(); } }, dialog);
@@ -182,21 +194,21 @@ export function openModal({ title, body, actions = [], wide = false, onClose }) 
   return { close, dialog };
 }
 
-export function confirmDialog(message, { title = "Are you sure?", confirmText = "Confirm", danger = false } = {}) {
+export function confirmDialog(message, { title = t("Are you sure?"), confirmText = t("Confirm"), danger = false } = {}) {
   return new Promise((resolve) => {
     let settled = false;
     const finish = (value) => { if (!settled) { settled = true; resolve(value); } modal.close(); };
     const modal = openModal({
       title, body: h("p", {}, message), onClose: () => { if (!settled) { settled = true; resolve(false); } },
       actions: [
-        h("button", { class: "btn", type: "button", onclick: () => finish(false) }, "Cancel"),
+        h("button", { class: "btn", type: "button", onclick: () => finish(false) }, t("Cancel")),
         h("button", { class: `btn ${danger ? "danger" : "primary"}`, type: "button", onclick: () => finish(true) }, confirmText),
       ],
     });
   });
 }
 
-export async function copyText(text, label = "Copied") {
+export async function copyText(text, label = t("Copied")) {
   try {
     if (navigator.clipboard && window.isSecureContext) {
       await navigator.clipboard.writeText(text);
@@ -211,7 +223,7 @@ export async function copyText(text, label = "Copied") {
     }
     toast(label, "success", 1800);
   } catch {
-    toast("Could not copy. Select the text and press Ctrl+C.", "error");
+    toast(t("Could not copy. Select the text and press Ctrl+C."), "error");
   }
 }
 

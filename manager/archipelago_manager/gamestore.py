@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import re
 import shutil
@@ -168,18 +169,34 @@ async def import_game(src: Path, original_name: str, *, name: str | None = None,
     return game_id
 
 
+def _guess_owner(slot: sqlite3.Row, configs: list[sqlite3.Row], yaml_hashes: set[str]) -> int | None:
+    """The one user whose config has this slot's name and game. Anyone can name a config after someone else, so if the
+    game came with its yaml files, a user whose config is one of them byte for byte wins over the others."""
+    users, proven = set(), set()
+    for row in configs:
+        if (slot["name"].casefold() in {n.casefold() for n in db.jloads(row["player_names"], [])}
+                and slot["game"] in db.jloads(row["games"], [])):
+            users.add(row["user_id"])
+            if row["sha256"] in yaml_hashes:
+                proven.add(row["user_id"])
+    users = proven or users
+    return next(iter(users)) if len(users) == 1 else None
+
+
 def link_slots(game_id: int, owners: dict[str, int] | None = None) -> int:
-    """Assigns slots to users by slot name. Returns how many slots were linked."""
+    """Assigns slots to users: by `owners` (slot name -> user id) when known, else by the users' configs."""
+    configs, yaml_hashes = [], set()
     if owners is None:
-        candidates: dict[str, set[int]] = {}
-        for row in db.query("SELECT user_id, player_names FROM configs"):
-            for name in db.jloads(row["player_names"], []):
-                candidates.setdefault(name.casefold(), set()).add(row["user_id"])
-        owners = {name: next(iter(users)) for name, users in candidates.items() if len(users) == 1}
+        configs = db.query("SELECT user_id, player_names, games, sha256 FROM configs")
+        for f in db.query("SELECT filename FROM game_files WHERE game_id = ? AND kind = 'yaml'", (game_id,)):
+            try:
+                yaml_hashes.add(hashlib.sha256((gamepaths.files_dir(game_id) / f["filename"]).read_bytes()).hexdigest())
+            except OSError:
+                pass
     linked = 0
-    for slot in db.query("SELECT slot, name FROM game_slots WHERE game_id = ? AND type = 1 AND user_id IS NULL",
+    for slot in db.query("SELECT slot, name, game FROM game_slots WHERE game_id = ? AND type = 1 AND user_id IS NULL",
                          (game_id,)):
-        user_id = owners.get(slot["name"].casefold())
+        user_id = owners.get(slot["name"].casefold()) if owners is not None else _guess_owner(slot, configs, yaml_hashes)
         if user_id is not None:
             db.execute("UPDATE game_slots SET user_id = ? WHERE game_id = ? AND slot = ?",
                        (user_id, game_id, slot["slot"]))

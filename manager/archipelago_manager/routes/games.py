@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import sqlite3
 import tempfile
 import zipfile
@@ -505,7 +506,9 @@ def download_my_files(game_id: int, background: BackgroundTasks,
     rows = [r for r in rows if (gamepaths.files_dir(game_id) / r["filename"]).is_file()]
     if not rows:
         raise HTTPException(404, "You have no files in this game")
-    tmp = Path(tempfile.mkstemp(suffix=".zip", dir=CONFIG.tmp_dir)[1])
+    fd, name = tempfile.mkstemp(suffix=".zip", dir=CONFIG.tmp_dir)
+    os.close(fd)  # ZipFile opens it again by name; an open descriptor would keep the file's space until restart
+    tmp = Path(name)
     with zipfile.ZipFile(tmp, "w", zipfile.ZIP_STORED) as zf:
         for r in rows:
             zf.write(gamepaths.files_dir(game_id) / r["filename"], arcname=r["filename"])

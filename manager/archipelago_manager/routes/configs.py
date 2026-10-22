@@ -43,7 +43,14 @@ def _analyze(data: bytes, name: str):
         raise HTTPException(400, str(e)) from None
 
 
+MAX_CONFIGS_PER_USER = 200
+
+
 def _store(user_id: int, name: str, data: bytes) -> sqlite3.Row:
+    count = db.query_one("SELECT COUNT(*) AS n FROM configs WHERE user_id = ?", (user_id,))["n"]
+    if count >= MAX_CONFIGS_PER_USER:
+        raise HTTPException(409, f"You already have {MAX_CONFIGS_PER_USER} configs, the most one person can keep. "
+                                 "Delete some first.")
     try:
         return configstore.store_config(user_id, name, data)
     except yamlinfo.YamlError as e:
@@ -74,11 +81,12 @@ def list_configs(all: bool = False, user: sqlite3.Row = Depends(current_user)) -
     return [config_json(r, owner=r["owner"]) for r in rows]
 
 
+# Not async: reading yaml takes a while for big files and must not hold up everyone else's requests
 @router.post("/configs")
-async def upload_configs(files: list[UploadFile] = File(...), user: sqlite3.Row = Depends(current_user)) -> dict:
+def upload_configs(files: list[UploadFile] = File(...), user: sqlite3.Row = Depends(current_user)) -> dict:
     created, errors = [], []
     for upload in files:
-        data = await upload.read(yamlinfo.MAX_YAML_BYTES + 1)
+        data = upload.file.read(yamlinfo.MAX_YAML_BYTES + 1)
         try:
             created.append(config_json(_store(user["id"], upload.filename or "config.yaml", data)))
         except HTTPException as e:

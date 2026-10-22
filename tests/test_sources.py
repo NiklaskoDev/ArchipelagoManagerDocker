@@ -1,6 +1,8 @@
 """Custom games from GitHub repositories. A local fake stands in for GitHub, so nothing leaves the machine."""
+import hashlib
 import json
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import unquote
 
@@ -47,8 +49,11 @@ class FakeGitHub:
                 if repo["tag"] is None:
                     return self.answer(404, json.dumps({"message": "Not Found"}).encode())
                 base = f"{fake.url}/download/{repo['full_name']}/{repo['tag']}"
-                assets = [{"name": name, "size": len(data), "browser_download_url": repo.get("url_override") or f"{base}/{name}"}
-                          for name, data in repo["assets"].items()]
+                # like GitHub: a file uploaded again gets a new id and time, and the digest is its sha256
+                assets = [{"name": name, "size": len(data), "browser_download_url": repo.get("url_override") or f"{base}/{name}",
+                           "id": repo["stamp"] + i, "updated_at": str(repo["stamp"]),
+                           "digest": repo.get("digest") or f"sha256:{hashlib.sha256(data).hexdigest()}"}
+                          for i, (name, data) in enumerate(repo["assets"].items())]
                 assets.append({"name": "notes.txt", "size": 5, "browser_download_url": f"{base}/notes.txt"})
                 return self.answer(200, json.dumps({
                     "tag_name": repo["tag"], "html_url": f"https://github.com/{repo['full_name']}/releases/tag/{repo['tag']}",
@@ -64,7 +69,7 @@ class FakeGitHub:
     def publish(self, full_name: str, tag: str | None, assets: dict[str, bytes], description: str = "A custom world",
                 **extra) -> None:
         self.repos[full_name.lower()] = {"full_name": full_name, "description": description, "tag": tag,
-                                         "assets": assets, **extra}
+                                         "assets": assets, "stamp": time.time_ns() // 1000, **extra}
 
     def close(self) -> None:
         self.server.shutdown()
@@ -107,7 +112,7 @@ def site(tmp_path_factory, github):
     admin = server.client()
     assert admin.post("/api/auth/setup", json={"username": "boss", "password": "bosspass123"}).status_code == 200
     hook = FakeWebhook()
-    admin.patch("/api/settings", json={"discord_webhook_url": hook.url, "notify_link_url": "http://manager.test"})
+    admin.patch("/api/settings", json={"discord_webhook_url": hook.url, "site_url": "http://manager.test"})
     for name in ("pia", "olaf"):
         admin.post("/api/users", json={"username": name, "password": "password123", "role": "user"})
     yield {"server": server, "admin": admin, "hook": hook, "pia": server.client("pia", "password123"),
@@ -234,3 +239,45 @@ def test_unusable_repositories_and_releases_are_refused(site, github, tmp_path):
         assert olaf.post("/api/apworld-sources", json={"repo": "someone/bundle"}).status_code == 403
     finally:
         admin.patch("/api/settings", json={"users_can_upload_apworlds": True})
+
+
+@pytest.mark.ap
+def test_approving_installs_exactly_the_release_the_admin_saw(site, github, tmp_path):
+    admin, pia = site["admin"], site["pia"]
+    github.publish("someone/swapped-world", "v1", {"swapped.apworld": apworld(tmp_path, "Swapped World", "swappedworld", "1.0")})
+    source = pia.post("/api/apworld-sources", json={"repo": "someone/swapped-world"}).json()
+    # after the admin had a look, the player puts another file into the same release
+    github.publish("someone/swapped-world", "v1", {"swapped.apworld": apworld(tmp_path, "Swapped World", "swappedworld", "6.6.6")})
+    downloads = len(github.downloads)
+    r = admin.post(f"/api/apworld-sources/{source['id']}/approve")
+    assert r.status_code == 409 and "changed" in r.json()["detail"]
+    assert github.downloads[downloads:] == []  # nothing was downloaded, nothing installed
+    listed = next(s for s in admin.get("/api/apworld-sources").json() if s["id"] == source["id"])
+    assert listed["status"] == "pending" and not listed["installed"]
+    # the admin has been told and approves again: now that file is what was seen
+    r = admin.post(f"/api/apworld-sources/{source['id']}/approve")
+    assert r.status_code == 200, r.text
+    assert [a["version"] for a in admin.get("/api/apworlds").json()["items"] if a["game"] == "Swapped World"] == ["6.6.6"]
+
+
+@pytest.mark.ap
+def test_a_download_that_does_not_match_its_digest_is_not_installed(site, github, tmp_path):
+    admin = site["admin"]
+    github.publish("someone/tampered-world", "v1", {"tampered.apworld": apworld(tmp_path, "Tampered", "tamperedworld", "1.0")},
+                   digest="sha256:" + "0" * 64)
+    r = admin.post("/api/apworld-sources", json={"repo": "someone/tampered-world"})
+    assert r.status_code == 502 and "not the one GitHub lists" in r.json()["detail"]
+    assert "Tampered" not in {a["game"] for a in admin.get("/api/apworlds").json()["items"]}
+
+
+@pytest.mark.ap
+def test_players_cannot_queue_up_endless_repositories(site, github, tmp_path):
+    olaf = site["olaf"]
+    data = apworld(tmp_path, "Queued", "queuedworld", "1.0")
+    for i in range(6):
+        github.publish(f"queue/world-{i}", "v1", {"queued.apworld": data})
+    statuses = [olaf.post("/api/apworld-sources", json={"repo": f"queue/world-{i}"}).status_code for i in range(6)]
+    assert statuses == [200] * 5 + [409]
+    for source in olaf.get("/api/apworld-sources").json():
+        if source["repo"].startswith("queue/"):
+            olaf.delete(f"/api/apworld-sources/{source['id']}")

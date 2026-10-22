@@ -1,8 +1,11 @@
 """Discord notifications. A local fake stands in for Discord, so nothing leaves the machine."""
+import ast
 import json
 import os
 import signal
+import string
 import time
+from pathlib import Path
 
 import pytest
 
@@ -43,7 +46,7 @@ def test_notification_settings_are_validated(plain_server):
     assert settings["notify_status"]["last_error"] is None
     for bad in ("ftp://example.test/hook", "javascript:alert(1)", "https://", "not a url", "https://x/" + "a" * 600):
         assert admin.patch("/api/settings", json={"discord_webhook_url": bad}).status_code in (400, 422), bad
-    assert admin.patch("/api/settings", json={"notify_link_url": "tower.local:8080"}).status_code == 400
+    assert admin.patch("/api/settings", json={"site_url": "tower.local:8080"}).status_code == 400
     assert admin.patch("/api/settings", json={"notify_events": ["game_online", "fireworks"]}).status_code == 400
     r = admin.patch("/api/settings", json={"discord_webhook_url": "  https://discord.com/api/webhooks/1/abc  ",
                                            "notify_events": ["signup", "game_online", "signup"]})
@@ -104,6 +107,68 @@ def test_rate_limits_are_waited_out_and_failures_are_reported(plain_server, hook
     new_round(admin, "Silent round")
     time.sleep(2)
     assert len(hook.posts) == 3
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# messages in German
+# ---------------------------------------------------------------------------------------------------------------------
+def tr_texts() -> dict[str, str]:
+    """The English texts the code hands to notify.tr(), and where."""
+    package = Path(__file__).resolve().parents[1] / "manager" / "archipelago_manager"
+    texts = {}
+    for path in sorted(package.rglob("*.py")):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if not (isinstance(node, ast.Call) and node.args
+                    and "tr" in (getattr(node.func, "id", None), getattr(node.func, "attr", None))):
+                continue
+            for part in ast.walk(node.args[0]):  # both texts of tr("..." if one else "...")
+                if isinstance(part, ast.Constant) and isinstance(part.value, str):
+                    texts.setdefault(part.value, f"{path.name}:{node.lineno}")
+    return texts
+
+
+def fields(text: str) -> set[str]:
+    return {name for _literal, name, _spec, _conversion in string.Formatter().parse(text) if name is not None}
+
+
+def test_the_german_texts_fit_the_code():
+    from archipelago_manager.notify_de import MESSAGES
+    wrong = [f"{key!r} -> {value!r}" for key, value in MESSAGES.items() if fields(key) != fields(value)]
+    assert not wrong, "Other placeholders than the English text:\n" + "\n".join(wrong)
+    used = tr_texts()
+    missing = [f"{text!r} ({where})" for text, where in used.items() if text not in MESSAGES]
+    assert not missing, "Not in notify_de.py:\n" + "\n".join(missing)
+    unused = [key for key in MESSAGES if key not in used]
+    assert not unused, "No longer used: " + ", ".join(map(repr, unused))
+
+
+def test_messages_can_be_in_german(plain_server, hook):
+    admin = setup_admin(plain_server)
+    assert admin.get("/api/settings").json()["notify_language"] == "en"
+    assert admin.patch("/api/settings", json={"notify_language": "fr"}).status_code == 400
+    r = admin.patch("/api/settings", json={"notify_language": "de", "discord_webhook_url": hook.url})
+    assert r.status_code == 200 and r.json()["notify_language"] == "de"
+
+    assert admin.post("/api/settings/test-notification", json={}).status_code == 200
+    assert hook.embeds[0]["title"] == "Testnachricht"
+    assert hook.embeds[0]["description"] == \
+        "Benachrichtigungen von diesem Archipelago Manager kommen in diesem Kanal an."
+
+    deadline = int(time.time()) + 3 * 86400
+    signup = new_round(admin, "Freitags*runde", deadline=deadline, allowed_games=["Clique", "A_Game"])
+    opened = hook.wait_for("Anmeldung geöffnet: Freitags*runde", timeout=20)
+    assert opened["description"] == f"Reiche deine YAML bis <t:{deadline}:F> ein (<t:{deadline}:R>)."
+    assert {"name": "Spiele", "value": "A\\_Game, Clique", "inline": False} in opened["fields"]  # still escaped
+    assert {"name": "Configs pro Spieler", "value": "1", "inline": True} in opened["fields"]
+    assert admin.post(f"/api/signups/{signup['id']}/close").status_code == 200
+    closed = hook.wait_for("Anmeldung geschlossen: Freitags*runde", timeout=20)
+    assert closed["description"] == "0 Anmeldungen. Niemand hat sich angemeldet."
+
+    # and back to English
+    assert admin.patch("/api/settings", json={"notify_language": "en"}).json()["notify_language"] == "en"
+    new_round(admin, "Back in English")
+    english = hook.wait_for("Sign-ups open: Back in English", timeout=20)
+    assert english["description"] == "Enter your YAML until an administrator closes the sign-ups."
 
 
 # ---------------------------------------------------------------------------------------------------------------------

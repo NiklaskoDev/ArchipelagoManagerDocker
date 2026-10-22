@@ -1,29 +1,38 @@
 import { h, clear, icon, toast, action, fmtBytes, fmtAgo } from "../util.js";
 import { get, patch, put, post } from "../api.js";
-import { pageHeader, field, checkbox, banner, adminTabs, serverOptionsForm, updateBanner, updateStatus } from "../components.js";
+import { pageHeader, field, checkbox, banner, adminTabs, serverOptionsForm, updateBanner, updateStatus, copyField, select } from "../components.js";
+import { t, tServer, plural } from "../i18n.js";
+
+const CALLBACK_PATH = "/api/auth/discord/callback";
 
 export default async function render({ root, cleanup }) {
   const [settings, system] = await Promise.all([get("/api/settings"), get("/api/system")]);
 
   // general -------------------------------------------------------------------------------------------------------------
-  const publicHost = h("input", { class: "input", value: settings.public_host, placeholder: "e.g. archipelago.example.com or 192.168.1.20" });
+  const publicHost = h("input", { class: "input", value: settings.public_host, placeholder: t("e.g. archipelago.example.com or 192.168.1.20") });
+  const siteUrl = h("input", { class: "input", type: "url", value: settings.site_url, placeholder: location.origin });
+  const useThisPage = h("button", { class: "btn sm", type: "button" }, t("Use this page's address"));
   const toggles = {
-    allow_registration: checkbox("Anyone who can open this page may create an account", settings.allow_registration,
-      "Off means only administrators can add users."),
-    users_can_start_rooms: checkbox("Players can start, stop and restart the games they are in", settings.users_can_start_rooms),
-    users_can_generate: checkbox("Users can generate games from their own configs", settings.users_can_generate),
-    users_can_upload_apworlds: checkbox("Users can submit custom games (an administrator still has to approve them)", settings.users_can_upload_apworlds),
-    auto_restart_crashed: checkbox("Restart game servers that crash", settings.auto_restart_crashed, "Gives up after three crashes in ten minutes."),
+    allow_registration: checkbox(t("Anyone who can open this page may create an account"), settings.allow_registration,
+      t("Off means only administrators can add users.")),
+    users_can_start_rooms: checkbox(t("Players can start, stop and restart the games they are in"), settings.users_can_start_rooms),
+    users_can_generate: checkbox(t("Users can generate games from their own configs"), settings.users_can_generate),
+    users_can_upload_apworlds: checkbox(t("Users can submit custom games (an administrator still has to approve them)"), settings.users_can_upload_apworlds),
+    auto_restart_crashed: checkbox(t("Restart game servers that crash"), settings.auto_restart_crashed, t("Gives up after three crashes in ten minutes.")),
   };
   const rules = serverOptionsForm(settings.default_server_options);
   const discord = notificationsCard(settings);
-  const saveSettings = h("button", { class: "btn primary", type: "button" }, "Save settings");
+  const login = discordLoginCard(settings, siteUrl);
+  useThisPage.onclick = () => { siteUrl.value = location.origin; login.siteChanged(); };
+  const saveSettings = h("button", { class: "btn primary", type: "button" }, t("Save settings"));
   saveSettings.onclick = action(async () => {
-    const body = { public_host: publicHost.value.trim(), default_server_options: rules.read(), ...discord.read() };
+    const body = { public_host: publicHost.value.trim(), site_url: siteUrl.value.trim(), default_server_options: rules.read(),
+      ...discord.read(), ...login.read() };
     for (const [key, box] of Object.entries(toggles)) body[key] = box.input.checked;
     const saved = await patch("/api/settings", body);
     discord.drawStatus(saved.notify_status);
-    toast("Settings saved", "success");
+    login.saved(saved);
+    toast(t("Settings saved"), "success");
   });
 
   // host.yaml -----------------------------------------------------------------------------------------------------------
@@ -31,22 +40,21 @@ export default async function render({ root, cleanup }) {
   const hostPath = h("span", { class: "mono muted" });
   const hostWarning = h("div");
   let hostLoaded = false;
-  const hostDetails = h("details", { class: "card" }, h("summary", {}, "Archipelago host.yaml"),
+  const hostDetails = h("details", { class: "card" }, h("summary", {}, t("Archipelago host.yaml")),
     h("div", { class: "stack" },
-      h("p", { class: "muted small" }, "Archipelago's own settings file. Game-specific options, such as base ROM paths needed to generate some games, live here. Per-game server settings above take precedence for servers started by this manager."),
+      h("p", { class: "muted small" }, t("Archipelago's own settings file. Game-specific options, such as base ROM paths needed to generate some games, live here. Per-game server settings above take precedence for servers started by this manager.")),
       hostWarning, hostPath, hostArea,
       h("div", { class: "row" }, h("button", { class: "btn primary", type: "button", onclick: action(async () => {
         await put("/api/host-yaml", { content: hostArea.value });
-        toast("host.yaml saved. Running servers keep their old settings until restarted.", "success");
-      }) }, "Save host.yaml"))));
+        toast(t("host.yaml saved. Running servers keep their old settings until restarted."), "success");
+      }) }, t("Save host.yaml")))));
   hostDetails.addEventListener("toggle", action2(async () => {
     if (!hostDetails.open || hostLoaded) return;
     const r = await get("/api/host-yaml");
     hostArea.value = r.content;
     hostPath.textContent = r.path;
     if (!r.persistent) {
-      hostWarning.append(banner("warn", icon("alert", 16), "This file is not in the data folder, so edits are lost when the container is recreated. " +
-        "Run the container as a regular user (PUID/PGID) to keep them."));
+      hostWarning.append(banner("warn", icon("alert", 16), t("This file is not in the data folder, so edits are lost when the container is recreated. Run the container as a regular user (PUID/PGID) to keep them.")));
     }
     hostLoaded = true;
   }));
@@ -60,90 +68,143 @@ export default async function render({ root, cleanup }) {
       update.enabled ? h("button", { class: "btn sm", type: "button", onclick: action(async () => {
         const fresh = await post("/api/system/check-updates");
         drawUpdate(fresh);
-        toast(fresh.update_available ? `Archipelago ${fresh.latest} is available` : fresh.error ? fresh.error : "Archipelago is up to date",
-          fresh.error ? "error" : "success");
-      }) }, "Check now") : null));
+        toast(fresh.update_available ? t("Archipelago {version} is available", { version: fresh.latest })
+          : fresh.error ? tServer(fresh.error) : t("Archipelago is up to date"), fresh.error ? "error" : "success");
+      }) }, t("Check now")) : null));
     clear(updateBannerHost).append(updateBanner(update) || "");
   };
   drawUpdate(system.update);
-  const systemCard = h("div", { class: "card stack" }, h("h2", {}, "System"), updateBannerHost,
+  const systemCard = h("div", { class: "card stack" }, h("h2", {}, t("System")), updateBannerHost,
     h("dl", { class: "kv" },
-      h("dt", {}, "Manager"), h("dd", {}, system.manager_version),
-      h("dt", {}, "Archipelago"), h("dd", {}, system.ap_version ? `${system.ap_version} (${system.world_count} games loaded)` : h("span", { class: "form-error" }, system.ap_error || "unavailable")),
-      h("dt", {}, "Updates"), updateHost,
-      h("dt", {}, "Game ports"), h("dd", {}, `${system.port_range[0]}–${system.port_range[1]}`, h("span", { class: "muted" }, " (each must be published by Docker)")),
-      h("dt", {}, "Data folder"), h("dd", {}, h("span", { class: "mono" }, system.data_dir), h("span", { class: "muted" }, ` · ${fmtBytes(system.data_bytes)} used, ${fmtBytes(system.disk.free)} free`)),
-      h("dt", {}, "Custom worlds folder"), h("dd", { class: "mono" }, system.worlds_folder || "—")),
-    system.quarantined?.length ? banner("warn", icon("alert", 16), h("div", {}, h("strong", {}, "Files moved out of the way:"),
-      h("div", { class: "small" }, "These .apworld files in the worlds folder were not valid archives and would have stopped Archipelago from starting."),
+      h("dt", {}, t("Manager")), h("dd", {}, system.manager_version),
+      h("dt", {}, "Archipelago"), h("dd", {}, system.ap_version
+        ? `${system.ap_version} (${plural(system.world_count, "{n} game loaded", "{n} games loaded")})`
+        : h("span", { class: "form-error" }, system.ap_error ? tServer(system.ap_error) : t("unavailable"))),
+      h("dt", {}, t("Updates")), updateHost,
+      h("dt", {}, t("Game ports")), h("dd", {}, `${system.port_range[0]}–${system.port_range[1]}`, h("span", { class: "muted" }, " ", t("(each must be published by Docker)"))),
+      h("dt", {}, t("Data folder")), h("dd", {}, h("span", { class: "mono" }, system.data_dir), h("span", { class: "muted" }, " · ",
+        t("{used} used, {free} free", { used: fmtBytes(system.data_bytes), free: fmtBytes(system.disk.free) }))),
+      h("dt", {}, t("Custom worlds folder")), h("dd", { class: "mono" }, system.worlds_folder || "—")),
+    system.quarantined?.length ? banner("warn", icon("alert", 16), h("div", {}, h("strong", {}, t("Files moved out of the way:")),
+      h("div", { class: "small" }, t("These .apworld files in the worlds folder were not valid archives and would have stopped Archipelago from starting.")),
       system.quarantined.map((q) => h("div", { class: "small mono" }, q)))) : null,
-    failed.length ? banner("warn", icon("alert", 16), h("div", {}, h("strong", {}, "Some worlds failed to load:"),
+    failed.length ? banner("warn", icon("alert", 16), h("div", {}, h("strong", {}, t("Some worlds failed to load:")),
       failed.map(([n, why]) => h("div", { class: "small mono" }, `${n}: ${String(why).trim().split("\n").pop()}`)))) : null,
     h("div", { class: "row" }, h("button", { class: "btn", type: "button", onclick: action(async () => {
       const r = await post("/api/system/reload-worlds");
-      toast(`${r.world_count} games loaded`, "success");
-    }) }, icon("restart", 14), "Reload games")));
+      toast(plural(r.world_count, "{n} game loaded", "{n} games loaded"), "success");
+    }) }, icon("restart", 14), t("Reload games"))));
 
-  root.append(pageHeader("Administration", "Server-wide settings.", saveSettings), adminTabs("settings"),
+  root.append(pageHeader(t("Administration"), t("Server-wide settings."), saveSettings), adminTabs("settings"),
     h("div", { class: "stack" },
-      h("div", { class: "card stack" }, h("h2", {}, "General"),
-        field("Public address", publicHost, "What players type to reach this server. Leave empty to use the address of this page."),
+      h("div", { class: "card stack" }, h("h2", {}, t("General")),
+        field(t("Public address"), publicHost, t("What players type to reach this server. Leave empty to use the address of this page.")),
+        field(t("Address of this web UI"), h("div", { class: "row" }, h("div", { class: "grow" }, siteUrl), useThisPage),
+          t("Where players open this page, e.g. https://archipelago.example.com. Discord messages link here, and signing in with Discord needs it.")),
         h("div", { class: "stack tight" }, Object.values(toggles))),
-      h("div", { class: "card stack" }, h("h2", {}, "Defaults for new games"),
-        h("p", { class: "muted small" }, "Applied when a game is added. Each game can override them."), rules.node),
+      h("div", { class: "card stack" }, h("h2", {}, t("Defaults for new games")),
+        h("p", { class: "muted small" }, t("Applied when a game is added. Each game can override them.")), rules.node),
+      login.node,
       discord.node,
       hostDetails, systemCard));
 }
 
 const EVENTS = [
-  ["game_online", "A game goes online", "When someone starts it; not when it comes back after a crash or a restart of the container."],
-  ["game_crashed", "A game server crashes"],
-  ["player_goal", "A player reaches their goal, and when everyone has"],
-  ["hint_found", "A hinted item is found", "Many at once, for example after a !release, come as one message."],
-  ["generation", "A new game is generated, or generating fails"],
-  ["signup", "Sign-up rounds open, close soon and close"],
-  ["apworld_pending", "A custom game or GitHub repository waits for approval"],
-  ["apworld_update", "A custom game from GitHub has a new release"],
-  ["ap_update", "A new Archipelago version is out"],
+  ["game_online", t("A game goes online"), t("When someone starts it; not when it comes back after a crash or a restart of the container.")],
+  ["game_crashed", t("A game server crashes")],
+  ["player_goal", t("A player reaches their goal, and when everyone has")],
+  ["hint_found", t("A hinted item is found"), t("Many at once, for example after a !release, come as one message.")],
+  ["generation", t("A new game is generated, or generating fails")],
+  ["signup", t("Sign-up rounds open, close soon and close")],
+  ["apworld_pending", t("A custom game or GitHub repository waits for approval")],
+  ["apworld_update", t("A custom game from GitHub has a new release")],
+  ["ap_update", t("A new Archipelago version is out")],
 ];
 
 // Discord webhook settings. Saved with the page's "Save settings" button; read() returns their part of the request.
 function notificationsCard(settings) {
   const webhook = h("input", { class: "input", type: "url", value: settings.discord_webhook_url, autocomplete: "off",
     placeholder: "https://discord.com/api/webhooks/…" });
-  const linkBase = h("input", { class: "input", type: "url", value: settings.notify_link_url, placeholder: location.origin });
-  const useThisPage = h("button", { class: "btn sm", type: "button", onclick: () => { linkBase.value = location.origin; } }, "Use this page's address");
+  const language = select([["en", "English"], ["de", "Deutsch"]], settings.notify_language);
   const boxes = EVENTS.map(([key, label, hint]) => ({ key, box: checkbox(label, settings.notify_events.includes(key), hint) }));
   const statusHost = h("div");
   const drawStatus = (status) => {
     clear(statusHost);
     if (status.last_error && (!status.last_ok_at || status.last_error_at > status.last_ok_at)) {
       statusHost.append(banner("error", icon("alert", 16), h("div", { class: "grow" },
-        h("strong", {}, `A message could not be sent (${fmtAgo(status.last_error_at)}): `), status.last_error)));
+        h("strong", {}, t("A message could not be sent ({ago}):", { ago: fmtAgo(status.last_error_at) })), " ", tServer(status.last_error))));
     } else if (status.last_ok_at) {
-      statusHost.append(h("p", { class: "muted small" }, `Last message delivered ${fmtAgo(status.last_ok_at)}.`));
+      statusHost.append(h("p", { class: "muted small" }, t("Last message delivered {ago}.", { ago: fmtAgo(status.last_ok_at) })));
     }
   };
   drawStatus(settings.notify_status);
-  const test = h("button", { class: "btn", type: "button" }, icon("bell", 14), "Send a test message");
+  const test = h("button", { class: "btn", type: "button" }, icon("bell", 14), t("Send a test message"));
   test.onclick = action(async () => {
     const result = await post("/api/settings/test-notification", { discord_webhook_url: webhook.value.trim() || null });
     drawStatus(result.notify_status);
-    toast("Test message sent. Check your Discord channel.", "success");
+    toast(t("Test message sent. Check your Discord channel."), "success");
   });
-  const node = h("div", { class: "card stack" }, h("h2", {}, "Discord notifications"),
-    h("p", { class: "muted small" }, "Posts a message to a Discord channel when something happens. In Discord: channel settings → Integrations → Webhooks → New Webhook → Copy Webhook URL. Leave the address empty to turn notifications off."),
-    field("Webhook address", webhook),
-    field("Address of this web UI", h("div", { class: "row" }, h("div", { class: "grow" }, linkBase), useThisPage),
-      "Messages link to pages here. Leave empty to leave the links out."),
-    h("div", { class: "stack tight" }, h("span", { class: "field-label" }, "Send a message when…"), boxes.map((b) => b.box)),
+  const node = h("div", { class: "card stack" }, h("h2", {}, t("Discord notifications")),
+    h("p", { class: "muted small" }, t("Posts a message to a Discord channel when something happens. In Discord: channel settings → Integrations → Webhooks → New Webhook → Copy Webhook URL. Leave the address empty to turn notifications off.")),
+    field(t("Webhook address"), webhook),
+    field(t("Language of the messages"), language),
+    h("div", { class: "stack tight" }, h("span", { class: "field-label" }, t("Send a message when…")), boxes.map((b) => b.box)),
     statusHost,
     h("div", { class: "row" }, test));
   const read = () => ({
-    discord_webhook_url: webhook.value.trim(), notify_link_url: linkBase.value.trim(),
+    discord_webhook_url: webhook.value.trim(), notify_language: language.value,
     notify_events: boxes.filter((b) => b.box.input.checked).map((b) => b.key),
   });
   return { node, read, drawStatus };
+}
+
+// Signing in with Discord (OAuth2). The client secret never comes back from the server: the field stays empty and is
+// only sent when something is typed into it.
+function discordLoginCard(settings, siteUrl) {
+  const enabled = checkbox(t("Let people sign in with Discord"), settings.discord_login);
+  const clientId = h("input", { class: "input", value: settings.discord_client_id, inputMode: "numeric", autocomplete: "off",
+    placeholder: "123456789012345678" });
+  const secret = h("input", { class: "input", type: "password", autocomplete: "new-password", spellcheck: false });
+  const signup = checkbox(t("Create an account for people who sign in with Discord for the first time"), settings.discord_signup,
+    t("Off means only people who already have an account here and linked Discord to it in their user menu can sign in this way."));
+  const guild = h("input", { class: "input", value: settings.discord_guild_id, inputMode: "numeric", autocomplete: "off",
+    placeholder: t("optional") });
+  const redirectHost = h("div");
+  const secretHint = h("span");
+  const drawSecretHint = (isSet) => {
+    secret.placeholder = isSet ? "••••••••••••" : "";
+    secretHint.textContent = isSet ? t("Saved, and never shown again. Type a new one to replace it.") : t("Not saved yet.");
+  };
+  const siteChanged = () => {
+    const base = siteUrl.value.trim().replace(/\/+$/, "");
+    clear(redirectHost).append(/^https?:\/\/[^/]/.test(base)
+      ? copyField(base + CALLBACK_PATH)
+      : h("span", { class: "muted small" }, t("Enter the address of this web UI under General first.")));
+  };
+  siteUrl.addEventListener("input", siteChanged);
+  siteChanged();
+  drawSecretHint(settings.discord_client_secret_set);
+  const node = h("div", { class: "card stack" }, h("h2", {}, t("Sign in with Discord")),
+    h("p", { class: "muted small" }, t("In the Discord Developer Portal (discord.com/developers/applications): create an application, add the redirect address below under OAuth2 → Redirects, then copy the client ID and the client secret from OAuth2 into the fields here.")),
+    enabled,
+    field(t("Redirect address"), redirectHost, t("Discord only sends people back to this exact address.")),
+    h("div", { class: "form-grid" },
+      field(t("Client ID"), clientId),
+      field(t("Client secret"), secret, secretHint)),
+    signup,
+    field(t("Only members of this Discord server"), guild,
+      t("The server's ID: in Discord, right-click the server → Copy Server ID (turn on Developer Mode in the advanced settings first). Leave empty to allow any Discord account.")));
+  const read = () => {
+    const body = { discord_login: enabled.input.checked, discord_client_id: clientId.value.trim(),
+      discord_signup: signup.input.checked, discord_guild_id: guild.value.trim() };
+    if (secret.value) body.discord_client_secret = secret.value.trim();
+    return body;
+  };
+  const saved = (values) => {
+    secret.value = "";
+    drawSecretHint(values.discord_client_secret_set);
+  };
+  return { node, read, saved, siteChanged };
 }
 
 function action2(fn) {

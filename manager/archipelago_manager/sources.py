@@ -8,6 +8,7 @@ code, and Discord can be told about it.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import re
@@ -25,8 +26,8 @@ from .routes import apworlds as library
 log = logging.getLogger(__name__)
 
 CHECK_INTERVAL = 12 * 3600
-_OWNER = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$")
-_NAME = re.compile(r"^[A-Za-z0-9._-]{1,100}$")
+_OWNER = re.compile(r"[A-Za-z0-9][A-Za-z0-9-]{0,38}")
+_NAME = re.compile(r"[A-Za-z0-9._-]{1,100}")
 
 
 class SourceError(Exception):
@@ -41,7 +42,7 @@ def parse_repo(text: str) -> str:
     parts = value.split("/")
     owner, name = (parts[0], parts[1]) if len(parts) >= 2 else ("", "")
     name = name[:-4] if name.lower().endswith(".git") else name
-    if not _OWNER.match(owner) or not _NAME.match(name) or name in (".", ".."):
+    if not _OWNER.fullmatch(owner) or not _NAME.fullmatch(name) or name in (".", ".."):
         raise SourceError("Enter a GitHub repository as owner/name or as its github.com address")
     return f"{owner}/{name}"
 
@@ -84,7 +85,8 @@ def fetch_release(repo: str) -> dict:
         if e.status == 404:
             raise SourceError(f"{info['full_name']} has no published release", 404) from None
         raise
-    assets = [{"name": a["name"], "size": a.get("size") or 0, "url": a["browser_download_url"]}
+    assets = [{"name": a["name"], "size": a.get("size") or 0, "url": a["browser_download_url"], "id": a.get("id"),
+               "updated_at": a.get("updated_at"), "digest": a.get("digest")}
               for a in release.get("assets", []) if str(a.get("name", "")).lower().endswith(".apworld")]
     return {"repo": info["full_name"], "description": info.get("description"),
             "tag": release.get("tag_name") or "", "release_url": release.get("html_url"), "assets": assets}
@@ -111,6 +113,11 @@ def pick_asset(release: dict, wanted: str | None) -> dict:
                       "Choose one.", 409)
 
 
+def fingerprint(release: dict, asset: dict) -> str:
+    """Tells this exact file apart from any other: a new release, or the same name uploaded again, changes it."""
+    return json.dumps([release["tag"], asset["name"], asset.get("id"), asset.get("updated_at"), asset.get("digest")])
+
+
 def _download(url: str, target: Path) -> None:
     parts = urllib.parse.urlsplit(url)
     allowed = {"github.com", urllib.parse.urlsplit(CONFIG.github_api).hostname}
@@ -135,16 +142,29 @@ def _download(url: str, target: Path) -> None:
 # ----------------------------------------------------------------------------------------------------------------------
 # installing and watching for releases
 # ----------------------------------------------------------------------------------------------------------------------
-async def install(source_id: int) -> dict:
-    """Downloads the newest release of an approved source and installs it. Returns the library entry."""
+async def install(source_id: int, *, expected: str | None = None) -> dict:
+    """Downloads the newest release of an approved source and installs it. Returns the library entry.
+
+    With `expected` (a fingerprint), only that exact file is installed: what an administrator looked at before
+    approving, not something the repository put in its place since.
+    """
     source = get(source_id)
     if not source or source["status"] != "approved":
         raise SourceError("Only approved sources are installed", 409)
     release = await asyncio.to_thread(fetch_release, source["repo"])
     asset = pick_asset(release, source["asset"])
+    if expected is not None and fingerprint(release, asset) != expected:
+        db.execute("UPDATE apworld_sources SET latest_tag = ?, latest_url = ?, latest_asset = ?, checked_at = ? "
+                   "WHERE id = ?", (release["tag"], release["release_url"], fingerprint(release, asset), time.time(),
+                                    source_id))
+        raise SourceError(f"The release changed since it was shown here; the newest is now {release['tag']}. "
+                          "Look at it again before installing it.", 409)
     tmp = CONFIG.tmp_dir / f"source-{source_id}-{time.time_ns()}.apworld"
     try:
         await asyncio.to_thread(_download, asset["url"], tmp)
+        digest = str(asset.get("digest") or "")
+        if digest.startswith("sha256:") and await asyncio.to_thread(_sha256, tmp) != digest[7:].lower():
+            raise SourceError("The downloaded file is not the one GitHub lists for this release", 502)
         try:
             entry = await library.add_to_library(tmp, asset["name"], uploaded_by=source["added_by"], install=True)
         except library.InvalidAPWorld as e:
@@ -152,10 +172,18 @@ async def install(source_id: int) -> dict:
     finally:
         tmp.unlink(missing_ok=True)
     db.execute("UPDATE apworld_sources SET asset = ?, game = ?, installed_tag = ?, apworld_id = ?, latest_tag = ?, "
-               "latest_url = ?, checked_at = ?, error = NULL WHERE id = ?",
+               "latest_url = ?, latest_asset = ?, checked_at = ?, error = NULL WHERE id = ?",
                (asset["name"], entry["game"], release["tag"], entry["id"], release["tag"], release["release_url"],
-                time.time(), source_id))
+                fingerprint(release, asset), time.time(), source_id))
     return entry
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as f:
+        while chunk := f.read(1 << 20):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def update_available(source: sqlite3.Row) -> bool:
@@ -173,14 +201,19 @@ async def check(source_id: int) -> None:
     except SourceError as e:
         db.execute("UPDATE apworld_sources SET checked_at = ?, error = ? WHERE id = ?", (time.time(), e.message, source_id))
         return
-    db.execute("UPDATE apworld_sources SET latest_tag = ?, latest_url = ?, checked_at = ?, error = NULL WHERE id = ?",
-               (release["tag"], release["release_url"], time.time(), source_id))
+    try:
+        latest = fingerprint(release, pick_asset(release, source["asset"]))
+    except SourceError:
+        latest = None  # no single matching file: installing it will say why
+    db.execute("UPDATE apworld_sources SET latest_tag = ?, latest_url = ?, latest_asset = ?, checked_at = ?, "
+               "error = NULL WHERE id = ?", (release["tag"], release["release_url"], latest, time.time(), source_id))
     source = get(source_id)
     if update_available(source) and source["announced_tag"] != source["latest_tag"]:
         game = source["game"] or source["repo"]
-        if notify.emit("apworld_update", f"New version of {game}: {source['latest_tag']}",
-                       f"{notify.md(source['repo'])} published {notify.md(source['latest_tag'])}; this server has "
-                       f"{notify.md(source['installed_tag'])}. An administrator can install it on the Custom games page.",
+        if notify.emit("apworld_update", notify.tr("New version of {game}: {tag}", game=game, tag=source["latest_tag"]),
+                       notify.tr("{repo} published {latest}; this server has {installed}. An administrator can install "
+                                 "it on the Custom games page.", repo=notify.md(source["repo"]),
+                                 latest=notify.md(source["latest_tag"]), installed=notify.md(source["installed_tag"])),
                        url=notify.link("/worlds"), color="info"):
             db.execute("UPDATE apworld_sources SET announced_tag = ? WHERE id = ?", (source["latest_tag"], source_id))
 

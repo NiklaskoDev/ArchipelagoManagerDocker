@@ -1,6 +1,7 @@
 import { h, clear, icon, openModal, toast, action } from "../util.js";
 import { api, get, isAdmin } from "../api.js";
 import { pageHeader, empty, stateBadge, chips, badge, controlButtons, copyField, checkbox, field, promptMissingGames } from "../components.js";
+import { t, tServer } from "../i18n.js";
 
 export default async function render({ root, cleanup, isCurrent }) {
   const admin = isAdmin();
@@ -19,33 +20,33 @@ export default async function render({ root, cleanup, isCurrent }) {
   function draw(games) {
     clear(host);
     if (!games.length) {
-      host.append(empty("No games here yet",
-        admin ? "Upload the zip of a pregenerated multiworld, or generate one from player configs."
-              : "You will see a game here once an administrator adds you to one.",
-        admin ? h("button", { class: "btn primary", type: "button", onclick: uploadDialog }, icon("upload", 14), "Add a game") : null,
-        admin ? h("a", { class: "btn", href: "#/generate" }, icon("zap", 14), "Generate") : null));
+      host.append(empty(t("No games here yet"),
+        admin ? t("Upload the zip of a pregenerated multiworld, or generate one from player configs.")
+              : t("You will see a game here once an administrator adds you to one."),
+        admin ? h("button", { class: "btn primary", type: "button", onclick: uploadDialog }, icon("upload", 14), t("Add a game")) : null,
+        admin ? h("a", { class: "btn", href: "#/generate" }, icon("zap", 14), t("Generate")) : null));
       return;
     }
     host.append(h("div", { class: "card flush table-wrap" }, h("table", { class: "table" },
-      h("thead", {}, h("tr", {}, ["Game", "Status", "Server", "Players", "Worlds", ""].map((t) => h("th", {}, t)))),
+      h("thead", {}, h("tr", {}, [t("Game"), t("Status"), t("Server"), t("Players"), t("Worlds"), ""].map((text) => h("th", {}, text)))),
       h("tbody", {}, games.map((g) => h("tr", {},
         h("td", {}, h("a", { href: `#/games/${g.id}`, class: "slot-name" }, g.name),
-          g.race_mode ? [" ", badge("Race", "warn")] : null,
-          g.my_slots.length ? h("div", { class: "muted small" }, "You: ", g.my_slots.map((s) => s.name).join(", ")) : null),
+          g.race_mode ? [" ", badge(t("Race"), "warn")] : null,
+          g.my_slots.length ? h("div", { class: "muted small" }, t("You: {names}", { names: g.my_slots.map((s) => s.name).join(", ") })) : null),
         h("td", {}, stateBadge(g.state)),
-        h("td", {}, g.address ? copyField(g.address) : h("span", { class: "muted" }, "no port")),
-        h("td", {}, `${g.claimed_count} / ${g.player_count}`, h("div", { class: "muted small" }, "with an owner")),
+        h("td", {}, g.address ? copyField(g.address) : h("span", { class: "muted" }, t("no port"))),
+        h("td", {}, `${g.claimed_count} / ${g.player_count}`, h("div", { class: "muted small" }, t("with an owner"))),
         h("td", {}, chips(g.games, g.missing_games)),
         h("td", { class: "actions" }, h("div", { class: "row", style: { justifyContent: "flex-end" } },
-          controlButtons(g, () => load(true)), h("a", { class: "btn sm", href: `#/games/${g.id}` }, "Open")))))))));
+          controlButtons(g, () => load(true)), h("a", { class: "btn sm", href: `#/games/${g.id}` }, t("Open"))))))))));
   }
 
   function uploadDialog() {
     const input = h("input", { type: "file", accept: ".zip,.archipelago", class: "input" });
-    const name = h("input", { class: "input", placeholder: "Defaults to the file name" });
-    const start = checkbox("Start the server right away", true);
+    const name = h("input", { class: "input", placeholder: t("Defaults to the file name") });
+    const start = checkbox(t("Start the server right away"), true);
     const note = h("div", { class: "muted small" });
-    const drop = h("div", { class: "dropzone", tabIndex: 0 }, "Drop the generator's .zip (or a .archipelago file) here, or click to choose");
+    const drop = h("div", { class: "dropzone", tabIndex: 0 }, t("Drop the generator's .zip (or a .archipelago file) here, or click to choose"));
     const setFile = (file) => {
       if (!file) return;
       const transfer = new DataTransfer();
@@ -59,19 +60,19 @@ export default async function render({ root, cleanup, isCurrent }) {
     drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove("over"); setFile(e.dataTransfer.files[0]); };
     input.onchange = () => setFile(input.files[0]);
     input.hidden = true;
-    const submit = h("button", { class: "btn primary", type: "button" }, icon("upload", 14), "Upload and add");
+    const submit = h("button", { class: "btn primary", type: "button" }, icon("upload", 14), t("Upload and add"));
     submit.onclick = action(async () => {
-      if (!input.files[0]) throw new Error("Choose a file first");
+      if (!input.files[0]) throw new Error(t("Choose a file first"));
       const form = new FormData();
       form.append("file", input.files[0]);
       form.append("name", name.value);
       form.append("start", start.input.checked ? "true" : "false");
-      note.textContent = "Uploading and reading the multiworld… large files can take a moment.";
+      note.textContent = t("Uploading and reading the multiworld… large files can take a moment.");
       try {
         const game = await api("POST", "/api/games", form);
         modal.close();
-        toast(`Added "${game.name}"`, "success");
-        if (game.start_error) toast(`Could not start the server: ${game.start_error}`, "error");
+        toast(t("Added \"{name}\"", { name: game.name }), "success");
+        if (game.start_error) toast(t("Could not start the server: {error}", { error: tServer(game.start_error) }), "error");
         location.hash = `#/games/${game.id}`;
         promptMissingGames(game.missing_games.map((g) => ({ game: g, games: [{ id: game.id, name: game.name }] })));
       } finally {
@@ -79,18 +80,18 @@ export default async function render({ root, cleanup, isCurrent }) {
       }
     });
     const modal = openModal({
-      title: "Add a pregenerated game",
+      title: t("Add a pregenerated game"),
       body: h("div", { class: "stack" }, drop, input,
-        h("p", { class: "muted small" }, "Files for each player are extracted and linked to users whose YAML player name matches the slot name. You can also assign slots by hand afterwards."),
-        field("Name", name), start, note),
-      actions: [h("button", { class: "btn", type: "button", onclick: () => modal.close() }, "Cancel"), submit],
+        h("p", { class: "muted small" }, t("Files for each player are extracted and linked to users whose YAML player name matches the slot name. You can also assign slots by hand afterwards.")),
+        field(t("Name"), name), start, note),
+      actions: [h("button", { class: "btn", type: "button", onclick: () => modal.close() }, t("Cancel")), submit],
     });
   }
 
   root.append(
-    pageHeader("Games", admin ? "Every hosted multiworld on this server." : "Multiworlds you are part of.",
-      admin ? h("button", { class: "btn primary", type: "button", onclick: uploadDialog }, icon("upload", 14), "Add a game") : null,
-      admin ? h("a", { class: "btn", href: "#/generate" }, icon("zap", 14), "Generate") : null),
+    pageHeader(t("Games"), admin ? t("Every hosted multiworld on this server.") : t("Multiworlds you are part of."),
+      admin ? h("button", { class: "btn primary", type: "button", onclick: uploadDialog }, icon("upload", 14), t("Add a game")) : null,
+      admin ? h("a", { class: "btn", href: "#/generate" }, icon("zap", 14), t("Generate")) : null),
     host);
   await load(true);
   const timer = setInterval(() => { if (!document.hidden) load().catch(() => {}); }, 5000);

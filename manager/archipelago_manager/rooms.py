@@ -27,7 +27,18 @@ PROGRESS_CHECK_INTERVAL = 20
 STATUS_GOAL = 30  # ClientStatus.CLIENT_GOAL
 
 # A password is handed to the server as a console argument, so it must survive being split on whitespace.
-_PASSWORD_OK = re.compile(r"^[^\s\x00-\x1f\x7f]{1,64}$")
+_PASSWORD_OK = re.compile(r"[^\s\x00-\x1f\x7f]{1,64}")
+
+
+# The server repeats every /option it is given, including the passwords set at each start, and chat may carry an
+# "!admin login". Those must not reach the log: players see parts of it (the last line becomes the crash reason), and
+# crash reasons go to Discord.
+_SECRET_OPTION = re.compile(r"((?:/option|Set option)\s+(?:server_)?password\s+(?:to\s+)?|!admin\s+login\s+)\S+",
+                            re.IGNORECASE)
+
+
+def mask_secrets(line: str) -> str:
+    return _SECRET_OPTION.sub(r"\1********", line)
 
 
 # `/option password <word>` turns these into "no password", which would silently disable the one being set.
@@ -35,7 +46,7 @@ _RESERVED_PASSWORDS = {"null", "none", '""', "''"}
 
 
 def valid_password(value: str) -> bool:
-    return bool(_PASSWORD_OK.match(value)) and value.lower() not in _RESERVED_PASSWORDS
+    return bool(_PASSWORD_OK.fullmatch(value)) and value.lower() not in _RESERVED_PASSWORDS
 
 
 class RoomError(RuntimeError):
@@ -117,8 +128,9 @@ def build_command(game: Any) -> list[str]:
         "MultiServer.py", str(gamepaths.multidata_path(game["id"])),
         "--host", "0.0.0.0",  # without a host the server tries to look up its public IP on the internet at startup
         "--port", str(game["port"]),
-        "--password", game["password"] or "",
-        "--server_password", game["server_password"] or "",
+        # in one argument each: a password that starts with "-" would otherwise be read as an option
+        f"--password={game['password'] or ''}",
+        f"--server_password={game['server_password'] or ''}",
         "--hint_cost", str(opts["hint_cost"]),
         "--location_check_points", str(opts["location_check_points"]),
         "--release_mode", opts["release_mode"],
@@ -154,6 +166,8 @@ class RoomManager:
         self._seen: dict[int, tuple[set[int], dict[int, set[int]]]] = {}
         self._background: set[asyncio.Task] = set()
         self._trackers: dict[tuple[int, int], tuple[tuple[float, int] | None, dict]] = {}
+        # one reading of a save at a time per game (and per tracker): the others wait and then share its result
+        self._reading: dict[tuple, asyncio.Lock] = {}
 
     def reset(self) -> None:
         """Forget all in-process state. Only matters when the application starts more than once per process."""
@@ -186,6 +200,7 @@ class RoomManager:
             room.lines.append((room.seq, line))
 
     def _append_log(self, room: Room, line: str) -> None:
+        line = mask_secrets(line)
         room.seq += 1
         room.lines.append((room.seq, line))
         path = gamepaths.log_path(room.game_id)
@@ -350,12 +365,12 @@ class RoomManager:
     def _schedule_restart(self, room: Room) -> str:
         """Plans an automatic restart if allowed. Returns what happens next, in words."""
         if not app_settings.get_setting("auto_restart_crashed"):
-            return "Automatic restarts are turned off."
+            return notify.tr("Automatic restarts are turned off.")
         now = time.monotonic()
         room.crash_times = [t for t in room.crash_times if now - t < CRASH_RESTART_WINDOW] + [now]
         if len(room.crash_times) > CRASH_RESTART_LIMIT:
             self._append_log(room, "--- crashed too often, not restarting automatically ---")
-            return "It crashed too often, so it is not restarted automatically."
+            return notify.tr("It crashed too often, so it is not restarted automatically.")
         delay = 5 * 2 ** (len(room.crash_times) - 1)
         self._append_log(room, f"--- restarting in {delay}s (crash {len(room.crash_times)}/{CRASH_RESTART_LIMIT}) ---")
 
@@ -365,7 +380,8 @@ class RoomManager:
                 asyncio.ensure_future(self._restart_after_crash(room))
 
         room.restart_handle = asyncio.get_running_loop().call_later(delay, restart)
-        return f"Restarting automatically in {delay} seconds (attempt {len(room.crash_times)} of {CRASH_RESTART_LIMIT})."
+        return notify.tr("Restarting automatically in {delay} seconds (attempt {attempt} of {limit}).", delay=delay,
+                         attempt=len(room.crash_times), limit=CRASH_RESTART_LIMIT)
 
     async def _restart_after_crash(self, room: Room) -> None:
         try:
@@ -456,6 +472,10 @@ class RoomManager:
     async def _read_save(self, game_id: int) -> dict | None:
         """What the server's save says: progress per slot, the hints and the checked locations per slot. Empty before
         the first save, None if the save could not be read."""
+        async with self._reading.setdefault(("save", game_id), asyncio.Lock()):
+            return await self._read_save_now(game_id)
+
+    async def _read_save_now(self, game_id: int) -> dict | None:
         path = gamepaths.save_path(game_id)
         try:
             stat = path.stat()
@@ -487,6 +507,10 @@ class RoomManager:
     async def tracker(self, game_id: int, slot: int) -> dict:
         """One slot's items, locations and hints with names (see ap_helper.cmd_tracker). Read again only when the save
         changed. Raises apbridge.APBridgeError if Archipelago cannot read the game."""
+        async with self._reading.setdefault(("tracker", game_id, slot), asyncio.Lock()):
+            return await self._tracker_now(game_id, slot)
+
+    async def _tracker_now(self, game_id: int, slot: int) -> dict:
         path = gamepaths.save_path(game_id)
         try:
             stat = path.stat()
@@ -504,6 +528,8 @@ class RoomManager:
 
     def forget(self, game_id: int) -> None:
         self.rooms.pop(game_id, None)
+        for key in [k for k in self._reading if k[1] == game_id]:
+            del self._reading[key]
         self._progress.pop(game_id, None)
         self._seen.pop(game_id, None)
         for key in [k for k in self._trackers if k[0] == game_id]:
@@ -517,19 +543,19 @@ class RoomManager:
         if not game:
             return
         address = notify.game_address(room.port)
-        fields = [("Server", f"`{address}`" if address else f"Port {room.port}", True)]
+        fields = [(notify.tr("Server"), f"`{address}`" if address else f"Port {room.port}", True)]
         if game["password"]:
-            fields.append(("Password", "Shown on the game page", True))
-        fields.append(("Players", player_list(room.game_id)))
-        notify.emit("game_online", f"{game['name']} is online", url=notify.link(f"/games/{room.game_id}"),
-                    fields=fields, color="success")
+            fields.append((notify.tr("Password"), notify.tr("Shown on the game page"), True))
+        fields.append((notify.tr("Players"), player_list(room.game_id)))
+        notify.emit("game_online", notify.tr("{game} is online", game=game["name"]),
+                    url=notify.link(f"/games/{room.game_id}"), fields=fields, color="success")
 
     def _announce_crash(self, room: Room, next_step: str) -> None:
         game = db.query_one("SELECT name FROM games WHERE id = ?", (room.game_id,))
         if game:
-            notify.emit("game_crashed", f"{game['name']} crashed",
-                        f"The server stopped unexpectedly (exit code {room.exit_code}).\n```\n{room.error}\n```\n"
-                        f"{next_step}",
+            notify.emit("game_crashed", notify.tr("{game} crashed", game=game["name"]),
+                        notify.tr("The server stopped unexpectedly (exit code {code}).\n```\n{error}\n```\n{next_step}",
+                                  code=room.exit_code, error=room.error, next_step=next_step),
                         url=notify.link(f"/games/{room.game_id}"), color="error")
 
     async def watch_progress(self) -> None:
@@ -588,16 +614,20 @@ class RoomManager:
         locations = {(slot, ident): name for slot, ident, name in names["locations"]}
         lines, item_names = [], []
         for receiving, finding, location, item, entrance, _flags in found:
-            finder, receiver = notify.md(players.get(finding, f"Player {finding}")), players.get(receiving, "")
+            finder = notify.md(players[finding] if finding in players else notify.tr("Player {slot}", slot=finding))
+            receiver = players.get(receiving, "")
             item_name = items[receiving, item]
             item_names.append(item_name)
-            whose = "their" if finding == receiving else f"**{notify.md(receiver)}**'s"
-            line = f"**{finder}** found {whose} **{notify.md(item_name)}** at {notify.md(locations[finding, location])}"
+            line = notify.tr("**{finder}** found their **{item}** at {location}" if finding == receiving
+                             else "**{finder}** found **{receiver}**'s **{item}** at {location}",
+                             finder=finder, receiver=notify.md(receiver), item=notify.md(item_name),
+                             location=notify.md(locations[finding, location]))
             lines.append(line + (f" ({notify.md(entrance)})" if entrance else ""))
         url = notify.link(f"/games/{game_id}")
         if len(found) == 1:
-            notify.emit("hint_found", f"Hinted item found: {item_names[0]}", f"{lines[0]} in {notify.md(game_name)}.",
-                        url=url, color="success")
+            notify.emit("hint_found", notify.tr("Hinted item found: {item}", item=item_names[0]),
+                        notify.tr("{line} in {game}.", line=lines[0], game=notify.md(game_name)), url=url,
+                        color="success")
             return
         # A !release or !collect can find many hinted items at once: one message instead of a flood
         text, shown = "", 0
@@ -606,9 +636,9 @@ class RoomManager:
                 break
             text, shown = text + line + "\n", shown + 1
         if shown < len(lines):
-            text += f"…and {len(lines) - shown} more"
-        notify.emit("hint_found", f"{len(found)} hinted items found in {game_name}", text.strip(), url=url,
-                    color="success")
+            text += notify.tr("…and {n} more", n=len(lines) - shown)
+        notify.emit("hint_found", notify.tr("{n} hinted items found in {game}", n=len(found), game=game_name),
+                    text.strip(), url=url, color="success")
 
     def _announce_goals(self, game_id: int, game_name: str, done: set[int], known: set[int]) -> None:
         new = done - known
@@ -624,11 +654,15 @@ class RoomManager:
         for slot in sorted(new & players.keys()):
             p = players[slot]
             who = notify.md(p["name"]) + (f" ({notify.md(p['username'])})" if p["username"] else "")
-            notify.emit("player_goal", f"{p['name']} reached their goal",
-                        f"{who} finished **{notify.md(p['game'])}** in {notify.md(game_name)}.",
-                        url=url, fields=[("Done", f"{finished} of {len(players)} players", True)], color="success")
+            notify.emit("player_goal", notify.tr("{player} reached their goal", player=p["name"]),
+                        notify.tr("{who} finished **{game}** in {name}.", who=who, game=notify.md(p["game"]),
+                                  name=notify.md(game_name)),
+                        url=url, fields=[(notify.tr("Done"), notify.tr("{finished} of {total} players",
+                                                                        finished=finished, total=len(players)), True)],
+                        color="success")
         if players.keys() <= done and not players.keys() <= known:
-            notify.emit("player_goal", f"Everyone finished {game_name}!",
-                        f"All {len(players)} players reached their goal. Congratulations!", url=url, color="success")
+            notify.emit("player_goal", notify.tr("Everyone finished {game}!", game=game_name),
+                        notify.tr("All {n} players reached their goal. Congratulations!", n=len(players)), url=url,
+                        color="success")
 
 ROOMS = RoomManager()

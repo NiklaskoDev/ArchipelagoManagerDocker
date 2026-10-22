@@ -44,7 +44,8 @@ players log in to keep their YAML configs, see their games and download their pa
    - **Game ports**: one port per hosted game; the default range holds 20 games at once. If you change it, change
      *Game port range* to the same values.
    - **Public address**: the name or IP your players type (see [Reaching your games](#reaching-your-games)).
-4. Open the **WebUI** from the container's menu and create the administrator account.
+4. Open the **WebUI** from the container's menu and create the administrator account. For safety this works only on
+   the server's local address (its IP address or local name, as the WebUI button opens it), not through a domain name.
 
 The image runs as Unraid's `nobody:users` (99:100) by default, so the appdata folder stays accessible from your shares.
 
@@ -67,7 +68,9 @@ by your players:
 - **Over the internet:** forward the whole game port range (TCP) from your router to the server, and set *Public
   address* (Admin → Settings) to your domain or WAN address. The web UI port does not need to be exposed unless you
   want players to log in remotely. If you do, put it behind a reverse proxy with HTTPS, and set
-  `FORWARDED_ALLOW_IPS` to the proxy's address so the session cookie is marked secure.
+  `FORWARDED_ALLOW_IPS` to the proxy's address: otherwise every visitor seems to come from the proxy and shares its
+  limit of failed logins (the log says so when it happens). Also set *Address of this web UI* (Admin → Settings) to the
+  `https://` address; cookies are then always marked secure.
 - **Host networking:** works too and avoids publishing ports. Then set `PORT` to a free port for the web UI.
 
 ## Using it
@@ -91,8 +94,9 @@ You can withdraw until the round closes.
 
 ### As an admin
 
-- **Add a pregenerated game:** *Games → Add a game*, drop the zip. The slots are matched to users by player name
-  (case-insensitive). If two users have a config with the same name the slot is left unassigned rather than guessed;
+- **Add a pregenerated game:** *Games → Add a game*, drop the zip. The slots are matched to users whose config has the
+  same player name (case-insensitive) and game. If the zip contains the players' YAMLs, a user whose config is one of
+  them wins over others with the same name. If it is still ambiguous the slot is left unassigned rather than guessed;
   assign it from the slot's *Owner* drop-down. Turning on *claimable* in the game's settings lets players pick their own;
   add *only one slot each* so nobody can take more than one (you can still assign extra slots by hand).
 - **Generate a game:** *Generate*, tick the configs, set the options, *Generate*. Slot owners are taken from the configs.
@@ -102,9 +106,22 @@ You can withdraw until the round closes.
   game is not installed), the round stays closed with the error: fix the entries, then *Generate* again or *Reopen*.
 - **Discord notifications:** *Admin → Settings → Discord notifications*. In Discord, open the channel's settings →
   *Integrations* → *Webhooks* → *New Webhook* → *Copy Webhook URL*, paste it, and *Send a test message*. Set *Address of
-  this web UI* so messages link to the right page, and untick the kinds of messages you do not want. Goals and found
+  this web UI* (under *General*) so messages link to the right page, pick the language of the messages (English or
+  German), and untick the kinds of messages you do not want. Goals and found
   hinted items are read from the server's save, so they are posted up to a minute after they happen. Many hinted items
   found at once (after a `!release` or `!collect`) come as one message.
+- **Sign in with Discord:** *Admin → Settings → Sign in with Discord*.
+  1. Set *Address of this web UI* under *General* to the address players open, e.g. `https://archipelago.example.com`.
+  2. In the [Discord Developer Portal](https://discord.com/developers/applications): *New Application*, then under
+     *OAuth2 → Redirects* add the *Redirect address* shown on the settings page (the web UI's address followed by
+     `/api/auth/discord/callback`).
+  3. Copy *Client ID* and *Client Secret* from *OAuth2* into the settings, tick *Let people sign in with Discord* and
+     save. The secret is stored on the server and never shown again.
+
+  Players then link their Discord account in the user menu (*Link Discord*) and can sign in with one click. Tick
+  *Create an account…* to let people without an account sign up through Discord (they can set a password later in the
+  user menu), and enter a Discord server ID to admit only members of that server. Accounts are matched by Discord's
+  account ID only, never by name; admins see who is linked under *Admin → Users* and can unlink an account there.
 - **Run a game:** *Start / Stop / Restart* on the game page. *Settings* holds the room password, the remote-admin
   password, hint cost, `!release`/`!collect`/`!remaining` rules and the idle shutdown. Passwords and rules apply to a
   running server immediately; the port and a few startup options need a restart (the UI tells you).
@@ -118,6 +135,11 @@ You can withdraw until the round closes.
   the current progress as a copy, so a reset or a restore can always be undone.
 - **Users and settings:** *Admin* has users, registration, what players may do, defaults for new games, Archipelago's
   `host.yaml`, and system information.
+
+### Language
+
+The web UI is available in English and German. It follows the browser's language at first; switch it on the sign-in
+page or in the user menu (the choice is remembered in that browser).
 
 ### Custom games (APWorlds)
 
@@ -228,6 +250,17 @@ approve pull requests*. You can also run the workflow by hand (*Actions → Arch
 - The console is admin-only and runs real server commands. Remote admin (`!admin`) is off unless you set a password.
 - Discord messages never contain passwords and cannot mention anyone (`@everyone` in a player name stays plain text).
   Treat the webhook address like a password: anyone who has it can post to the channel.
+- Signing in with Discord uses OAuth2 with a single-use `state` bound to the browser that started it, a fixed redirect
+  address, and Discord's account ID; Discord's tokens are revoked right after use. Disabled users cannot sign in this
+  way either.
+- Server logs never show the room or admin passwords (MultiServer repeats them when they are set).
+- Without a session, requests may be only a few kilobytes; only admins (and, for custom games, players allowed to
+  submit them, up to 100 MB) can upload large files. Players can keep at most 200 configs and have at most 5 custom
+  games and 5 GitHub repositories waiting for approval.
+- An approved GitHub repository installs exactly the release file the admin was shown; if the repository changed it in
+  the meantime, the admin is asked to look again. Downloads are checked against GitHub's SHA-256 digest.
+- The administrator account can only be created on a local address, so a website cannot take over a fresh install
+  through DNS rebinding.
 
 ## Troubleshooting
 

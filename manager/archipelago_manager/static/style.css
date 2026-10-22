@@ -221,6 +221,12 @@ table.table { width: 100%; border-collapse: collapse; }
 .auth-card { width: min(400px, 100%); display: flex; flex-direction: column; gap: 16px; padding: 28px; box-shadow: var(--shadow); }
 .auth-brand { display: flex; align-items: center; gap: 12px; }
 .auth-brand h1 { font-size: 1.3rem; }
+.auth-or { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: .85rem; }
+.auth-or::before, .auth-or::after { content: ""; flex: 1; border-top: 1px solid var(--border); }
+.btn.discord { background: #5865f2; border-color: #5865f2; color: #fff; }
+.btn.discord:hover { background: #4752c4; border-color: #4752c4; }
+.menu-sep { border-top: 1px solid var(--border); margin: 6px 0; }
+.menu-note { padding: 4px 10px 6px; color: var(--muted); font-size: .8rem; overflow-wrap: anywhere; }
 
 .slot-name { font-weight: 600; }
 .status-line { display: inline-flex; align-items: center; gap: 7px; }

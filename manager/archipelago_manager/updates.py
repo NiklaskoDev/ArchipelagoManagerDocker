@@ -61,9 +61,10 @@ def _announce() -> None:
     current = status()
     if not current["update_available"] or app_settings.get_state("announced_update") == current["latest"]:
         return
-    if notify.emit("ap_update", f"Archipelago {current['latest']} is available",
-                   f"This server runs {current['installed']}. Update the container image to get it: on Unraid, "
-                   "Docker → Check for updates → Apply.", url=current["url"], color="info"):
+    if notify.emit("ap_update", notify.tr("Archipelago {version} is available", version=current["latest"]),
+                   notify.tr("This server runs {installed}. Update the container image to get it: on Unraid, "
+                             "Docker → Check for updates → Apply.", installed=current["installed"]),
+                   url=current["url"], color="info"):
         app_settings.set_state("announced_update", current["latest"])
 
 

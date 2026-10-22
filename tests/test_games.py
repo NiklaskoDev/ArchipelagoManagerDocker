@@ -95,6 +95,29 @@ def test_unambiguous_names_link_automatically(admin, seed_game, make_user):
         admin.delete(f"/api/games/{game['id']}")
 
 
+def test_a_slot_is_not_handed_to_whoever_names_a_config_after_it(admin, seed_game, make_user):
+    seed = admin.get(f"/api/games/{seed_game}").json()
+    bundled, other = seed["slots"][0], seed["slots"][1]  # the zip bundles the first slot's yaml
+    owner_name, owner = make_user()
+    squatter_name, squatter = make_user()
+    # the squatter copies the name and game; the owner's config is the yaml that came with the game, byte for byte
+    upload_yaml(squatter, "copy", player_yaml(bundled["name"], bundled["game"]))
+    upload_yaml(owner, "mine", player_yaml(bundled["name"], bundled["game"], "# original upload\n"))
+    # a config with the right name but for another game is not that player's either
+    wrong_game = "ChecksFinder" if other["game"] != "ChecksFinder" else "APQuest"
+    upload_yaml(squatter, "other", player_yaml(other["name"], wrong_game))
+    game = upload_game(admin, pregenerated_zip(admin, seed_game)).json()
+    try:
+        owners = {s["name"]: s["owner"] for s in game["slots"]}
+        assert owners[bundled["name"]] == owner_name
+        assert owners[other["name"]] != squatter_name
+    finally:
+        admin.delete(f"/api/games/{game['id']}")
+        for client in (owner, squatter):
+            for c in client.get("/api/configs").json():
+                client.delete(f"/api/configs/{c['id']}")
+
+
 def test_assigning_a_slot_copies_bundled_yaml_into_the_users_library(uploaded, admin, make_user):
     name, user = make_user()
     user_id = user.get("/api/auth/status").json()["user"]["id"]
