@@ -10,7 +10,7 @@ from collections.abc import Iterable, Iterator
 
 from .config import CONFIG
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 # Added in schema version 3
 _SIGNUPS = """
@@ -84,8 +84,11 @@ CREATE TABLE users (
     role          TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('admin', 'user')),
     disabled      INTEGER NOT NULL DEFAULT 0,
     created_at    REAL NOT NULL,
-    last_login    REAL
+    last_login    REAL,
+    discord_id    TEXT,
+    discord_name  TEXT
 );
+CREATE UNIQUE INDEX users_discord ON users(discord_id) WHERE discord_id IS NOT NULL;
 
 CREATE TABLE sessions (
     token_hash TEXT PRIMARY KEY,
@@ -202,7 +205,7 @@ CREATE TABLE job_players (
     games        TEXT NOT NULL DEFAULT '[]'
 );
 CREATE INDEX job_players_job ON job_players(job_id);
-""" + _SIGNUPS + _SOURCES
+""" + _SIGNUPS + _SOURCES + "ALTER TABLE apworld_sources ADD COLUMN latest_asset TEXT;"
 
 
 # Upgrades for databases created by older versions: MIGRATIONS[n] turns schema n - 1 into schema n. New databases get
@@ -211,6 +214,11 @@ MIGRATIONS: dict[int, str] = {
     2: "ALTER TABLE games ADD COLUMN single_claim INTEGER NOT NULL DEFAULT 0;",
     3: _SIGNUPS,
     4: _SOURCES,
+    # Discord accounts linked to users (an empty password_hash means the account signs in with Discord only)
+    5: "ALTER TABLE users ADD COLUMN discord_id TEXT; ALTER TABLE users ADD COLUMN discord_name TEXT; "
+       "CREATE UNIQUE INDEX users_discord ON users(discord_id) WHERE discord_id IS NOT NULL; "
+       # which exact file of the newest release an administrator was shown (see sources.fingerprint)
+       "ALTER TABLE apworld_sources ADD COLUMN latest_asset TEXT;",
 }
 
 

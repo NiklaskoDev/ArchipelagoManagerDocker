@@ -1,6 +1,7 @@
-import { h, clear, icon, toast, openModal, action } from "./util.js";
+import { h, clear, icon, toast, openModal, action, confirmDialog } from "./util.js";
 import { api, state, refreshStatus, setUnauthorizedHandler, isAdmin, post, ApiError } from "./api.js";
 import { banner, loading, field } from "./components.js";
+import { t, lang, LANGUAGES, setLanguage } from "./i18n.js";
 
 const ROUTES = [
   [/^\/?$/, () => import("./views/dashboard.js"), "home"],
@@ -38,7 +39,7 @@ function runCleanups() {
 async function route() {
   const hash = location.hash || "#/";
   if (dirtyCheck?.() && currentHash !== null && hash !== currentHash) {
-    if (!confirm("You have unsaved changes. Leave this page anyway?")) {
+    if (!confirm(t("You have unsaved changes. Leave this page anyway?"))) {
       history.replaceState(null, "", currentHash);
       return;
     }
@@ -53,8 +54,8 @@ async function route() {
   clear(view).append(loading());
   window.scrollTo(0, 0);
   if (!match) {
-    clear(view).append(h("div", { class: "empty" }, h("h3", {}, "Page not found"),
-      h("a", { class: "btn", href: "#/" }, "Go to the dashboard")));
+    clear(view).append(h("div", { class: "empty" }, h("h3", {}, t("Page not found")),
+      h("a", { class: "btn", href: "#/" }, t("Go to the dashboard"))));
     return;
   }
   const [m, load] = match;
@@ -76,8 +77,8 @@ async function route() {
   } catch (err) {
     if (token !== navToken) return;
     if (!(err instanceof ApiError)) console.error(err);  // API errors are shown on the page; this is for real bugs
-    clear(view).append(banner("error", icon("alert", 18), h("div", {}, h("strong", {}, "Something went wrong. "), err.message || String(err)),
-      h("button", { class: "btn sm", type: "button", onclick: route }, "Retry")));
+    clear(view).append(banner("error", icon("alert", 18), h("div", {}, h("strong", {}, t("Something went wrong.")), " ", err.message || String(err)),
+      h("button", { class: "btn sm", type: "button", onclick: route }, t("Retry"))));
   }
 }
 
@@ -99,27 +100,28 @@ function navLink(href, section, label, iconName) {
 function renderShell() {
   const perms = state.status.permissions;
   const links = [
-    navLink("#/", "home", "Dashboard", "home"),
-    navLink("#/games", "games", "Games", "server"),
-    navLink("#/configs", "configs", "My configs", "file"),
-    navLink("#/signups", "signups", "Sign-ups", "calendar"),
-    (isAdmin() || perms.generate) ? navLink("#/generate", "generate", "Generate", "zap") : null,
-    navLink("#/worlds", "worlds", "Custom games", "package"),
-    isAdmin() ? navLink("#/admin/users", "admin", "Admin", "settings") : null,
+    navLink("#/", "home", t("Dashboard"), "home"),
+    navLink("#/games", "games", t("Games"), "server"),
+    navLink("#/configs", "configs", t("My configs"), "file"),
+    navLink("#/signups", "signups", t("Sign-ups"), "calendar"),
+    (isAdmin() || perms.generate) ? navLink("#/generate", "generate", t("Generate"), "zap") : null,
+    navLink("#/worlds", "worlds", t("Custom games"), "package"),
+    isAdmin() ? navLink("#/admin/users", "admin", t("Admin"), "settings") : null,
   ];
   view = h("main", { id: "view", class: "view", tabindex: "-1" });
   const userButton = h("button", { class: "btn ghost user-btn", type: "button", "aria-haspopup": "menu" },
-    icon("user", 16), h("span", {}, state.user.username), isAdmin() ? h("span", { class: "badge accent" }, "admin") : null);
-  const menu = h("div", { class: "menu", hidden: true, role: "menu" },
-    h("button", { class: "menu-item", type: "button", role: "menuitem", onclick: () => { menu.hidden = true; passwordDialog(); } },
-      icon("key", 14), "Change password"),
-    h("button", { class: "menu-item", type: "button", role: "menuitem", onclick: logout }, icon("logout", 14), "Sign out"));
-  userButton.onclick = (e) => { e.stopPropagation(); menu.hidden = !menu.hidden; };
+    icon("user", 16), h("span", {}, state.user.username), isAdmin() ? h("span", { class: "badge accent" }, t("admin")) : null);
+  const menu = h("div", { class: "menu", hidden: true, role: "menu" });
+  userButton.onclick = (e) => {
+    e.stopPropagation();
+    if (menu.hidden) drawUserMenu(menu);
+    menu.hidden = !menu.hidden;
+  };
   document.addEventListener("click", () => { menu.hidden = true; });
   const topbar = h("header", { class: "topbar" },
       h("div", { class: "topbar-inner" },
         h("a", { class: "brand", href: "#/" }, h("span", { class: "brand-mark" }, "AP"), h("span", { class: "brand-name" }, "Archipelago Manager")),
-        h("nav", { class: "nav", "aria-label": "Main" }, links),
+        h("nav", { class: "nav", "aria-label": t("Main") }, links),
         h("div", { class: "user-menu" }, userButton, menu)));
   clear(app).append(topbar, view, h("footer", { class: "footer muted small" }, `Archipelago Manager ${state.status.version}`));
   fitNav();
@@ -145,6 +147,70 @@ window.addEventListener("resize", () => {
   requestAnimationFrame(() => { fitPending = false; fitNav(); });
 });
 
+function drawUserMenu(menu) {
+  const user = state.user;
+  const item = (iconName, label, onclick) => h("button", { class: "menu-item", type: "button", role: "menuitem",
+    onclick: (e) => { e.stopPropagation(); menu.hidden = true; onclick(); } }, icon(iconName, 14), label);
+  const other = lang === "de" ? "en" : "de";
+  clear(menu).append(
+    item("key", user.has_password ? t("Change password") : t("Set a password"), passwordDialog),
+    user.discord_name
+      ? [h("div", { class: "menu-note" }, t("Discord: {name}", { name: user.discord_name })), item("link", t("Unlink Discord"), unlinkDiscord)]
+      : state.status.discord_login ? item("link", t("Link Discord"), linkDiscord) : null,
+    item("globe", LANGUAGES[other], () => {
+      if (dirtyCheck?.() && !confirm(t("You have unsaved changes. Leave this page anyway?"))) return;
+      setLanguage(other);
+    }),
+    h("div", { class: "menu-sep" }),
+    item("logout", t("Sign out"), logout));
+}
+
+// Discord sends the browser back to the configured address of this web UI, and the sign-in only finishes in the browser
+// (and on the address) that started it. Starting on another address would end with "expired", so say so up front.
+function onSiteAddress() {
+  const site = state.status.site_url;
+  try { return !site || new URL(site).origin === location.origin; } catch { return false; }
+}
+
+function openOnSiteAddress(why) {
+  const site = state.status.site_url;
+  const modal = openModal({
+    title: t("Open the right address"),
+    body: h("div", { class: "stack" }, h("p", {}, why),
+      h("p", {}, h("a", { href: `${site}/${location.hash}` }, site))),
+    actions: [h("button", { class: "btn", type: "button", onclick: () => modal.close() }, t("Close"))],
+  });
+}
+
+async function linkDiscord() {
+  if (!onSiteAddress()) {
+    openOnSiteAddress(t("Discord sends you back to the address this server is set up with, so link your account from there:"));
+    return;
+  }
+  try {
+    const { url } = await post("/api/auth/discord/link");
+    location.href = url;
+  } catch (err) {
+    toast(err.message, "error");
+  }
+}
+
+async function unlinkDiscord() {
+  if (!state.user.has_password) {
+    toast(t("Set a password first, or you could not sign in any more."), "error");
+    passwordDialog();
+    return;
+  }
+  if (!(await confirmDialog(t("You will no longer be able to sign in with this Discord account. You can link it again later."),
+    { title: t("Unlink Discord?"), confirmText: t("Unlink") }))) return;
+  try {
+    state.user = await post("/api/auth/discord/unlink");
+    toast(t("Discord unlinked"), "success");
+  } catch (err) {
+    toast(err.message, "error");
+  }
+}
+
 async function logout() {
   await api("POST", "/api/auth/logout", {}).catch(() => {});
   state.user = null;
@@ -152,28 +218,66 @@ async function logout() {
 }
 
 function passwordDialog() {
-  const current = h("input", { type: "password", class: "input", autocomplete: "current-password" });
+  // Accounts created through Discord have no password yet; they set a first one without a current one.
+  const first = !state.user.has_password;
+  const current = first ? null : h("input", { type: "password", class: "input", autocomplete: "current-password" });
   const next = h("input", { type: "password", class: "input", autocomplete: "new-password", minLength: 8 });
   const again = h("input", { type: "password", class: "input", autocomplete: "new-password" });
-  const save = h("button", { class: "btn primary", type: "button" }, "Change password");
+  const title = first ? t("Set a password") : t("Change password");
+  const save = h("button", { class: "btn primary", type: "button" }, title);
   save.onclick = action(async () => {
-    if (next.value !== again.value) throw new Error("The new passwords do not match");
-    await post("/api/auth/password", { current_password: current.value, new_password: next.value });
+    if (next.value !== again.value) throw new Error(t("The new passwords do not match"));
+    await post("/api/auth/password", { current_password: current ? current.value : "", new_password: next.value });
     modal.close();
-    toast("Password changed", "success");
+    if (first) state.user = { ...state.user, has_password: true };
+    toast(first ? t("Password set. You can now also sign in with {name} and this password.", { name: state.user.username })
+      : t("Password changed"), "success");
   });
   const modal = openModal({
-    title: "Change password",
-    body: h("div", { class: "stack" }, field("Current password", current), field("New password", next, "At least 8 characters"),
-      field("Repeat new password", again)),
-    actions: [h("button", { class: "btn", type: "button", onclick: () => modal.close() }, "Cancel"), save],
+    title,
+    body: h("div", { class: "stack" }, current ? field(t("Current password"), current) : null,
+      field(t("New password"), next, t("At least 8 characters")), field(t("Repeat new password"), again)),
+    actions: [h("button", { class: "btn", type: "button", onclick: () => modal.close() }, t("Cancel")), save],
   });
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// what Discord sent the browser back with: #/?discord=linked or #/?discord_error=expired (fixed codes only)
+// ---------------------------------------------------------------------------------------------------------------------
+const DISCORD_ERRORS = {
+  expired: () => t("The sign-in with Discord took too long or was started in another browser. Please try again."),
+  denied: () => t("Signing in with Discord was cancelled."),
+  not_linked: () => t("This Discord account is not linked to an account here. Sign in with your username and password and link Discord in the user menu, or ask an administrator."),
+  disabled_user: () => t("This account is disabled. Ask an administrator."),
+  not_member: () => t("Only members of this server's Discord community can sign in with Discord."),
+  taken: () => t("This Discord account is already linked to another user."),
+  disabled: () => t("Signing in with Discord is not set up on this server."),
+  discord: () => t("Discord did not accept the sign-in. Try again; if it keeps happening, an administrator should check the client ID and secret."),
+  unreachable: () => t("Discord could not be reached. Try again in a moment."),
+  busy: () => t("Too many sign-in attempts. Try again in a few minutes."),
+};
+const DISCORD_DONE = {
+  linked: () => t("Your Discord account is linked. You can now sign in with Discord."),
+  welcome: () => t("Welcome! Your account was created with Discord. Set a password in the user menu if you also want to sign in without Discord."),
+};
+
+function takeDiscordResult() {
+  const [path, query = ""] = (location.hash || "#/").slice(1).split("?");
+  const params = new URLSearchParams(query);
+  const error = params.get("discord_error"), done = params.get("discord");
+  if (!error && !done) return null;
+  params.delete("discord_error");
+  params.delete("discord");
+  const rest = params.toString();
+  history.replaceState(null, "", `#${path}${rest ? `?${rest}` : ""}`);
+  if (error) return { kind: "error", text: (DISCORD_ERRORS[error] || DISCORD_ERRORS.discord)() };
+  return DISCORD_DONE[done] ? { kind: "success", text: DISCORD_DONE[done]() } : null;
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
 // sign in / first-run setup / registration
 // ---------------------------------------------------------------------------------------------------------------------
-function renderAuth() {
+function renderAuth(notice) {
   view = null;
   const status = state.status;
   let mode = status.needs_setup ? "setup" : "login";
@@ -183,13 +287,14 @@ function renderAuth() {
     const password = h("input", { class: "input", type: "password", required: true,
       autocomplete: mode === "login" ? "current-password" : "new-password", minLength: mode === "login" ? 1 : 8 });
     const confirm = mode === "login" ? null : h("input", { class: "input", type: "password", autocomplete: "new-password", required: true });
-    const error = h("div", { class: "form-error", role: "alert" });
+    const error = h("div", { class: "form-error", role: "alert" }, notice?.kind === "error" ? notice.text : null);
+    notice = null;
     const submit = h("button", { class: "btn primary block", type: "submit" },
-      { setup: "Create administrator", login: "Sign in", register: "Create account" }[mode]);
+      { setup: t("Create administrator"), login: t("Sign in"), register: t("Create account") }[mode]);
     const form = h("form", { class: "stack", onsubmit: async (e) => {
       e.preventDefault();
       error.textContent = "";
-      if (confirm && confirm.value !== password.value) { error.textContent = "The passwords do not match"; return; }
+      if (confirm && confirm.value !== password.value) { error.textContent = t("The passwords do not match"); return; }
       submit.disabled = true;
       try {
         const path = { setup: "setup", login: "login", register: "register" }[mode];
@@ -200,36 +305,50 @@ function renderAuth() {
         submit.disabled = false;
       }
     } },
-    field("Username", username),
-    field("Password", password, mode === "login" ? null : "At least 8 characters"),
-    confirm ? field("Repeat password", confirm) : null,
+    field(t("Username"), username),
+    field(t("Password"), password, mode === "login" ? null : t("At least 8 characters")),
+    confirm ? field(t("Repeat password"), confirm) : null,
     error, submit);
+    const other = lang === "de" ? "en" : "de";
     clear(card).append(
       h("div", { class: "auth-brand" }, h("span", { class: "brand-mark large" }, "AP"), h("h1", {}, "Archipelago Manager")),
-      mode === "setup" ? h("p", { class: "muted" }, "Welcome! Create the administrator account to get started.") : null,
+      mode === "setup" ? h("p", { class: "muted" }, t("Welcome! Create the administrator account to get started.")) : null,
       form,
+      mode !== "setup" && status.discord_login ? [h("div", { class: "auth-or" }, t("or")), discordButton(status)] : null,
       mode !== "setup" && status.allow_registration
-        ? h("p", { class: "muted center small" }, mode === "login" ? "No account yet? " : "Already registered? ",
+        ? h("p", { class: "muted center small" }, mode === "login" ? t("No account yet?") : t("Already registered?"), " ",
           h("a", { href: "#", onclick: (e) => { e.preventDefault(); mode = mode === "login" ? "register" : "login"; draw(); } },
-            mode === "login" ? "Create one" : "Sign in"))
-        : null);
+            mode === "login" ? t("Create one") : t("Sign in")))
+        : null,
+      h("p", { class: "center small" }, h("a", { href: "#", lang: other, onclick: (e) => { e.preventDefault(); setLanguage(other); } },
+        icon("globe", 13), " ", LANGUAGES[other])));
   };
   draw();
   clear(app).append(h("div", { class: "auth-wrap" }, card));
 }
 
+// A plain link: the browser goes to this server, which sends it on to Discord. It starts on the configured address of
+// this web UI, because that is where Discord sends it back.
+function discordButton(status) {
+  const next = /^#\/[A-Za-z0-9/_-]*$/.test(location.hash) ? location.hash : "";
+  const href = `${status.site_url}/api/auth/discord/login${next ? `?next=${encodeURIComponent(next)}` : ""}`;
+  return h("a", { class: "btn discord block", href }, icon("login", 16), t("Sign in with Discord"));
+}
+
 // ---------------------------------------------------------------------------------------------------------------------
 export async function boot() {
+  const discordResult = takeDiscordResult();
   try {
     await refreshStatus();
   } catch (err) {
-    clear(app).append(h("div", { class: "auth-wrap" }, banner("error", `Cannot reach the server: ${err.message}`)));
+    clear(app).append(h("div", { class: "auth-wrap" }, banner("error", t("Cannot reach the server: {error}", { error: err.message }))));
     return;
   }
   if (!state.user) {
-    renderAuth();
+    renderAuth(discordResult);
     return;
   }
+  if (discordResult) toast(discordResult.text, discordResult.kind, 9000);
   renderShell();
   currentHash = null;
   await route();

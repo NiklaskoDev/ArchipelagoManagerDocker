@@ -17,7 +17,7 @@ from .rooms import ROOMS
 from .routes import admin, apworlds, auth, configs, games, jobs
 from .routes import signups as signup_routes
 from .routes import sources as source_routes
-from .security import CSRF_HEADER, CSRF_VALUE
+from .security import CSRF_HEADER, CSRF_VALUE, user_for_request
 
 log = logging.getLogger("archipelago_manager")
 
@@ -68,19 +68,29 @@ async def lifespan(_app: FastAPI):
 class BodyLimit:
     """Rejects oversized request bodies before Starlette spools them to disk.
 
-    Only the upload endpoints may be large; everything else is a small JSON document or a handful of yaml files.
+    FastAPI reads a form, files and all, before the route checks who is asking. So the limit depends on the session up
+    front: without one only the tiny sign-in requests fit, and only the uploads of those allowed to upload may be large.
+    Everything else is a small JSON document or a handful of yaml files.
     """
 
-    UPLOAD_PATHS = ("/api/games", "/api/apworlds")  # multiworld zips, .apworld files and extra files of a game
+    ANONYMOUS_LIMIT = 64 * 1024
     SMALL_LIMIT = 16 * 1024 * 1024
+    PLAYER_APWORLD_LIMIT = 100 * 1024 * 1024  # a submission still waits for approval; admins may upload more
 
     def __init__(self, app) -> None:
         self.app = app
 
     def limit_for(self, scope) -> int:
-        path = scope["path"]
-        is_upload = path in self.UPLOAD_PATHS or (path.startswith("/api/games/") and path.endswith("/files"))
-        return CONFIG.max_upload_bytes + 1024 * 1024 if is_upload else self.SMALL_LIMIT
+        user = user_for_request(Request(scope))
+        if user is None:
+            return self.ANONYMOUS_LIMIT
+        path, upload = scope["path"], CONFIG.max_upload_bytes + 1024 * 1024
+        admin = user["role"] == "admin"
+        if path == "/api/apworlds":
+            return upload if admin else min(upload, self.PLAYER_APWORLD_LIMIT)
+        if admin and (path == "/api/games" or (path.startswith("/api/games/") and path.endswith("/files"))):
+            return upload  # multiworld zips and extra files of a game
+        return self.SMALL_LIMIT
 
     async def __call__(self, scope, receive, send) -> None:
         if scope["type"] != "http" or scope["method"] not in ("POST", "PUT", "PATCH"):
@@ -130,6 +140,22 @@ app = FastAPI(title="Archipelago Manager", version=__version__, lifespan=lifespa
               docs_url=None, redoc_url=None, openapi_url=None)
 
 
+_proxy_warned = False
+
+
+def _warn_about_untrusted_proxy(request: Request) -> None:
+    """Behind a reverse proxy that FORWARDED_ALLOW_IPS does not list, every visitor seems to come from the proxy: they
+    share one budget of failed logins, so a few wrong passwords lock everyone out. Say so once in the log."""
+    global _proxy_warned
+    forwarded = request.headers.get("x-forwarded-for")
+    peer = request.client.host if request.client else None
+    if _proxy_warned or not forwarded or not peer or forwarded.split(",")[-1].strip() == peer:
+        return  # (uvicorn puts the forwarded address in place of the proxy's when it trusts the proxy)
+    _proxy_warned = True
+    log.warning("Requests arrive through a reverse proxy at %s that is not trusted, so all visitors look like %s. "
+                "Set FORWARDED_ALLOW_IPS=%s on the container.", peer, peer, peer)
+
+
 @app.middleware("http")
 async def guard(request: Request, call_next):
     # Browsers cannot attach a custom header to a cross-site request without a CORS preflight, which we never allow.
@@ -137,6 +163,7 @@ async def guard(request: Request, call_next):
     if (request.method not in ("GET", "HEAD", "OPTIONS") and request.url.path.startswith("/api/")
             and request.headers.get(CSRF_HEADER) != CSRF_VALUE):
         return JSONResponse(status_code=403, content={"detail": "Missing request header"})
+    _warn_about_untrusted_proxy(request)
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"

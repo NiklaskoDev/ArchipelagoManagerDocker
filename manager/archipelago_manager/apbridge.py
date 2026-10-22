@@ -25,6 +25,7 @@ class APBridgeError(RuntimeError):
 def ap_env() -> dict[str, str]:
     """Environment for every Archipelago subprocess (helper, generator, servers)."""
     env = os.environ.copy()
+    env.pop("ADMIN_PASSWORD", None)  # the manager's own login is none of an .apworld's business
     env["XDG_DATA_HOME"] = str(CONFIG.ap_data_home)
     # Requirements are baked into the image. A runtime pip install would only hang waiting for a prompt.
     env["SKIP_REQUIREMENTS_UPDATE"] = "true"
@@ -43,19 +44,25 @@ def _parse_result(stdout: str) -> dict[str, Any]:
     raise APBridgeError("The Archipelago helper produced no result")
 
 
+# Each helper loads Archipelago and often a whole multiworld into memory. However many requests come in at once, only a
+# few run at the same time; the rest wait their turn.
+_HELPERS = asyncio.Semaphore(4)
+
+
 async def run_helper(*args: str, timeout: float = 180) -> dict[str, Any]:
     if not (CONFIG.ap_dir / "Utils.py").is_file():
         raise APBridgeError(f"Archipelago is not installed at {CONFIG.ap_dir}")
-    proc = await asyncio.create_subprocess_exec(
-        CONFIG.ap_python, str(CONFIG.helper), "--ap-dir", str(CONFIG.ap_dir), *args,
-        stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-        env=ap_env(), cwd=str(CONFIG.ap_dir))
-    try:
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout)
-    except TimeoutError:
-        proc.kill()
-        await proc.wait()
-        raise APBridgeError(f"Archipelago helper timed out after {timeout:.0f}s") from None
+    async with _HELPERS:
+        proc = await asyncio.create_subprocess_exec(
+            CONFIG.ap_python, str(CONFIG.helper), "--ap-dir", str(CONFIG.ap_dir), *args,
+            stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            env=ap_env(), cwd=str(CONFIG.ap_dir))
+        try:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout)
+        except TimeoutError:
+            proc.kill()
+            await proc.wait()
+            raise APBridgeError(f"Archipelago helper timed out after {timeout:.0f}s") from None
     try:
         result = _parse_result(stdout.decode(errors="replace"))
     except (APBridgeError, ValueError):

@@ -239,15 +239,16 @@ def close(signup_id: int, *, user: sqlite3.Row | None = None) -> None:
         rows = entries(signup_id)
         generate_now = bool(signup["auto_generate"] and rows)
         if not rows:
-            next_step = "Nobody signed up."
+            next_step = notify.tr("Nobody signed up.")
         elif generate_now:
-            next_step = "Generating the game now."
+            next_step = notify.tr("Generating the game now.")
         else:
-            next_step = "An administrator will generate the game."
-        notify.emit("signup", f"Sign-ups closed: {signup['name']}",
-                    f"{len(rows)} {'entry' if len(rows) == 1 else 'entries'}. {next_step}",
+            next_step = notify.tr("An administrator will generate the game.")
+        notify.emit("signup", notify.tr("Sign-ups closed: {name}", name=signup["name"]),
+                    notify.tr("{n} entry. {next_step}" if len(rows) == 1 else "{n} entries. {next_step}",
+                              n=len(rows), next_step=next_step),
                     url=notify.link(f"/signups/{signup_id}"),
-                    fields=[("Players", _player_lines(rows))] if rows else None, color="info")
+                    fields=[(notify.tr("Players"), _player_lines(rows))] if rows else None, color="info")
     if generate_now:
         try:
             generate(signup_id, user=user)
@@ -287,7 +288,7 @@ def generate(signup_id: int, *, user: sqlite3.Row | None = None) -> int:
         except (SignupError, JobRequestError) as e:
             db.execute("UPDATE signups SET error = ? WHERE id = ?", (e.message, signup_id))
             if user is None:  # nobody is looking at the page to see the error: this ran at the deadline
-                notify.emit("generation", f"Could not generate {signup['name']}", e.message,
+                notify.emit("generation", notify.tr("Could not generate {name}", name=signup["name"]), e.message,
                             url=notify.link(f"/signups/{signup_id}"), color="error")
             if isinstance(e, JobRequestError):
                 raise SignupError(e.message, e.status, e.missing_games) from None
@@ -343,26 +344,29 @@ def announce_open(signup_id: int, *, reopened: bool = False) -> None:
         return
     text = signup["description"] + "\n\n" if signup["description"] else ""
     if signup["deadline"]:
-        text += (f"Enter your YAML until {notify.timestamp(signup['deadline'], 'F')} "
-                 f"({notify.timestamp(signup['deadline'], 'R')}).")
+        text += notify.tr("Enter your YAML until {date} ({when}).", date=notify.timestamp(signup["deadline"], "F"),
+                          when=notify.timestamp(signup["deadline"], "R"))
     else:
-        text += "Enter your YAML until an administrator closes the sign-ups."
+        text += notify.tr("Enter your YAML until an administrator closes the sign-ups.")
     allowed = db.jloads(signup["allowed_games"], [])
     limit = signup["configs_per_user"]
-    fields = [("Games", notify.md(", ".join(allowed)) if allowed else "Any game installed on the server", False),
-              ("Configs per player", str(limit), True)]
-    notify.emit("signup", f"Sign-ups {'reopened' if reopened else 'open'}: {signup['name']}", text,
+    fields = [(notify.tr("Games"), notify.md(", ".join(allowed)) if allowed
+               else notify.tr("Any game installed on the server"), False),
+              (notify.tr("Configs per player"), str(limit), True)]
+    notify.emit("signup", notify.tr("Sign-ups reopened: {name}" if reopened else "Sign-ups open: {name}",
+                                    name=signup["name"]), text,
                 url=notify.link(f"/signups/{signup_id}"), fields=fields, color="info")
 
 
 def _remind(signup: sqlite3.Row) -> None:
     rows = entries(signup["id"])
     deadline = signup["deadline"]
-    notify.emit("signup", f"Sign-ups for {signup['name']} close soon",
-                f"Sign-ups close {notify.timestamp(deadline, 'R')} ({notify.timestamp(deadline, 'F')}). "
-                f"{len(rows)} {'entry' if len(rows) == 1 else 'entries'} so far.",
+    text = notify.tr("Sign-ups close {when} ({date}).", when=notify.timestamp(deadline, "R"),
+                     date=notify.timestamp(deadline, "F"))
+    text += " " + notify.tr("{n} entry so far." if len(rows) == 1 else "{n} entries so far.", n=len(rows))
+    notify.emit("signup", notify.tr("Sign-ups for {name} close soon", name=signup["name"]), text,
                 url=notify.link(f"/signups/{signup['id']}"),
-                fields=[("Players", _player_lines(rows))] if rows else None, color="warning")
+                fields=[(notify.tr("Players"), _player_lines(rows))] if rows else None, color="warning")
 
 
 def tick(now: float | None = None) -> None:

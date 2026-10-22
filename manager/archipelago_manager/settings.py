@@ -40,11 +40,20 @@ DEFAULTS: dict[str, Any] = {
     "auto_restart_crashed": True,
     "default_server_options": DEFAULT_SERVER_OPTIONS,
     "discord_webhook_url": "",
-    "notify_link_url": "",  # address of this web UI, for links in notifications
     "notify_events": list(NOTIFY_EVENTS),
+    "notify_language": "en",
+    # Address of this web UI as players open it: links in notifications, and where Discord sends people back to
+    "site_url": "",
+    "discord_login": False,
+    "discord_client_id": "",
+    "discord_client_secret": "",  # never sent to the browser; see public_settings()
+    "discord_signup": False,       # create accounts for Discord users nobody linked yet
+    "discord_guild_id": "",        # if set, only members of this Discord server may sign in with Discord
 }
+LANGUAGES = ("en", "de")
 
-_BOOL_KEYS = {"allow_registration", "users_can_start_rooms", "users_can_generate", "users_can_upload_apworlds",
+_BOOL_KEYS = {"discord_login", "discord_signup",
+              "allow_registration", "users_can_start_rooms", "users_can_generate", "users_can_upload_apworlds",
               "auto_restart_crashed"}
 
 
@@ -97,11 +106,30 @@ def get_settings() -> dict[str, Any]:
         if key in stored:
             result[key] = stored[key]
     result["default_server_options"] = clean_server_options(stored.get("default_server_options") or {})
+    if "site_url" not in stored and stored.get("notify_link_url"):  # its name up to version 1.2
+        result["site_url"] = stored["notify_link_url"]
     return result
+
+
+def public_settings(values: dict[str, Any]) -> dict[str, Any]:
+    """Settings as an admin's browser may see them: without the Discord client secret, only whether one is set."""
+    return {**{k: v for k, v in values.items() if k != "discord_client_secret"},
+            "discord_client_secret_set": bool(values["discord_client_secret"])}
+
+
+def discord_login_ready(values: dict[str, Any] | None = None) -> bool:
+    values = values or get_settings()
+    return bool(values["discord_login"] and values["discord_client_id"] and values["discord_client_secret"]
+                and values["site_url"])
 
 
 def get_setting(key: str) -> Any:
     return get_settings()[key]
+
+
+# How the settings below are called in the web UI, for error messages
+_LABELS = {"discord_webhook_url": "The webhook address", "site_url": "The address of this web UI",
+           "discord_client_id": "The client ID", "discord_guild_id": "The server ID"}
 
 
 def update_settings(patch: dict[str, Any]) -> dict[str, Any]:
@@ -118,15 +146,31 @@ def update_settings(patch: dict[str, Any]) -> dict[str, Any]:
             value = value.strip()
         elif key == "default_server_options":
             value = clean_server_options(value, base=get_settings()["default_server_options"])
-        elif key in ("discord_webhook_url", "notify_link_url"):
+        elif key in ("discord_webhook_url", "site_url"):
             value = value.strip() if isinstance(value, str) else value
             if not isinstance(value, str) or (value and not valid_url(value)):
-                raise SettingsError(f"{key} must be an http:// or https:// address")
+                raise SettingsError(f"{_LABELS[key]} must start with http:// or https://")
+            if key == "site_url":
+                value = value.rstrip("/")
+        elif key in ("discord_client_id", "discord_guild_id"):
+            value = value.strip() if isinstance(value, str) else value
+            if not isinstance(value, str) or (value and not re.fullmatch(r"\d{5,25}", value)):
+                raise SettingsError(f"{_LABELS[key]} must be the number Discord shows for it")
+        elif key == "discord_client_secret":
+            if not isinstance(value, str) or len(value) > 200 or not re.fullmatch(r"[\x21-\x7e]*", value):
+                raise SettingsError("That is not a valid client secret")
+        elif key == "notify_language":
+            if value not in LANGUAGES:
+                raise SettingsError(f"notify_language must be one of: {', '.join(LANGUAGES)}")
         elif key == "notify_events":
             if not isinstance(value, list) or any(v not in NOTIFY_EVENTS for v in value):
                 raise SettingsError(f"notify_events may only contain: {', '.join(NOTIFY_EVENTS)}")
             value = [e for e in NOTIFY_EVENTS if e in value]
         clean[key] = value
+    after = {**get_settings(), **clean}
+    if after["discord_login"] and not discord_login_ready(after):
+        raise SettingsError("To turn on signing in with Discord, enter the client ID, the client secret and the "
+                            "address of this web UI")
     with db.connection() as conn:
         for key, value in clean.items():
             conn.execute("INSERT INTO settings(key, value) VALUES (?, ?) "

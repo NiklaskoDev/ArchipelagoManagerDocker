@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 from .. import db, notify, settings as app_settings, sources
 from ..security import admin_user, current_user, is_admin
+from . import apworlds as library
 
 router = APIRouter(prefix="/api")
 
@@ -74,6 +75,10 @@ class NewSource(BaseModel):
 async def add_source(body: NewSource, user: sqlite3.Row = Depends(current_user)) -> dict:
     _can_submit(user)
     admin = is_admin(user)
+    if not admin and db.query_one("SELECT COUNT(*) AS n FROM apworld_sources WHERE status = 'pending' AND added_by = ?",
+                                  (user["id"],))["n"] >= library.MAX_PENDING_PER_USER:
+        raise HTTPException(409, f"You already have {library.MAX_PENDING_PER_USER} repositories waiting for approval. "
+                                 "Wait for an administrator, or withdraw one.")
     try:
         release = await asyncio.to_thread(sources.fetch_release, sources.parse_repo(body.repo))
         asset = sources.pick_asset(release, body.asset)
@@ -84,10 +89,10 @@ async def add_source(body: NewSource, user: sqlite3.Row = Depends(current_user))
     now = time.time()
     source_id = db.execute(
         "INSERT INTO apworld_sources(repo, asset, status, note, added_by, added_at, approved_by, approved_at, "
-        "latest_tag, latest_url, checked_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        "latest_tag, latest_url, latest_asset, checked_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
         (release["repo"], asset["name"], "approved" if admin else "pending", (body.note or "").strip() or None,
          user["id"], now, user["id"] if admin else None, now if admin else None, release["tag"],
-         release["release_url"], now))
+         release["release_url"], sources.fingerprint(release, asset), now))
     if admin:  # an administrator's own choice: install right away, and keep nothing if that fails
         try:
             await sources.install(source_id)
@@ -96,10 +101,11 @@ async def add_source(body: NewSource, user: sqlite3.Row = Depends(current_user))
             raise _http(e) from None
     else:
         note = f"\n> {notify.md(body.note.strip())}" if body.note and body.note.strip() else ""
-        notify.emit("apworld_pending", f"Custom game waiting for approval: {release['repo']}",
-                    f"{notify.md(user['username'])} wants to add [{notify.md(release['repo'])}]"
-                    f"(https://github.com/{release['repo']}), release {notify.md(release['tag'])} "
-                    f"({notify.md(asset['name'])}). Nothing is downloaded until an administrator approves it.{note}",
+        notify.emit("apworld_pending", notify.tr("Custom game waiting for approval: {game}", game=release["repo"]),
+                    notify.tr("{user} wants to add [{repo}](https://github.com/{path}), release {tag} ({file}). "
+                              "Nothing is downloaded until an administrator approves it.",
+                              user=notify.md(user["username"]), repo=notify.md(release["repo"]), path=release["repo"],
+                              tag=notify.md(release["tag"]), file=notify.md(asset["name"])) + note,
                     url=notify.link("/worlds"), color="warning")
     return source_json(_row(source_id))
 
@@ -112,7 +118,8 @@ async def approve_source(source_id: int, admin: sqlite3.Row = Depends(admin_user
     db.execute("UPDATE apworld_sources SET status = 'approved', approved_by = ?, approved_at = ? WHERE id = ?",
                (admin["id"], time.time(), source_id))
     try:
-        await sources.install(source_id)
+        # exactly the release the administrator was shown, not whatever the repository holds by now
+        await sources.install(source_id, expected=row["latest_asset"] or "")
     except sources.SourceError as e:
         # back to waiting, with the reason, so nothing counts as approved that is not installed
         db.execute("UPDATE apworld_sources SET status = 'pending', approved_by = NULL, approved_at = NULL, error = ? "
@@ -123,9 +130,9 @@ async def approve_source(source_id: int, admin: sqlite3.Row = Depends(admin_user
 
 @router.post("/apworld-sources/{source_id}/update")
 async def update_source(source_id: int, _admin: sqlite3.Row = Depends(admin_user)) -> dict:
-    _row(source_id)
+    row = _row(source_id)
     try:
-        await sources.install(source_id)
+        await sources.install(source_id, expected=row["latest_asset"] or "")
     except sources.SourceError as e:
         db.execute("UPDATE apworld_sources SET error = ? WHERE id = ?", (e.message, source_id))
         raise _http(e) from None

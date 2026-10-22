@@ -1,6 +1,7 @@
 import { h, clear, icon, toast, action, confirmDialog, fmtAgo } from "../util.js";
 import { get, post, put, del, isAdmin, state } from "../api.js";
 import { pageHeader, chips, banner, field, loading, missingGamesPanel, missingRomsPanel, badge } from "../components.js";
+import { t, tServer } from "../i18n.js";
 
 export default async function render({ root, params, query, cleanup, setDirtyCheck, isCurrent }) {
   const id = params[0] ? Number(params[0]) : null;
@@ -18,7 +19,7 @@ export default async function render({ root, params, query, cleanup, setDirtyChe
     text = game === "__blank__"
       ? "name: Player\ngame: \n"
       : await fetch(`/api/templates/yaml?game=${encodeURIComponent(game)}`, { credentials: "same-origin" }).then((r) => {
-          if (!r.ok) throw new Error(`No template for ${game}`);
+          if (!r.ok) throw new Error(t("No template for {game}", { game }));
           return r.text();
         });
     // templates ship with a placeholder name; give the user a sensible starting point
@@ -28,7 +29,7 @@ export default async function render({ root, params, query, cleanup, setDirtyChe
 
   const editor = h("textarea", { class: "input editor", spellcheck: false, wrap: "off", "aria-label": "YAML" });
   editor.value = text;
-  const nameInput = h("input", { class: "input", value: name, maxLength: 120, "aria-label": "File name" });
+  const nameInput = h("input", { class: "input", value: name, maxLength: 120, "aria-label": t("File name") });
   const infoHost = h("div", { class: "stack" });
   const errorHost = h("div");
   let saved = { text, name };
@@ -41,22 +42,22 @@ export default async function render({ root, params, query, cleanup, setDirtyChe
   function drawInfo(c, warnings = []) {
     clear(infoHost);
     if (!c) {
-      infoHost.append(h("p", { class: "muted small" }, "Save the file to see which players and games it defines."));
+      infoHost.append(h("p", { class: "muted small" }, t("Save the file to see which players and games it defines.")));
       return;
     }
     infoHost.append(
       h("dl", { class: "kv" },
-        h("dt", {}, "Player"), h("dd", {}, c.player_names.length ? c.player_names.join(", ") : h("span", { class: "muted" }, "taken from the file name")),
-        h("dt", {}, "Game"), h("dd", {}, chips(c.games, c.missing_games)),
-        c.owner && isAdmin() ? [h("dt", {}, "Owner"), h("dd", {}, c.owner)] : null,
-        h("dt", {}, "Updated"), h("dd", {}, fmtAgo(c.updated_at))),
-      ...warnings.map((w) => banner("info", icon("alert", 16), w)),
+        h("dt", {}, t("Player")), h("dd", {}, c.player_names.length ? c.player_names.join(", ") : h("span", { class: "muted" }, t("taken from the file name"))),
+        h("dt", {}, t("Game")), h("dd", {}, chips(c.games, c.missing_games)),
+        c.owner && isAdmin() ? [h("dt", {}, t("Owner")), h("dd", {}, c.owner)] : null,
+        h("dt", {}, t("Updated")), h("dd", {}, fmtAgo(c.updated_at))),
+      ...warnings.map((w) => banner("info", icon("alert", 16), tServer(w))),
       c.missing_games.length ? missingGamesPanel(c.missing_games.map((g) => ({ game: g, configs: [{ id: c.id, name: c.name, owner: c.owner }], games: [], pending: [] })),
         async () => drawInfo(await get(`/api/configs/${c.id}`), warnings)) : null,
       missingRomsPanel(c.missing_roms || []));
   }
 
-  const save = h("button", { class: "btn primary", type: "button" }, icon("check", 14), "Save");
+  const save = h("button", { class: "btn primary", type: "button" }, icon("check", 14), t("Save"));
   const doSave = action(async () => {
     clear(errorHost);
     try {
@@ -65,13 +66,13 @@ export default async function render({ root, params, query, cleanup, setDirtyChe
         : await put(`/api/configs/${id}`, { name: nameInput.value, content: editor.value });
       saved = { text: editor.value, name: result.name };
       nameInput.value = result.name;
-      toast("Saved", "success");
+      toast(t("Saved"), "success");
       if (id === null) { location.hash = `#/configs/${result.id}`; return; }
       config = { ...config, ...result };
       drawInfo(config, result.warnings || []);
     } catch (err) {
       errorHost.append(banner("error", icon("alert", 16), err.message));
-      throw new Error("Not saved");
+      throw new Error(t("Not saved"));
     }
   });
   save.onclick = doSave;
@@ -89,40 +90,40 @@ export default async function render({ root, params, query, cleanup, setDirtyChe
   });
 
   root.append(
-    h("div", { class: "muted small" }, h("a", { href: "#/configs" }, "← All configs")),
-    pageHeader(id === null ? "New config" : config.name, "Edit the YAML directly. Everything is checked when you save.",
-      id !== null ? h("a", { class: "btn", href: `/api/configs/${id}/download` }, icon("download", 14), "Download") : null,
+    h("div", { class: "muted small" }, h("a", { href: "#/configs" }, t("← All configs"))),
+    pageHeader(id === null ? t("New config") : config.name, t("Edit the YAML directly. Everything is checked when you save."),
+      id !== null ? h("a", { class: "btn", href: `/api/configs/${id}/download` }, icon("download", 14), t("Download")) : null,
       id !== null ? h("button", { class: "btn danger", type: "button", onclick: action(async () => {
-        if (!(await confirmDialog(`Delete ${config.name}?`, { danger: true, confirmText: "Delete" }))) return;
+        if (!(await confirmDialog(t("Delete {name}?", { name: config.name }), { danger: true, confirmText: t("Delete") }))) return;
         await del(`/api/configs/${id}`);
         saved = { text: editor.value, name: nameInput.value };
-        toast("Config deleted", "success");
+        toast(t("Config deleted"), "success");
         location.hash = "#/configs";
-      }) }, icon("trash", 14), "Delete") : null,
+      }) }, icon("trash", 14), t("Delete")) : null,
       save),
     errorHost,
     h("div", { class: "grid", style: { gridTemplateColumns: "minmax(0, 1fr) minmax(260px, 340px)", alignItems: "start" } },
-      h("div", { class: "stack" }, field("File name", nameInput), editor),
-      h("div", { class: "card stack" }, h("h2", {}, "Details"), infoHost)));
+      h("div", { class: "stack" }, field(t("File name"), nameInput), editor),
+      h("div", { class: "card stack" }, h("h2", {}, t("Details")), infoHost)));
   drawInfo(config, config ? config.warnings : []);
 }
 
 async function renderPicker(root) {
   const templates = await get("/api/templates");
-  const search = h("input", { class: "input", placeholder: "Search games…", type: "search", "aria-label": "Search games" });
+  const search = h("input", { class: "input", placeholder: t("Search games…"), type: "search", "aria-label": t("Search games") });
   const list = h("div", { class: "grid tiles" });
   const draw = () => {
     const q = search.value.trim().toLowerCase();
-    clear(list).append(...templates.filter((t) => t.game.toLowerCase().includes(q)).map((t) =>
-      h("a", { class: "tile", href: `#/configs/new?game=${encodeURIComponent(t.game)}`, style: { color: "inherit" } },
-        h("div", {}, t.game), t.source === "custom" ? badge("custom", "accent") : null)));
-    if (!list.childElementCount) list.append(h("p", { class: "muted" }, "No game matches. Custom games can be added under “Custom games”."));
+    clear(list).append(...templates.filter((tpl) => tpl.game.toLowerCase().includes(q)).map((tpl) =>
+      h("a", { class: "tile", href: `#/configs/new?game=${encodeURIComponent(tpl.game)}`, style: { color: "inherit" } },
+        h("div", {}, tpl.game), tpl.source === "custom" ? badge(t("custom"), "accent") : null)));
+    if (!list.childElementCount) list.append(h("p", { class: "muted" }, t("No game matches. Custom games can be added under “Custom games”.")));
   };
   search.oninput = draw;
   draw();
-  root.append(h("div", { class: "muted small" }, h("a", { href: "#/configs" }, "← All configs")),
-    pageHeader("New config", "Pick the game you want to play. You get a documented template with every option."),
+  root.append(h("div", { class: "muted small" }, h("a", { href: "#/configs" }, t("← All configs"))),
+    pageHeader(t("New config"), t("Pick the game you want to play. You get a documented template with every option.")),
     h("div", { class: "stack" }, search, list,
-      h("div", {}, h("a", { class: "btn", href: "#/configs/new?game=__blank__" }, "Start with an empty file"))));
+      h("div", {}, h("a", { class: "btn", href: "#/configs/new?game=__blank__" }, t("Start with an empty file")))));
   search.focus();
 }

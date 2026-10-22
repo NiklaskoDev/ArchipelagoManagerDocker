@@ -11,7 +11,7 @@ from collections import defaultdict, deque
 
 from fastapi import Depends, HTTPException, Request, Response
 
-from . import db
+from . import db, settings as app_settings
 
 SESSION_COOKIE = "apm_session"
 SESSION_TTL = 30 * 24 * 3600
@@ -79,9 +79,15 @@ def destroy_user_sessions(user_id: int, except_token: str | None = None) -> None
     db.execute("DELETE FROM sessions WHERE user_id = ? AND token_hash != ?", (user_id, keep))
 
 
+def https_in_use(request: Request) -> bool:
+    """Whether cookies should be marked secure: this request came over https, or the web UI's address is https (behind
+    a reverse proxy whose X-Forwarded-Proto is not trusted, the request itself looks like plain http)."""
+    return request.url.scheme == "https" or app_settings.get_setting("site_url").startswith("https://")
+
+
 def set_session_cookie(request: Request, response: Response, token: str) -> None:
     response.set_cookie(SESSION_COOKIE, token, max_age=SESSION_TTL, httponly=True, samesite="lax",
-                        secure=request.url.scheme == "https", path="/")
+                        secure=https_in_use(request), path="/")
 
 
 def user_for_request(request: Request) -> sqlite3.Row | None:
@@ -131,6 +137,9 @@ class LoginThrottle:
         return len(self._prune(key)) >= self.limit
 
     def fail(self, key: str) -> None:
+        if len(self._failures) > 10000:  # many different keys: forget the ones whose failures are all old
+            for old in list(self._failures):
+                self._prune(old)
         self._failures[key].append(time.monotonic())
 
     def clear(self, key: str) -> None:

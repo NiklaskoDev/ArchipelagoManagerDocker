@@ -1,10 +1,16 @@
 // Reusable pieces shared by several views.
-import { h, clear, icon, copyText, openModal, toast, action, fmtBytes, fmtAgo } from "./util.js";
+import { h, clear, icon, copyText, openModal, toast, action, fmtBytes, fmtAgo, withNodes } from "./util.js";
 import { api, get, post, state, isAdmin } from "./api.js";
+import { t, tServer, plural } from "./i18n.js";
 
 const STATE_LABELS = {
-  running: ["ok", "Running"], starting: ["warn", "Starting…"], stopping: ["warn", "Stopping…"],
-  stopped: ["muted", "Stopped"], crashed: ["bad", "Crashed"],
+  running: ["ok", t("Running")], starting: ["warn", t("Starting…")], stopping: ["warn", t("Stopping…")],
+  stopped: ["muted", t("Stopped")], crashed: ["bad", t("Crashed")],
+};
+
+const JOB_LABELS = {
+  queued: ["muted", t("Queued")], running: ["warn", t("Generating…")], succeeded: ["ok", t("Done")],
+  failed: ["bad", t("Failed")], cancelled: ["muted", t("Cancelled")],
 };
 
 export function badge(text, kind = "muted") {
@@ -17,14 +23,12 @@ export function stateBadge(stateName) {
 }
 
 export function jobBadge(status) {
-  const map = { queued: ["muted", "Queued"], running: ["warn", "Generating…"], succeeded: ["ok", "Done"],
-                failed: ["bad", "Failed"], cancelled: ["muted", "Cancelled"] };
-  const [kind, label] = map[status] || ["muted", status];
+  const [kind, label] = JOB_LABELS[status] || ["muted", status];
   return h("span", { class: `badge ${kind}` }, label);
 }
 
 export function gameChip(name, missing = false) {
-  return h("span", { class: `chip ${missing ? "missing" : ""}`, title: missing ? "Not installed on this server" : undefined },
+  return h("span", { class: `chip ${missing ? "missing" : ""}`, title: missing ? t("Not installed on this server") : undefined },
     missing ? icon("alert", 12) : null, name);
 }
 
@@ -41,8 +45,8 @@ export function progressBar(value, total, { compact = false } = {}) {
     h("span", { class: "progress-label" }, total ? `${value} / ${total}` : "—"));
 }
 
-export function copyButton(text, label = "Copied") {
-  return h("button", { class: "btn ghost icon-only sm", type: "button", title: "Copy", "aria-label": "Copy",
+export function copyButton(text, label = t("Copied")) {
+  return h("button", { class: "btn ghost icon-only sm", type: "button", title: t("Copy"), "aria-label": t("Copy"),
     onclick: () => copyText(text, label) }, icon("copy", 14));
 }
 
@@ -61,7 +65,7 @@ export function empty(title, text, ...actions) {
     actions.length ? h("div", { class: "row center" }, actions) : null);
 }
 
-export function loading(text = "Loading…") {
+export function loading(text = t("Loading…")) {
   return h("div", { class: "loading" }, h("span", { class: "spinner" }), text);
 }
 
@@ -99,37 +103,37 @@ export function uploadApworldModal({ game, onDone } = {}) {
   const input = h("input", { type: "file", accept: ".apworld", class: "input" });
   const status = h("div", { class: "muted" });
   const submit = h("button", { class: "btn primary", type: "button" },
-    icon("upload"), admin ? "Install" : "Submit for approval");
+    icon("upload"), admin ? t("Install") : t("Submit for approval"));
   submit.onclick = action(async () => {
     const file = input.files[0];
-    if (!file) throw new Error("Choose an .apworld file first");
-    status.textContent = "Uploading…";
+    if (!file) throw new Error(t("Choose an .apworld file first"));
+    status.textContent = t("Uploading…");
     const form = new FormData();
     form.append("file", file);
     try {
       const result = await api("POST", "/api/apworlds", form);
       modal.close();
-      const verb = result.status === "installed" ? "installed" : "submitted for approval";
-      toast(`${result.game} ${verb}`, "success");
-      if (result.load_error) toast(`It did not load: ${result.load_error}`, "error");
-      if (game && result.game !== game) toast(`Note: that file is for "${result.game}", not "${game}".`, "info");
+      toast(result.status === "installed" ? t("{name} installed", { name: result.game })
+        : t("{name} submitted for approval", { name: result.game }), "success");
+      if (result.load_error) toast(t("It did not load: {error}", { error: tServer(result.load_error) }), "error");
+      if (game && result.game !== game) toast(t("Note: that file is for \"{actual}\", not \"{game}\".", { actual: result.game, game }), "info");
       onDone?.(result);
     } finally {
       status.textContent = "";
     }
   });
   const modal = openModal({
-    title: game ? `Add the game "${game}"` : "Add a custom game",
+    title: game ? t("Add the game \"{game}\"", { game }) : t("Add a custom game"),
     body: h("div", { class: "stack" },
       h("p", {}, admin
-        ? "Choose an .apworld file. It is installed immediately and available for generating."
-        : "Choose an .apworld file. An administrator has to approve it before it can be used."),
-      h("p", { class: "muted" }, "APWorlds contain code that runs on the server. Only add files from sources you trust."),
+        ? t("Choose an .apworld file. It is installed immediately and available for generating.")
+        : t("Choose an .apworld file. An administrator has to approve it before it can be used.")),
+      h("p", { class: "muted" }, t("APWorlds contain code that runs on the server. Only add files from sources you trust.")),
       input, status,
-      h("p", { class: "muted small" }, "Published on GitHub? ",
+      h("p", { class: "muted small" }, t("Published on GitHub?"), " ",
         h("a", { href: "#", onclick: (e) => { e.preventDefault(); modal.close(); githubSourceModal({ onDone }); } },
-          "Add it from its repository instead"), ", so new releases show up here.")),
-    actions: [h("button", { class: "btn", type: "button", onclick: () => modal.close() }, "Cancel"), submit],
+          t("Add it from its repository instead")), t(", so new releases show up here."))),
+    actions: [h("button", { class: "btn", type: "button", onclick: () => modal.close() }, t("Cancel")), submit],
   });
   return modal;
 }
@@ -138,17 +142,17 @@ export function uploadApworldModal({ game, onDone } = {}) {
 // is downloaded from it before that.
 export function githubSourceModal({ onDone } = {}) {
   const admin = isAdmin();
-  const repo = h("input", { class: "input", placeholder: "owner/name or https://github.com/owner/name", autocomplete: "off" });
-  const note = h("input", { class: "input", maxLength: 300, placeholder: "e.g. Pokemon Crystal, for Friday's round" });
+  const repo = h("input", { class: "input", placeholder: t("owner/name or https://github.com/owner/name"), autocomplete: "off" });
+  const note = h("input", { class: "input", maxLength: 300, placeholder: t("e.g. Pokemon Crystal, for Friday's round") });
   const found = h("div", { class: "stack tight" });
   const submit = h("button", { class: "btn primary", type: "button", disabled: true },
-    icon(admin ? "download" : "upload", 14), admin ? "Install" : "Submit for approval");
+    icon(admin ? "download" : "upload", 14), admin ? t("Install") : t("Submit for approval"));
   let release = null, assetSelect = null;
 
   const lookUp = action(async () => {
     release = null;
     submit.disabled = true;
-    clear(found).append(h("span", { class: "muted small" }, "Looking it up on GitHub…"));
+    clear(found).append(h("span", { class: "muted small" }, t("Looking it up on GitHub…")));
     try {
       release = await get(`/api/apworld-sources/lookup?repo=${encodeURIComponent(repo.value.trim())}`);
     } catch (err) {
@@ -159,15 +163,15 @@ export function githubSourceModal({ onDone } = {}) {
     clear(found).append(
       h("div", {}, h("a", { href: `https://github.com/${release.repo}`, target: "_blank", rel: "noopener" }, h("strong", {}, release.repo)),
         release.description ? h("div", { class: "muted small" }, release.description) : null),
-      h("div", { class: "small" }, "Newest release: ", h("a", { href: release.release_url, target: "_blank", rel: "noopener" }, release.tag)),
-      !release.assets.length ? banner("error", icon("alert", 16), "This release has no .apworld file.")
-        : assetSelect ? field("File to install", assetSelect, "The release has several .apworld files.")
-        : h("div", { class: "small" }, "File: ", h("code", {}, release.assets[0].name)),
+      h("div", { class: "small" }, t("Newest release:"), " ", h("a", { href: release.release_url, target: "_blank", rel: "noopener" }, release.tag)),
+      !release.assets.length ? banner("error", icon("alert", 16), t("This release has no .apworld file."))
+        : assetSelect ? field(t("File to install"), assetSelect, t("The release has several .apworld files."))
+        : h("div", { class: "small" }, t("File:"), " ", h("code", {}, release.assets[0].name)),
       release.existing ? banner("warn", icon("alert", 16), release.existing.status === "pending"
-        ? "This repository was already submitted and waits for approval." : "This repository was already added.") : null);
+        ? t("This repository was already submitted and waits for approval.") : t("This repository was already added.")) : null);
     submit.disabled = !release.assets.length || !!release.existing;
   });
-  const lookButton = h("button", { class: "btn", type: "button", onclick: lookUp }, "Look up");
+  const lookButton = h("button", { class: "btn", type: "button", onclick: lookUp }, t("Look up"));
   repo.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); lookButton.click(); } });
   repo.addEventListener("input", () => { release = null; submit.disabled = true; clear(found); });
 
@@ -175,20 +179,21 @@ export function githubSourceModal({ onDone } = {}) {
     const result = await post("/api/apworld-sources", {
       repo: release.repo, asset: assetSelect ? assetSelect.value : release.assets[0].name, note: note.value || null });
     modal.close();
-    toast(admin ? `${result.game} installed from ${result.repo}` : `${result.repo} submitted for approval`, "success");
+    toast(admin ? t("{game} installed from {repo}", { game: result.game, repo: result.repo })
+      : t("{name} submitted for approval", { name: result.repo }), "success");
     onDone?.(result);
   });
   const modal = openModal({
-    title: "Add a custom game from GitHub",
+    title: t("Add a custom game from GitHub"),
     body: h("div", { class: "stack" },
       h("p", {}, admin
-        ? "The newest release's .apworld is installed now. New releases show up on this page; installing one is your call."
-        : "An administrator has to approve the repository. Nothing is downloaded from it before that."),
-      h("p", { class: "muted small" }, "APWorlds contain code that runs on the server. Only add repositories you trust."),
-      field("Repository", h("div", { class: "row" }, h("div", { class: "grow" }, repo), lookButton)),
+        ? t("The newest release's .apworld is installed now. New releases show up on this page; installing one is your call.")
+        : t("An administrator has to approve the repository. Nothing is downloaded from it before that.")),
+      h("p", { class: "muted small" }, t("APWorlds contain code that runs on the server. Only add repositories you trust.")),
+      field(t("Repository"), h("div", { class: "row" }, h("div", { class: "grow" }, repo), lookButton)),
       found,
-      admin ? null : field("Note for the administrator", note)),
-    actions: [h("button", { class: "btn", type: "button", onclick: () => modal.close() }, "Cancel"), submit],
+      admin ? null : field(t("Note for the administrator"), note)),
+    actions: [h("button", { class: "btn", type: "button", onclick: () => modal.close() }, t("Cancel")), submit],
   });
   return modal;
 }
@@ -199,27 +204,29 @@ export function missingGamesPanel(items, onChange) {
   const admin = isAdmin();
   return h("div", { class: "stack missing-panel" }, items.map((item) => {
     const usedBy = [
-      ...item.configs.map((c) => `config ${c.name}${admin && c.owner ? ` (${c.owner})` : ""}`),
-      ...item.games.map((g) => `game ${g.name}`),
+      ...item.configs.map((c) => (admin && c.owner ? t("config {name} ({owner})", { name: c.name, owner: c.owner })
+        : t("config {name}", { name: c.name }))),
+      ...item.games.map((g) => t("game {name}", { name: g.name })),
     ];
+    const shown = usedBy.slice(0, 4).join(", ");
     const mine = item.pending.find((p) => p.id);
     const someonePending = item.pending.length > 0;
     return banner("warn",
       icon("alert", 18),
       h("div", { class: "grow" },
-        h("strong", {}, item.game), " is not installed on this server.",
-        usedBy.length ? h("div", { class: "muted small" }, "Used by ", usedBy.slice(0, 4).join(", "),
-          usedBy.length > 4 ? `, and ${usedBy.length - 4} more` : "", ".") : null,
+        withNodes(t("{game} is not installed on this server."), { game: h("strong", {}, item.game) }),
+        usedBy.length ? h("div", { class: "muted small" }, usedBy.length > 4
+          ? t("Used by {list}, and {n} more.", { list: shown, n: usedBy.length - 4 }) : t("Used by {list}.", { list: shown })) : null,
         item.games.length ? h("div", { class: "muted small" },
-          "The server can still host this seed. Players need the APWorld to patch and play it.") : null),
+          t("The server can still host this seed. Players need the APWorld to patch and play it.")) : null),
       someonePending && (admin || mine)
-        ? h("a", { class: "btn sm", href: "#/worlds" }, admin ? "Review submission" : "Waiting for approval")
-        : someonePending ? h("span", { class: "muted small" }, "Waiting for approval")
+        ? h("a", { class: "btn sm", href: "#/worlds" }, admin ? t("Review submission") : t("Waiting for approval"))
+        : someonePending ? h("span", { class: "muted small" }, t("Waiting for approval"))
         : canSubmitApworld()
           ? h("button", { class: "btn sm primary", type: "button",
               onclick: () => uploadApworldModal({ game: item.game, onDone: onChange }) },
-            icon("upload", 14), admin ? "Add APWorld" : "Submit APWorld")
-          : h("span", { class: "muted small" }, "Ask an administrator to add it"));
+            icon("upload", 14), admin ? t("Add APWorld") : t("Submit APWorld"))
+          : h("span", { class: "muted small" }, t("Ask an administrator to add it")));
   }));
 }
 
@@ -230,14 +237,19 @@ export function missingRomsPanel(...lists) {
   if (!items.length) return null;
   const admin = isAdmin();
   return h("div", { class: "stack missing-panel" }, items.map((item) => banner("warn", icon("alert", 18), h("div", { class: "grow" },
-    h("strong", {}, item.game), " needs its base ROM on the server before it can be generated.",
+    withNodes(t("{game} needs its base ROM on the server before it can be generated."), { game: h("strong", {}, item.game) }),
     admin
-      ? h("div", { class: "small" }, "Put ", h("code", {}, item.file), " into ",
-        h("code", {}, item.folder === "." ? "the data folder" : `${item.folder}/`),
-        item.in_data_dir && item.folder !== "." ? " in the data folder" : null,
-        item.in_data_dir ? " (on Unraid usually /mnt/user/appdata/archipelago-manager)" : null,
-        ". Use exactly this name; the game checks that the file is the right version.")
-      : h("div", { class: "small muted" }, "An administrator has to add it to the server.")))));
+      ? h("div", { class: "small" }, withNodes(romPlace(item), {
+        file: h("code", {}, item.file), folder: h("code", {}, item.folder === "." ? t("the data folder") : `${item.folder}/`) }),
+        " ", t("Use exactly this name; the game checks that the file is the right version."))
+      : h("div", { class: "small muted" }, t("An administrator has to add it to the server."))))));
+}
+
+// Where the base ROM goes, with {file} and {folder} still in the text
+function romPlace(item) {
+  if (!item.in_data_dir) return t("Put {file} into {folder}.");
+  return item.folder === "." ? t("Put {file} into {folder} (on Unraid usually /mnt/user/appdata/archipelago-manager).")
+    : t("Put {file} into {folder} in the data folder (on Unraid usually /mnt/user/appdata/archipelago-manager).");
 }
 
 // Shown right after importing a seed or uploading a yaml that needs games the server does not have.
@@ -246,10 +258,10 @@ export function promptMissingGames(items, onChange) {
   if (!items?.length) return;
   const full = items.map((item) => ({ configs: [], games: [], pending: [], ...item }));
   const body = h("div", { class: "stack" },
-    h("p", {}, full.length === 1 ? "This game is not installed on the server:" : "These games are not installed on the server:"),
+    h("p", {}, plural(full.length, "This game is not installed on the server:", "These games are not installed on the server:")),
     missingGamesPanel(full, () => { modal.close(); onChange?.(); }));
-  const modal = openModal({ title: "Custom game needed", body,
-    actions: [h("button", { class: "btn", type: "button", onclick: () => modal.close() }, "Not now")] });
+  const modal = openModal({ title: t("Custom game needed"), body,
+    actions: [h("button", { class: "btn", type: "button", onclick: () => modal.close() }, t("Not now"))] });
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -267,8 +279,8 @@ export function controlButtons(game, onUpdate) {
     onclick: action(async () => onUpdate(await post(`/api/games/${game.id}/${verb}`))),
   }, icon(iconName, 14), label);
   return isActive(game)
-    ? [run("Restart", "restart", "restart"), run("Stop", "stop", "stop")]
-    : [run("Start", "play", "start", "primary")];
+    ? [run(t("Restart"), "restart", "restart"), run(t("Stop"), "stop", "stop")]
+    : [run(t("Start"), "play", "start", "primary")];
 }
 
 export function gameCard(game, onUpdate) {
@@ -277,27 +289,27 @@ export function gameCard(game, onUpdate) {
       h("div", { class: "stack tight" },
         h("h3", {}, h("a", { href: `#/games/${game.id}` }, game.name)),
         chips(game.games, game.missing_games)),
-      h("div", { class: "row" }, game.race_mode ? badge("Race", "warn") : null, stateBadge(game.state))),
-    game.error && game.state === "crashed" ? h("div", { class: "form-error" }, game.error) : null,
-    game.address ? h("div", { class: "row" }, h("span", { class: "muted small" }, "Server"), copyField(game.address)) : null,
+      h("div", { class: "row" }, game.race_mode ? badge(t("Race"), "warn") : null, stateBadge(game.state))),
+    game.error && game.state === "crashed" ? h("div", { class: "form-error" }, tServer(game.error)) : null,
+    game.address ? h("div", { class: "row" }, h("span", { class: "muted small" }, t("Server")), copyField(game.address)) : null,
     game.my_slots.length
-      ? h("div", { class: "stack tight" }, h("span", { class: "muted small" }, game.my_slots.length > 1 ? "Your slots" : "Your slot"),
+      ? h("div", { class: "stack tight" }, h("span", { class: "muted small" }, plural(game.my_slots.length, "Your slot", "Your slots")),
         game.my_slots.map((s) => h("div", {}, h("span", { class: "slot-name" }, s.name), h("span", { class: "muted" }, ` · ${s.game}`))))
-      : h("div", { class: "muted small" }, `${game.claimed_count} of ${game.player_count} slots have an owner`),
+      : h("div", { class: "muted small" }, t("{claimed} of {total} slots have an owner", { claimed: game.claimed_count, total: game.player_count })),
     h("div", { class: "row" },
-      h("a", { class: "btn sm", href: `#/games/${game.id}` }, "Open"),
+      h("a", { class: "btn sm", href: `#/games/${game.id}` }, t("Open")),
       game.my_file_count ? h("a", { class: "btn sm", href: `/api/games/${game.id}/my-files.zip` }, icon("download", 14),
-        game.my_file_count > 1 ? `My ${game.my_file_count} files` : "My file") : null,
+        plural(game.my_file_count, "My file", "My {n} files")) : null,
       controlButtons(game, onUpdate)));
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Archipelago server rules, used for per-game settings and for the global defaults
 // ---------------------------------------------------------------------------------------------------------------------
-const RELEASE_CHOICES = [["auto", "auto (on goal)"], ["enabled", "enabled (always)"], ["disabled", "disabled"],
-  ["goal", "goal (after goal)"], ["auto-enabled", "auto + manual"]];
-const REMAINING_CHOICES = [["goal", "goal (after goal)"], ["enabled", "enabled (always)"], ["disabled", "disabled"]];
-const COUNTDOWN_CHOICES = [["auto", "auto"], ["enabled", "enabled"], ["disabled", "disabled"]];
+const RELEASE_CHOICES = [["auto", t("auto (on goal)")], ["enabled", t("enabled (always)")], ["disabled", t("disabled (never)")],
+  ["goal", t("goal (after goal)")], ["auto-enabled", t("auto + manual")]];
+const REMAINING_CHOICES = [["goal", t("goal (after goal)")], ["enabled", t("enabled (always)")], ["disabled", t("disabled (never)")]];
+const COUNTDOWN_CHOICES = [["auto", t("auto")], ["enabled", t("enabled")], ["disabled", t("disabled (never)")]];
 
 export function serverOptionsForm(opts) {
   const number = (key, min, max) => h("input", { class: "input", type: "number", min, max, value: opts[key] });
@@ -306,21 +318,21 @@ export function serverOptionsForm(opts) {
     auto_shutdown_minutes: number("auto_shutdown_minutes", 0, 43200),
     release_mode: select(RELEASE_CHOICES, opts.release_mode), collect_mode: select(RELEASE_CHOICES, opts.collect_mode),
     remaining_mode: select(REMAINING_CHOICES, opts.remaining_mode), countdown_mode: select(COUNTDOWN_CHOICES, opts.countdown_mode),
-    compatibility: select([[2, "Casual: any client version"], [0, "Strict: exact version only"]], opts.compatibility),
+    compatibility: select([[2, t("Casual: any client version")], [0, t("Strict: exact version only")]], opts.compatibility),
     loglevel: select(["info", "debug", "warning", "error"].map((v) => [v, v]), opts.loglevel),
   };
-  const noCheat = checkbox("Disable !getitem (item cheat)", opts.disable_item_cheat);
-  const embedded = checkbox("Use the hint/release options stored in the seed", opts.use_embedded_options,
-    "Seeds created on archipelago.gg carry the options chosen there.");
+  const noCheat = checkbox(t("Disable !getitem (item cheat)"), opts.disable_item_cheat);
+  const embedded = checkbox(t("Use the hint/release options stored in the seed"), opts.use_embedded_options,
+    t("Seeds created on archipelago.gg carry the options chosen there."));
   const node = h("div", { class: "stack" },
     h("div", { class: "form-grid" },
-      field("Hint cost (%)", o.hint_cost, "Share of a player's locations that earns one hint"),
-      field("Hint points per check", o.location_check_points),
+      field(t("Hint cost (%)"), o.hint_cost, t("Share of a player's locations that earns one hint")),
+      field(t("Hint points per check"), o.location_check_points),
       field("!release", o.release_mode), field("!collect", o.collect_mode),
       field("!remaining", o.remaining_mode), field("!countdown", o.countdown_mode),
-      field("Client compatibility", o.compatibility),
-      field("Idle shutdown (minutes)", o.auto_shutdown_minutes, "Stops the server after this long without a new check. 0 = never. Takes effect on restart."),
-      field("Log level", o.loglevel)),
+      field(t("Client compatibility"), o.compatibility),
+      field(t("Idle shutdown (minutes)"), o.auto_shutdown_minutes, t("Stops the server after this long without a new check. 0 = never. Takes effect on restart.")),
+      field(t("Log level"), o.loglevel)),
     noCheat, embedded);
   const read = () => ({
     hint_cost: Number(o.hint_cost.value), location_check_points: Number(o.location_check_points.value),
@@ -334,7 +346,7 @@ export function serverOptionsForm(opts) {
 
 export function adminTabs(current) {
   return h("div", { class: "tabs", role: "navigation" },
-    [["users", "Users"], ["settings", "Settings"]].map(([key, label]) =>
+    [["users", t("Users")], ["settings", t("Settings")]].map(([key, label]) =>
       h("a", { class: "tab", href: `#/admin/${key}`, "aria-current": key === current ? "page" : undefined }, label)));
 }
 
@@ -346,24 +358,25 @@ const README_UPDATING = "https://github.com/NiklaskoDev/ArchipelagoManagerDocker
 export function updateBanner(update) {
   if (!update?.update_available) return null;
   return banner("info", icon("package", 18), h("div", { class: "grow" },
-    h("strong", {}, `Archipelago ${update.latest} is available`), ` (this server runs ${update.installed}).`,
-    h("div", { class: "small" }, "Update the container image to get it: on Unraid, Docker → Check for updates → Apply. ",
-      "Users, configs and games are kept, and running games start again."),
+    h("strong", {}, t("Archipelago {version} is available", { version: update.latest })), " ",
+    t("(this server runs {version}).", { version: update.installed }),
+    h("div", { class: "small" }, t("Update the container image to get it: on Unraid, Docker → Check for updates → Apply."), " ",
+      t("Users, configs and games are kept, and running games start again.")),
     h("div", { class: "small" },
-      update.url ? [h("a", { href: update.url, target: "_blank", rel: "noopener" }, "Release notes"), " · "] : null,
-      h("a", { href: README_UPDATING, target: "_blank", rel: "noopener" }, "No newer image offered yet?"))));
+      update.url ? [h("a", { href: update.url, target: "_blank", rel: "noopener" }, t("Release notes")), " · "] : null,
+      h("a", { href: README_UPDATING, target: "_blank", rel: "noopener" }, t("No newer image offered yet?")))));
 }
 
 export function updateStatus(update) {
-  if (!update.enabled) return h("span", { class: "muted" }, "Not checked: turned off with UPDATE_CHECK=false");
+  if (!update.enabled) return h("span", { class: "muted" }, t("Not checked: turned off with UPDATE_CHECK=false"));
   if (update.update_available) {
-    return h("span", { class: "row" }, badge(`${update.latest} available`, "warn"),
-      update.url ? h("a", { href: update.url, target: "_blank", rel: "noopener" }, "release notes") : null);
+    return h("span", { class: "row" }, badge(t("{version} available", { version: update.latest }), "warn"),
+      update.url ? h("a", { href: update.url, target: "_blank", rel: "noopener" }, t("release notes")) : null);
   }
   if (update.latest) {
-    return h("span", { class: "row" }, badge("Up to date", "ok"),
-      h("span", { class: "muted small" }, `latest release ${update.latest}, checked ${fmtAgo(update.checked_at)}`));
+    return h("span", { class: "row" }, badge(t("Up to date"), "ok"),
+      h("span", { class: "muted small" }, t("latest release {version}, checked {ago}", { version: update.latest, ago: fmtAgo(update.checked_at) })));
   }
-  if (update.error) return h("span", { class: "muted", title: update.error }, "Could not reach GitHub to check");
-  return h("span", { class: "muted" }, "Not checked yet");
+  if (update.error) return h("span", { class: "muted", title: tServer(update.error) }, t("Could not reach GitHub to check"));
+  return h("span", { class: "muted" }, t("Not checked yet"));
 }

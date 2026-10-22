@@ -1,31 +1,38 @@
 """Login, registration and user administration."""
 from __future__ import annotations
 
+import asyncio
+import ipaddress
+import logging
 import shutil
 import sqlite3
 import time
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
-from .. import __version__, db, settings as app_settings
+from .. import __version__, db, discord_auth, settings as app_settings
 from ..config import CONFIG
-from ..security import (SESSION_COOKIE, admin_user, check_password_policy, check_username, create_session,
-                        current_user, destroy_session, destroy_user_sessions, hash_password, login_throttle,
-                        set_session_cookie, user_for_request, verify_password)
+from ..security import (SESSION_COOKIE, LoginThrottle, admin_user, check_password_policy, check_username, create_session,
+                        current_user, destroy_session, destroy_user_sessions, hash_password, https_in_use,
+                        login_throttle, set_session_cookie, user_for_request, verify_password)
 from ..security import ip_throttle
 
 router = APIRouter(prefix="/api")
+log = logging.getLogger(__name__)
 
 
 def user_json(row: sqlite3.Row) -> dict:
     return {"id": row["id"], "username": row["username"], "role": row["role"], "disabled": bool(row["disabled"]),
-            "created_at": row["created_at"], "last_login": row["last_login"]}
+            "created_at": row["created_at"], "last_login": row["last_login"],
+            "discord_name": row["discord_name"] if row["discord_id"] else None,
+            "has_password": bool(row["password_hash"])}
 
 
 def _client_key(request: Request, username: str) -> str:
     host = request.client.host if request.client else "?"
-    return f"{host}|{username.lower()}"
+    return f"{host}|{username.strip().casefold()}"  # as the lookup sees the name, so "admin " counts as "admin"
 
 
 def has_users() -> bool:
@@ -63,6 +70,9 @@ def status(request: Request) -> dict:
         "version": __version__,
         "needs_setup": not has_users(),
         "allow_registration": cfg["allow_registration"],
+        # Discord sends people back to site_url, so the sign-in has to start there as well
+        "discord_login": app_settings.discord_login_ready(cfg),
+        "site_url": cfg["site_url"] or None,
         "user": user_json(user) if user else None,
         "permissions": {
             "start_rooms": cfg["users_can_start_rooms"],
@@ -78,10 +88,31 @@ def _login_response(request: Request, response: Response, user_id: int) -> dict:
     return user_json(db.query_one("SELECT * FROM users WHERE id = ?", (user_id,)))
 
 
+_LOCAL_SUFFIXES = (".local", ".lan", ".home", ".internal", ".home.arpa", ".localdomain")
+
+
+def _opened_locally(request: Request) -> bool:
+    """Whether the page was opened by an address only the local network uses: an IP address, a name without dots or one
+    of the private suffixes, or the configured public host. A website on the internet can point its own name at this
+    server (DNS rebinding), but that name is never one of these."""
+    host = (request.url.hostname or "").rstrip(".").lower()
+    try:
+        ipaddress.ip_address(host)
+        return True
+    except ValueError:
+        pass
+    return bool(host) and ("." not in host or host.endswith(_LOCAL_SUFFIXES)
+                           or host == (CONFIG.public_host or "").lower())
+
+
 @router.post("/auth/setup")
 def setup(creds: Credentials, request: Request, response: Response) -> dict:
     if has_users():
         raise HTTPException(409, "Setup has already been completed")
+    if not _opened_locally(request):
+        raise HTTPException(403, "For safety, the administrator account can only be created on this server's local "
+                                 "address: open this page by its IP address, e.g. http://192.168.1.20:8080, or set "
+                                 "ADMIN_USER and ADMIN_PASSWORD on the container.")
     user_id = create_user(creds.username, creds.password, "admin")
     return _login_response(request, response, user_id)
 
@@ -93,9 +124,11 @@ def login(creds: Credentials, request: Request, response: Response) -> dict:
     if login_throttle.blocked(key) or ip_throttle.blocked(ip_key):
         raise HTTPException(429, "Too many failed logins. Try again in a few minutes.")
     row = db.query_one("SELECT * FROM users WHERE username = ?", (creds.username.strip(),))
-    # Verify even for unknown users so response time does not reveal which usernames exist.
-    stored = row["password_hash"] if row else "scrypt$16384$8$1$AAAAAAAAAAAAAAAAAAAAAA==$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
-    valid = verify_password(creds.password, stored)
+    # Verify even for unknown users and for accounts without a password (Discord only), so the response time does not
+    # reveal which usernames exist or how they sign in.
+    dummy = "scrypt$16384$8$1$AAAAAAAAAAAAAAAAAAAAAA==$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+    stored = row["password_hash"] if row and row["password_hash"] else dummy
+    valid = verify_password(creds.password, stored) and bool(row and row["password_hash"])
     if not row or not valid or row["disabled"]:
         login_throttle.fail(key)
         ip_throttle.fail(ip_key)
@@ -126,18 +159,107 @@ def register(creds: Credentials, request: Request, response: Response) -> dict:
 
 
 class PasswordChange(BaseModel):
-    current_password: str = Field(max_length=256)
+    current_password: str = Field(default="", max_length=256)
     new_password: str = Field(max_length=256)
 
 
 @router.post("/auth/password")
 def change_password(body: PasswordChange, request: Request, user: sqlite3.Row = Depends(current_user)) -> dict:
-    if not verify_password(body.current_password, user["password_hash"]):
+    # Accounts made through Discord have no password yet and may set a first one; everyone else proves the old one.
+    if user["password_hash"] and not verify_password(body.current_password, user["password_hash"]):
         raise HTTPException(403, "Current password is wrong")
     check_password_policy(body.new_password)
     db.execute("UPDATE users SET password_hash = ? WHERE id = ?", (hash_password(body.new_password), user["id"]))
     destroy_user_sessions(user["id"], except_token=request.cookies.get(SESSION_COOKIE))
     return {"ok": True}
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+# Discord (see discord_auth.py for how the flow is kept safe)
+# ----------------------------------------------------------------------------------------------------------------------
+def _state_cookie(request: Request, response: Response, value: str) -> None:
+    response.set_cookie(discord_auth.STATE_COOKIE, value, max_age=discord_auth.STATE_TTL, httponly=True,
+                        samesite="lax", secure=https_in_use(request), path="/api/auth/discord")
+
+
+def _back_to_app(fragment: str) -> RedirectResponse:
+    response = RedirectResponse("/" + fragment, status_code=303)
+    response.delete_cookie(discord_auth.STATE_COOKIE, path="/api/auth/discord")
+    return response
+
+
+# Each start keeps a little state until it finishes or expires. Starts per address are limited, so nobody can push
+# everyone else's unfinished sign-ins out (discord_auth keeps at most 500).
+_discord_starts = LoginThrottle(limit=30, window=10 * 60)
+
+
+@router.get("/auth/discord/login")
+def discord_login(request: Request, next: str = "") -> RedirectResponse:
+    """Sends the browser to Discord. Opened as a page (not fetched), on the site_url address."""
+    key = request.client.host if request.client else "?"
+    if _discord_starts.blocked(key):
+        return _back_to_app("#/?discord_error=busy")
+    _discord_starts.fail(key)
+    try:
+        url, browser = discord_auth.begin("login", next_page=next)
+    except discord_auth.DiscordError as e:
+        return _back_to_app(f"#/?discord_error={e.code}")
+    response = RedirectResponse(url, status_code=303)
+    _state_cookie(request, response, browser)
+    return response
+
+
+@router.post("/auth/discord/link")
+def discord_link(request: Request, response: Response, user: sqlite3.Row = Depends(current_user)) -> dict:
+    """Starts linking a Discord account to the signed-in user. The browser then goes to the returned address."""
+    try:
+        url, browser = discord_auth.begin("link", user_id=user["id"])
+    except discord_auth.DiscordError:
+        raise HTTPException(409, "Signing in with Discord is not set up on this server") from None
+    _state_cookie(request, response, browser)
+    return {"url": url}
+
+
+@router.get("/auth/discord/callback")
+async def discord_callback(request: Request, state: str = "", code: str = "", error: str = "") -> RedirectResponse:
+    try:
+        # first, before anything else: a callback this browser did not start goes nowhere
+        pending = discord_auth.take(state, request.cookies.get(discord_auth.STATE_COOKIE))
+        if error or not code or len(code) > 512:
+            raise discord_auth.DiscordError("denied")
+        identity = await asyncio.to_thread(discord_auth.fetch_identity, code)
+        if pending.mode == "link":
+            user = user_for_request(request)
+            if user is None or user["id"] != pending.user_id:
+                raise discord_auth.DiscordError("expired")
+            discord_auth.link(user["id"], identity)
+            return _back_to_app("#/?discord=linked")
+        user = discord_auth.user_for(identity["id"])
+        fragment = discord_auth.safe_next(pending.next)
+        if user is None:
+            if not app_settings.get_setting("discord_signup"):
+                raise discord_auth.DiscordError("not_linked")
+            user_id = discord_auth.sign_up(identity)
+            fragment = "#/?discord=welcome"
+        elif user["disabled"]:
+            raise discord_auth.DiscordError("disabled_user")
+        else:
+            user_id = user["id"]
+            db.execute("UPDATE users SET discord_name = ? WHERE id = ?", (identity["name"], user_id))
+    except discord_auth.DiscordError as e:
+        log.info("Discord sign-in refused: %s", e)
+        return _back_to_app(f"#/?discord_error={e.code}")
+    response = _back_to_app(fragment)
+    set_session_cookie(request, response, create_session(user_id, request.headers.get("user-agent")))
+    return response
+
+
+@router.post("/auth/discord/unlink")
+def discord_unlink(user: sqlite3.Row = Depends(current_user)) -> dict:
+    if not user["password_hash"]:
+        raise HTTPException(409, "Set a password first, or you could not sign in any more")
+    db.execute("UPDATE users SET discord_id = NULL, discord_name = NULL WHERE id = ?", (user["id"],))
+    return user_json(db.query_one("SELECT * FROM users WHERE id = ?", (user["id"],)))
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -170,6 +292,7 @@ class UserPatch(BaseModel):
     role: str | None = None
     disabled: bool | None = None
     password: str | None = Field(default=None, max_length=256)
+    unlink_discord: bool | None = None
 
 
 def _active_admin_count(excluding: int) -> int:
@@ -197,6 +320,9 @@ def patch_user(user_id: int, body: UserPatch, admin: sqlite3.Row = Depends(admin
         check_password_policy(body.password)
         db.execute("UPDATE users SET password_hash = ? WHERE id = ?", (hash_password(body.password), user_id))
         destroy_user_sessions(user_id)
+    if body.unlink_discord:
+        db.execute("UPDATE users SET discord_id = NULL, discord_name = NULL WHERE id = ?", (user_id,))
+        destroy_user_sessions(user_id)  # sessions that came from that Discord account end with it
     return user_json(db.query_one("SELECT * FROM users WHERE id = ?", (user_id,)))
 
 

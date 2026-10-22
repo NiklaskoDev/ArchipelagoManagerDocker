@@ -11,7 +11,7 @@ import yaml
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from .. import __version__, apbridge, db, notify, settings as app_settings, updates
+from .. import __version__, apbridge, db, discord_auth, notify, settings as app_settings, updates
 from ..config import CONFIG
 from ..rooms import ROOMS
 from ..security import admin_user
@@ -21,8 +21,9 @@ router = APIRouter(prefix="/api")
 
 
 def _settings_json(values: dict) -> dict:
-    return {**values, "port_range": [CONFIG.port_start, CONFIG.port_end], "public_host_from_env": CONFIG.public_host,
-            "notify_status": notify.status()}
+    return {**app_settings.public_settings(values), "port_range": [CONFIG.port_start, CONFIG.port_end],
+            "public_host_from_env": CONFIG.public_host, "notify_status": notify.status(),
+            "discord_redirect_uri": (values["site_url"] + discord_auth.CALLBACK_PATH) if values["site_url"] else None}
 
 
 @router.get("/settings")
@@ -39,8 +40,14 @@ class SettingsPatch(BaseModel):
     auto_restart_crashed: bool | None = None
     default_server_options: dict | None = None
     discord_webhook_url: str | None = Field(default=None, max_length=512)
-    notify_link_url: str | None = Field(default=None, max_length=512)
     notify_events: list[str] | None = None
+    notify_language: str | None = None
+    site_url: str | None = Field(default=None, max_length=512)
+    discord_login: bool | None = None
+    discord_client_id: str | None = Field(default=None, max_length=64)
+    discord_client_secret: str | None = Field(default=None, max_length=200)
+    discord_signup: bool | None = None
+    discord_guild_id: str | None = Field(default=None, max_length=64)
 
 
 @router.patch("/settings")

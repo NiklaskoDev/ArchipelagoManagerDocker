@@ -1,4 +1,5 @@
 // Thin fetch wrapper plus the small amount of global state the UI needs.
+import { t, tServer } from "./i18n.js";
 
 export const state = {
   user: null,
@@ -18,9 +19,9 @@ export function setUnauthorizedHandler(fn) { onUnauthorized = fn; }
 
 function describe(data, fallback) {
   const detail = data && data.detail;
-  if (typeof detail === "string") return detail;
+  if (typeof detail === "string") return tServer(detail);
   if (Array.isArray(detail)) {  // pydantic validation errors
-    return detail.map((d) => `${(d.loc || []).slice(1).join(".") || "value"}: ${d.msg}`).join("; ");
+    return detail.map((d) => `${(d.loc || []).slice(1).join(".") || t("value")}: ${d.msg}`).join("; ");
   }
   return fallback;
 }
@@ -38,14 +39,14 @@ export async function api(method, path, body, { raw = false } = {}) {
   try {
     response = await fetch(path, init);
   } catch {
-    throw new ApiError("Cannot reach the server. Check your connection.", 0);
+    throw new ApiError(t("Cannot reach the server. Check your connection."), 0);
   }
   if (raw && response.ok) return response;
   const type = response.headers.get("content-type") || "";
   const data = type.includes("json") ? await response.json().catch(() => null) : await response.text();
   if (!response.ok) {
     if (response.status === 401 && state.user) onUnauthorized();
-    throw new ApiError(describe(data, `Request failed (${response.status})`), response.status, data);
+    throw new ApiError(describe(data, t("Request failed ({status})", { status: response.status })), response.status, data);
   }
   return data;
 }

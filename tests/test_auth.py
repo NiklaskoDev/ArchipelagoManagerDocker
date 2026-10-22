@@ -199,7 +199,8 @@ def test_oversized_uploads_are_rejected_before_they_are_stored(tmp_path):
 
 
 def test_a_database_from_the_first_version_is_upgraded(tmp_path):
-    """Schema v1 had no single_claim column and none of the later tables; a newer manager adds them, keeping the data."""
+    """Schema v1 had no single_claim column, no Discord accounts and none of the later tables; a newer manager adds
+    them, keeping the data."""
     import sqlite3
     from conftest import Server
     server = Server(tmp_path / "data", ap=False)
@@ -213,6 +214,9 @@ def test_a_database_from_the_first_version_is_upgraded(tmp_path):
     conn.execute("DROP TABLE signup_entries")
     conn.execute("DROP TABLE signups")
     conn.execute("DROP TABLE apworld_sources")
+    conn.execute("DROP INDEX users_discord")
+    conn.execute("ALTER TABLE users DROP COLUMN discord_id")
+    conn.execute("ALTER TABLE users DROP COLUMN discord_name")
     conn.execute("PRAGMA user_version = 1")
     conn.commit()
     conn.close()
@@ -223,12 +227,13 @@ def test_a_database_from_the_first_version_is_upgraded(tmp_path):
         games = admin.get("/api/games").json()
         assert [(g["name"], g["single_claim"]) for g in games] == [("Old game", False)]
         conn = sqlite3.connect(db_path)
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 5
         conn.close()
         # tables added since then exist and work
         r = admin.post("/api/signups", json={"name": "After the upgrade"})
         assert r.status_code == 200 and admin.get("/api/signups").json()[0]["name"] == "After the upgrade"
         assert admin.get("/api/apworld-sources").json() == []
+        assert admin.get("/api/users").json()[0]["discord_name"] is None
     finally:
         server.stop()
 

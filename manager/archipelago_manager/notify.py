@@ -16,7 +16,7 @@ import urllib.request
 from datetime import UTC, datetime
 from typing import Any
 
-from . import __version__, settings as app_settings
+from . import __version__, notify_de, settings as app_settings
 
 log = logging.getLogger(__name__)
 
@@ -59,13 +59,23 @@ def md(text: Any) -> str:
     return _MARKDOWN.sub(r"\\\1", str(text))
 
 
+def tr(text: str, **values: Any) -> str:
+    """A message text in the language the admin chose for notifications, with the values filled in.
+
+    The English text is the key (notify_de.py has the German ones). Values go in as they are: escape names with md().
+    """
+    if app_settings.get_setting("notify_language") == "de":
+        text = notify_de.MESSAGES.get(text, text)
+    return text.format(**values)
+
+
 def _clip(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[:limit - 1] + "…"
 
 
 def link(path: str) -> str | None:
     """A link to a page of the web UI, if the admin told us its address."""
-    base = app_settings.get_setting("notify_link_url")
+    base = app_settings.get_setting("site_url")
     return f"{base.rstrip('/')}/#{path}" if base else None
 
 
@@ -73,7 +83,7 @@ def game_address(port: int | None) -> str | None:
     """What players type to connect. Without a public address there is nothing sensible to show."""
     host = app_settings.get_setting("public_host")
     if not host:
-        host = urllib.parse.urlsplit(app_settings.get_setting("notify_link_url") or "").hostname
+        host = urllib.parse.urlsplit(app_settings.get_setting("site_url") or "").hostname
     return f"{host}:{port}" if host and port else None
 
 
@@ -193,7 +203,8 @@ def emit(event: str, title: str, description: str = "", *, url: str | None = Non
 
 async def send_test(webhook: str) -> None:
     """Sends one message right away. Raises DeliveryError with a reason fit for the admin."""
-    payload = build_payload("Test message", "Notifications from this Archipelago Manager arrive in this channel.",
+    payload = build_payload(tr("Test message"),
+                            tr("Notifications from this Archipelago Manager arrive in this channel."),
                             url=link("/admin/settings"), color="success")
     await asyncio.to_thread(_post, webhook, payload)
     STATE.last_ok_at, STATE.last_error, STATE.last_error_at = time.time(), None, None

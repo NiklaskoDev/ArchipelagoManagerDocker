@@ -5,6 +5,7 @@ only *submit* a world, which then waits for approval ('pending').
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -24,6 +25,8 @@ router = APIRouter(prefix="/api")
 log = logging.getLogger(__name__)
 
 MAX_APWORLD_UNPACKED = 1024 * 1024 * 1024
+MAX_APWORLD_ENTRIES = 20000
+MAX_PENDING_PER_USER = 5
 _MANIFEST_RE = re.compile(r"^([^/]+)/archipelago\.json$")
 
 
@@ -31,8 +34,27 @@ class InvalidAPWorld(ValueError):
     pass
 
 
+def _entry_count(path: Path) -> int:
+    """How many files the zip's end record says it holds, read before ZipFile builds an object for each of them."""
+    with open(path, "rb") as f:
+        f.seek(0, 2)
+        size = f.tell()
+        f.seek(max(0, size - 65536 - 22))  # the record ends the file, after a comment of up to 64 KiB
+        tail = f.read()
+    at = tail.rfind(b"PK\x05\x06")
+    if at < 0 or at + 22 > len(tail):
+        raise InvalidAPWorld("The file is not a valid zip archive")
+    count = int.from_bytes(tail[at + 10:at + 12], "little")
+    return count if count != 0xFFFF else MAX_APWORLD_ENTRIES + 1  # 0xFFFF: a zip64 archive, far too many files
+
+
 def inspect_apworld(path: Path) -> dict:
-    """Validates the archive structure and returns {game, module, version, manifest}. Nothing is imported or run."""
+    """Validates the archive structure and returns {game, module, version, manifest}. Nothing is imported or run.
+
+    Takes a while for big archives: call it in a worker thread.
+    """
+    if _entry_count(path) > MAX_APWORLD_ENTRIES:
+        raise InvalidAPWorld("The archive contains too many files")
     try:
         with zipfile.ZipFile(path) as zf:
             infos = zf.infolist()
@@ -182,7 +204,7 @@ async def add_to_library(path: Path, filename: str, *, uploaded_by: int | None, 
 
     Moves the file. Raises InvalidAPWorld with a reason fit for the user.
     """
-    meta = inspect_apworld(path)
+    meta = await asyncio.to_thread(inspect_apworld, path)
     version_tuple = apbridge.version_tuple()
     minimum = str(meta["manifest"].get("minimum_ap_version") or "")
     if version_tuple and re.fullmatch(r"\d+\.\d+\.\d+", minimum):
@@ -208,6 +230,12 @@ async def upload_apworld(file: UploadFile = File(...), user: sqlite3.Row = Depen
     filename = Path(file.filename or "world.apworld").name
     if not filename.lower().endswith(".apworld"):
         raise HTTPException(400, "Please upload an .apworld file")
+    if not is_admin(user):
+        waiting = db.query_one("SELECT COUNT(*) AS n FROM apworlds WHERE status = 'pending' AND uploaded_by = ?",
+                               (user["id"],))["n"]
+        if waiting >= MAX_PENDING_PER_USER:
+            raise HTTPException(409, f"You already have {MAX_PENDING_PER_USER} games waiting for approval. "
+                                     "Wait for an administrator, or withdraw one.")
     tmp = CONFIG.tmp_dir / f"upload-{db.now():.6f}-{user['id']}.apworld"
     size = 0
     try:
@@ -225,9 +253,10 @@ async def upload_apworld(file: UploadFile = File(...), user: sqlite3.Row = Depen
         tmp.unlink(missing_ok=True)
     if entry["status"] == "pending":
         version = f" {entry['version']}" if entry["version"] else ""
-        notify.emit("apworld_pending", f"Custom game waiting for approval: {entry['game']}",
-                    f"{notify.md(user['username'])} submitted **{notify.md(entry['game'])}**{notify.md(version)} "
-                    f"({notify.md(filename)}). An administrator has to approve it before it can be used.",
+        notify.emit("apworld_pending", notify.tr("Custom game waiting for approval: {game}", game=entry["game"]),
+                    notify.tr("{user} submitted **{game}**{version} ({file}). An administrator has to approve it "
+                              "before it can be used.", user=notify.md(user["username"]), game=notify.md(entry["game"]),
+                              version=notify.md(version), file=notify.md(filename)),
                     url=notify.link("/worlds"), color="warning")
     return entry
 
