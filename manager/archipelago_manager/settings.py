@@ -12,7 +12,8 @@ REMAINING_MODES = ("enabled", "disabled", "goal")
 COUNTDOWN_MODES = ("enabled", "disabled", "auto")
 LOG_LEVELS = ("debug", "info", "warning", "error", "critical")
 # Kinds of Discord notifications an admin can switch on and off
-NOTIFY_EVENTS = ("game_online", "game_crashed", "player_goal", "generation", "signup", "apworld_pending", "ap_update")
+NOTIFY_EVENTS = ("game_online", "game_crashed", "player_goal", "hint_found", "generation", "signup", "apworld_pending",
+                 "ap_update")
 _URL = re.compile(r"^https?://[^\s/?#]+[^\s]*$")
 
 # Per-game options handed to MultiServer.py. auto_shutdown is stored in minutes (the server takes seconds).

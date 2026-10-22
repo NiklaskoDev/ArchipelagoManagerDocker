@@ -50,7 +50,7 @@ async def lifespan(_app: FastAPI):
     ROOMS.reset()
     notify.start()
     await GENERATION.start()
-    tasks = [asyncio.create_task(init_archipelago()), asyncio.create_task(ROOMS.watch_goals()),
+    tasks = [asyncio.create_task(init_archipelago()), asyncio.create_task(ROOMS.watch_progress()),
              asyncio.create_task(signups.run_periodically())]
     if CONFIG.update_check:
         tasks.append(asyncio.create_task(updates.run_periodically()))

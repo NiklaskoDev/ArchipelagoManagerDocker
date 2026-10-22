@@ -18,8 +18,9 @@ players log in to keep their YAML configs, see their games and download their pa
   can be hosted straight away. Jobs queue, show a live log and can be cancelled.
 - **Runs sign-up rounds.** An admin opens a round with a deadline; players enter their YAMLs, which are checked on the
   spot. When the deadline passes the game is generated from all entries and everyone is added to it.
-- **Posts to Discord.** A webhook message when a game goes online or crashes, a player reaches their goal, a game is
-  generated, sign-ups open or close, a custom game waits for approval, or a new Archipelago version is out.
+- **Posts to Discord.** A webhook message when a game goes online or crashes, a player reaches their goal, a hinted
+  item is found, a game is generated, sign-ups open or close, a custom game waits for approval, or a new Archipelago
+  version is out.
 - **Keeps custom games.** `.apworld` files are stored. If a config or a seed needs a game the server does not have, the
   UI says so and offers to add it. Regular users can *submit* an APWorld; an admin approves it.
 - **One UI for admins and players.** Players see only their games, can start and stop them (if allowed) and download
@@ -98,8 +99,9 @@ You can withdraw until the round closes.
   game is not installed), the round stays closed with the error: fix the entries, then *Generate* again or *Reopen*.
 - **Discord notifications:** *Admin → Settings → Discord notifications*. In Discord, open the channel's settings →
   *Integrations* → *Webhooks* → *New Webhook* → *Copy Webhook URL*, paste it, and *Send a test message*. Set *Address of
-  this web UI* so messages link to the right page, and untick the kinds of messages you do not want. Goals are read from
-  the server's save, so they are posted up to a minute after they happen.
+  this web UI* so messages link to the right page, and untick the kinds of messages you do not want. Goals and found
+  hinted items are read from the server's save, so they are posted up to a minute after they happen. Many hinted items
+  found at once (after a `!release` or `!collect`) come as one message.
 - **Run a game:** *Start / Stop / Restart* on the game page. *Settings* holds the room password, the remote-admin
   password, hint cost, `!release`/`!collect`/`!remaining` rules and the idle shutdown. Passwords and rules apply to a
   running server immediately; the port and a few startup options need a restart (the UI tells you).

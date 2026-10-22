@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import collections
 import contextlib
+import json
 import logging
 import re
 import socket
@@ -22,7 +23,7 @@ STOP_GRACE_SECONDS = 20
 READY_TIMEOUT = 90
 CRASH_RESTART_WINDOW = 10 * 60
 CRASH_RESTART_LIMIT = 3
-GOAL_CHECK_INTERVAL = 20
+PROGRESS_CHECK_INTERVAL = 20
 STATUS_GOAL = 30  # ClientStatus.CLIENT_GOAL
 
 # A password is handed to the server as a console argument, so it must survive being split on whitespace.
@@ -148,14 +149,16 @@ class RoomManager:
         self.rooms: dict[int, Room] = {}
         self.closing = False
         self._progress: dict[int, tuple[tuple[float, int], dict]] = {}
-        self._goals: dict[int, set[int]] = {}  # slots known to have reached their goal, per game
+        # Per game, what the last look at the save showed: the slots that had reached their goal, and the checked
+        # locations per slot. Notifications are about the difference to the next look.
+        self._seen: dict[int, tuple[set[int], dict[int, set[int]]]] = {}
         self._background: set[asyncio.Task] = set()
 
     def reset(self) -> None:
         """Forget all in-process state. Only matters when the application starts more than once per process."""
         self.rooms.clear()
         self._progress.clear()
-        self._goals.clear()
+        self._seen.clear()
         self.closing = False
 
     def room(self, game_id: int) -> Room:
@@ -227,10 +230,10 @@ class RoomManager:
                 room.restart_handle = None
             room.announce = announce
             await self._spawn(room)
-        if game_id not in self._goals:
-            # Goals already in the save are old news. Note them now: the first regular check may come only after a
-            # player has finished in this run.
-            task = asyncio.create_task(self._note_goals(game_id))
+        if game_id not in self._seen:
+            # What is already in the save is old news. Note it now: the first regular look may come only after a
+            # player has finished or found something in this run.
+            task = asyncio.create_task(self._note_progress(game_id))
             self._background.add(task)
             task.add_done_callback(self._background.discard)
 
@@ -442,20 +445,21 @@ class RoomManager:
     # progress (read from the server's save file)
     # ------------------------------------------------------------------------------------------------------------
     async def progress(self, game_id: int) -> dict[int, dict]:
-        slots = await self._read_progress(game_id)
-        if slots is None:
+        state = await self._read_save(game_id)
+        if state is None:
             cached = self._progress.get(game_id)
-            return cached[1] if cached else {}
-        return slots
+            return cached[1]["slots"] if cached else {}
+        return state["slots"]
 
-    async def _read_progress(self, game_id: int) -> dict[int, dict] | None:
-        """The save's progress per slot ({} before the first save), or None if the save could not be read."""
+    async def _read_save(self, game_id: int) -> dict | None:
+        """What the server's save says: progress per slot, the hints and the checked locations per slot. Empty before
+        the first save, None if the save could not be read."""
         path = gamepaths.save_path(game_id)
         try:
             stat = path.stat()
         except FileNotFoundError:
             self._progress.pop(game_id, None)
-            return {}
+            return {"slots": {}, "hints": [], "checks": {}}
         key = (stat.st_mtime, stat.st_size)
         cached = self._progress.get(game_id)
         if cached and cached[0] == key:
@@ -465,9 +469,11 @@ class RoomManager:
         except apbridge.APBridgeError as e:
             log.warning("Could not read progress of game %s: %s", game_id, e)
             return None
-        slots = {int(k): v for k, v in result["slots"].items()}
-        self._progress[game_id] = (key, slots)
-        return slots
+        state = {"slots": {int(k): v for k, v in result["slots"].items()},
+                 "hints": [tuple(h) for h in result.get("hints", [])],
+                 "checks": {int(k): set(v) for k, v in result.get("checks", {}).items()}}
+        self._progress[game_id] = (key, state)
+        return state
 
     def forget_progress(self, game_id: int) -> None:
         self._progress.pop(game_id, None)
@@ -475,7 +481,7 @@ class RoomManager:
     def forget(self, game_id: int) -> None:
         self.rooms.pop(game_id, None)
         self._progress.pop(game_id, None)
-        self._goals.pop(game_id, None)
+        self._seen.pop(game_id, None)
 
     # ------------------------------------------------------------------------------------------------------------
     # notifications
@@ -500,40 +506,91 @@ class RoomManager:
                         f"{next_step}",
                         url=notify.link(f"/games/{room.game_id}"), color="error")
 
-    async def watch_goals(self) -> None:
-        """Announces players who reach their goal. The server records goals in its save, at the latest a minute later."""
+    async def watch_progress(self) -> None:
+        """Announces goals and found hinted items. The server writes both to its save, at the latest a minute later."""
         while True:
-            await asyncio.sleep(GOAL_CHECK_INTERVAL)
+            await asyncio.sleep(PROGRESS_CHECK_INTERVAL)
             for game_id, room in list(self.rooms.items()):
                 if room.started_at is None:  # did not run since the manager started, so its save cannot have changed
                     continue
                 try:
-                    await self._check_goals(game_id)
+                    await self._check_progress(game_id)
                 except Exception:  # noqa: BLE001 - one broken game must not stop the others
-                    log.exception("Checking the goals of game %s failed", game_id)
+                    log.exception("Checking the progress of game %s failed", game_id)
 
-    async def _note_goals(self, game_id: int) -> None:
-        slots = await self._read_progress(game_id)
-        if slots is not None and game_id not in self._goals:
-            self._goals[game_id] = {slot for slot, p in slots.items() if p.get("status") == STATUS_GOAL}
+    @staticmethod
+    def _summary(state: dict) -> tuple[set[int], dict[int, set[int]]]:
+        return {slot for slot, p in state["slots"].items() if p.get("status") == STATUS_GOAL}, state["checks"]
 
-    async def _check_goals(self, game_id: int) -> None:
-        slots = await self._read_progress(game_id)
-        if slots is None:
+    async def _note_progress(self, game_id: int) -> None:
+        state = await self._read_save(game_id)
+        if state is not None and game_id not in self._seen:
+            self._seen[game_id] = self._summary(state)
+
+    async def _check_progress(self, game_id: int) -> None:
+        state = await self._read_save(game_id)
+        if state is None:
             return
-        done = {slot for slot, p in slots.items() if p.get("status") == STATUS_GOAL}
-        known = self._goals.get(game_id)
-        self._goals[game_id] = done
-        if known is None:  # the first look is the starting point: goals from before were announced back then
+        seen = self._seen.get(game_id)
+        self._seen[game_id] = self._summary(state)
+        if seen is None:  # the first look is the starting point: what came before was announced back then
             return
+        game = db.query_one("SELECT name FROM games WHERE id = ?", (game_id,))
+        if not game:
+            return
+        await self._announce_found_hints(game_id, game["name"], state, seen[1])
+        self._announce_goals(game_id, game["name"], self._seen[game_id][0], seen[0])
+
+    async def _announce_found_hints(self, game_id: int, game_name: str, state: dict,
+                                    checked_before: dict[int, set[int]]) -> None:
+        # A hint is (receiving slot, finding slot, location, item, entrance, item flags). It counts as found now if its
+        # location was checked since the last look; hints given for locations checked before are not news.
+        found = sorted((h for h in state["hints"] if h[2] in state["checks"].get(h[1], ())
+                        and h[2] not in checked_before.get(h[1], ())), key=lambda h: (h[1], h[2]))
+        if not found or not notify.wanted("hint_found"):
+            return
+        request = {"items": [[h[0], h[3]] for h in found], "locations": [[h[1], h[2]] for h in found]}
+        try:
+            names = await apbridge.run_helper("names", str(gamepaths.multidata_path(game_id)), json.dumps(request),
+                                              timeout=60)
+        except apbridge.APBridgeError as e:
+            log.warning("Could not look up the names of found hints in game %s: %s", game_id, e)
+            return
+        players = {int(slot): name for slot, name in names["players"].items()}
+        items = {(slot, ident): name for slot, ident, name in names["items"]}
+        locations = {(slot, ident): name for slot, ident, name in names["locations"]}
+        lines, item_names = [], []
+        for receiving, finding, location, item, entrance, _flags in found:
+            finder, receiver = notify.md(players.get(finding, f"Player {finding}")), players.get(receiving, "")
+            item_name = items[receiving, item]
+            item_names.append(item_name)
+            whose = "their" if finding == receiving else f"**{notify.md(receiver)}**'s"
+            line = f"**{finder}** found {whose} **{notify.md(item_name)}** at {notify.md(locations[finding, location])}"
+            lines.append(line + (f" ({notify.md(entrance)})" if entrance else ""))
+        url = notify.link(f"/games/{game_id}")
+        if len(found) == 1:
+            notify.emit("hint_found", f"Hinted item found: {item_names[0]}", f"{lines[0]} in {notify.md(game_name)}.",
+                        url=url, color="success")
+            return
+        # A !release or !collect can find many hinted items at once: one message instead of a flood
+        text, shown = "", 0
+        for line in lines:
+            if len(text) + len(line) > 3800:
+                break
+            text, shown = text + line + "\n", shown + 1
+        if shown < len(lines):
+            text += f"…and {len(lines) - shown} more"
+        notify.emit("hint_found", f"{len(found)} hinted items found in {game_name}", text.strip(), url=url,
+                    color="success")
+
+    def _announce_goals(self, game_id: int, game_name: str, done: set[int], known: set[int]) -> None:
         new = done - known
         if not new:
             return
-        game = db.query_one("SELECT name FROM games WHERE id = ?", (game_id,))
         players = {r["slot"]: r for r in db.query(
             "SELECT s.slot, s.name, s.game, u.username FROM game_slots s LEFT JOIN users u ON u.id = s.user_id "
             "WHERE s.game_id = ? AND s.type = 1", (game_id,))}
-        if not game or not players:
+        if not players:
             return
         finished = len(players.keys() & done)
         url = notify.link(f"/games/{game_id}")
@@ -541,11 +598,10 @@ class RoomManager:
             p = players[slot]
             who = notify.md(p["name"]) + (f" ({notify.md(p['username'])})" if p["username"] else "")
             notify.emit("player_goal", f"{p['name']} reached their goal",
-                        f"{who} finished **{notify.md(p['game'])}** in {notify.md(game['name'])}.",
+                        f"{who} finished **{notify.md(p['game'])}** in {notify.md(game_name)}.",
                         url=url, fields=[("Done", f"{finished} of {len(players)} players", True)], color="success")
         if players.keys() <= done and not players.keys() <= known:
-            notify.emit("player_goal", f"Everyone finished {game['name']}!",
+            notify.emit("player_goal", f"Everyone finished {game_name}!",
                         f"All {len(players)} players reached their goal. Congratulations!", url=url, color="success")
-
 
 ROOMS = RoomManager()

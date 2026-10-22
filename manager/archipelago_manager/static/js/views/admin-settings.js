@@ -99,6 +99,7 @@ const EVENTS = [
   ["game_online", "A game goes online", "When someone starts it; not when it comes back after a crash or a restart of the container."],
   ["game_crashed", "A game server crashes"],
   ["player_goal", "A player reaches their goal, and when everyone has"],
+  ["hint_found", "A hinted item is found", "Many at once, for example after a !release, come as one message."],
   ["generation", "A new game is generated, or generating fails"],
   ["signup", "Sign-up rounds open, close soon and close"],
   ["apworld_pending", "A custom game waits for approval"],

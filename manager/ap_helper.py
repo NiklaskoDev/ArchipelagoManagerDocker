@@ -187,7 +187,49 @@ def cmd_progress(args) -> dict:
     for (team, slot), used in save.get("hints_used", {}).items():
         if team == 0:
             entry(slot)["hints_used"] = int(used)
-    return {"slots": slots}
+    # Every hint is stored for both the finding and the receiving player; list each once.
+    hints = set()
+    for (team, _slot), slot_hints in save.get("hints", {}).items():
+        if team == 0:
+            for h in slot_hints:
+                hints.add((int(h.receiving_player), int(h.finding_player), int(h.location), int(h.item),
+                           str(h.entrance or ""), int(h.item_flags)))
+    checks = {int(slot): sorted(int(loc) for loc in locs)
+              for (team, slot), locs in save.get("location_checks", {}).items() if team == 0}
+    return {"slots": slots, "hints": sorted(hints), "checks": checks}
+
+
+def cmd_names(args) -> dict:
+    """Player, item and location names for ids, from the multidata's own data package (custom games included).
+
+    The request lists [slot, id] pairs: items in the game of the slot receiving them, locations in the game of the
+    slot they are in.
+    """
+    cmd_where(args)
+    md = decode_multidata(args.path)
+    request = json.loads(args.request)
+    package = md.get("datapackage", {})
+    reverse: dict[tuple[str, str], dict[int, str]] = {}
+
+    def names_of(kind: str, game: str) -> dict[int, str]:
+        if (kind, game) not in reverse:
+            mapping = package.get(game, {}).get(f"{kind}_name_to_id", {})
+            reverse[kind, game] = {value: name for name, value in mapping.items()}
+        return reverse[kind, game]
+
+    def lookup(kind: str, slot: int, ident: int) -> str:
+        info = md["slot_info"].get(slot)
+        # ids below zero (the server, cheats) belong to the "Archipelago" pseudo game
+        for game in ((info.game,) if info else ()) + ("Archipelago",):
+            if ident in names_of(kind, game):
+                return names_of(kind, game)[ident]
+        return f"{kind.capitalize()} {ident}"
+
+    return {
+        "players": {int(slot): info.name for slot, info in md["slot_info"].items()},
+        "items": [[slot, ident, lookup("item", slot, ident)] for slot, ident in request.get("items", [])],
+        "locations": [[slot, ident, lookup("location", slot, ident)] for slot, ident in request.get("locations", [])],
+    }
 
 
 # --------------------------------------------------------------------------------------------------------------------
@@ -243,6 +285,7 @@ COMMANDS = {
     "games": cmd_games,
     "multidata": cmd_multidata,
     "progress": cmd_progress,
+    "names": cmd_names,
     "templates": cmd_templates,
 }
 
@@ -257,6 +300,9 @@ def main() -> None:
     p.add_argument("path")
     p = sub.add_parser("progress")
     p.add_argument("save")
+    p = sub.add_parser("names")
+    p.add_argument("path")
+    p.add_argument("request", help='JSON: {"items": [[slot, id], ...], "locations": [[slot, id], ...]}')
     p = sub.add_parser("templates")
     p.add_argument("out")
     sub.add_parser("host-yaml")

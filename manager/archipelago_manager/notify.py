@@ -171,18 +171,21 @@ def stop() -> None:
     STATE.loop = STATE.queue = STATE.worker = None
 
 
+def wanted(event: str) -> bool:
+    """Whether a message of this kind would be sent, to skip work for messages nobody gets."""
+    cfg = app_settings.get_settings()
+    return bool(STATE.queue is not None and cfg["discord_webhook_url"] and event in cfg["notify_events"])
+
+
 def emit(event: str, title: str, description: str = "", *, url: str | None = None,
          fields: list[tuple] | None = None, color: str = "info") -> bool:
     """Queues a message if a webhook is set and the admin wants this kind of event. Safe to call from any thread.
 
     Returns whether the message was queued.
     """
-    if STATE.loop is None or STATE.queue is None:
+    if STATE.loop is None or not wanted(event):
         return False
-    cfg = app_settings.get_settings()
-    webhook = cfg["discord_webhook_url"]
-    if not webhook or event not in cfg["notify_events"]:
-        return False
+    webhook = app_settings.get_setting("discord_webhook_url")
     payload = build_payload(title, description, url=url, fields=fields, color=color)
     STATE.loop.call_soon_threadsafe(STATE.queue.put_nowait, (webhook, payload))
     return True

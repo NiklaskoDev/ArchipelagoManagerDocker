@@ -9,7 +9,9 @@ import pytest
 from helpers import (APClient, FakeWebhook, build_apworld, make_game, player_yaml, run_job, save_now, server_pid,
                      upload_yaml, wait_for, wait_state)
 
-ALL_EVENTS = ["game_online", "game_crashed", "player_goal", "generation", "signup", "apworld_pending", "ap_update"]
+ALL_EVENTS = ["game_online", "game_crashed", "player_goal", "hint_found", "generation", "signup", "apworld_pending",
+              "ap_update"]
+CHECKS_FINDER_BASE = 81000  # ChecksFinder's locations are "Tile 1" (81000) to "Tile 25"
 
 
 def setup_admin(server):
@@ -129,8 +131,32 @@ def test_a_game_announces_itself_its_finishers_and_its_crashes(admin, make_user,
     time.sleep(1)
     assert discord.titles().count(online["title"]) == 1
 
-    # goals are read from the save file
+    # a hinted item is announced when it is found; a hint for a location checked before is not news
     port = game["port"]
+    tile = lambda location: f"Tile {location - CHECKS_FINDER_BASE + 1}"  # noqa: E731
+    log_lines = lambda: [line["text"] for line in admin.get(f"/api/games/{gid}/log").json()["lines"]]  # noqa: E731
+    with APClient(port, "St*r", "ChecksFinder") as client:
+        assert client.connected
+        early, later = client.missing[0], client.missing[1]
+        client.ws.send(json.dumps([{"cmd": "LocationChecks", "locations": [early]}]))
+        time.sleep(1)
+        save_now(admin, gid)
+        time.sleep(22)  # one look at the save in between, so the check counts as earlier than the hint
+        # a client can turn a location it already checked into a hint (the server keeps those)
+        client.ws.send(json.dumps([{"cmd": "LocationScouts", "locations": [early], "create_as_hint": 2}]))
+        r = admin.post(f"/api/games/{gid}/command", json={"command": f"/hint_location St*r {tile(later)}"})
+        assert r.status_code == 200
+        # console commands are queued by the server: check the location only once the hint exists
+        wait_for(lambda: any(f"is at {tile(later)} in" in line for line in log_lines()), timeout=15, message="the hint")
+        client.ws.send(json.dumps([{"cmd": "LocationChecks", "locations": [later]}]))
+        time.sleep(1)
+    save_now(admin, gid)
+    found = discord.wait_for("Hinted item found")
+    assert f"at {tile(later)} in" in found["description"] and found["description"].startswith("**St\\*r** found ")
+    assert found["url"] == f"http://manager.test:8080/#/games/{gid}"
+    assert len([t for t in discord.titles() if "hinted item" in t.lower()]) == 1  # not the early one
+
+    # goals are read from the save file
     for name, game_name in (("St*r", "ChecksFinder"), ("Plain", "APQuest")):
         with APClient(port, name, game_name) as client:
             assert client.connected
