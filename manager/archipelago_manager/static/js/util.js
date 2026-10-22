@@ -152,6 +152,15 @@ export function fromLocalInput(value) {
   return Number.isNaN(time) ? null : time / 1000;
 }
 
+// A playing time: "2 d 5 h", "3 h 12 min", "40 min"
+export function fmtSpan(seconds) {
+  const minutes = Math.max(0, Math.floor(seconds / 60));
+  const d = Math.floor(minutes / 1440), hrs = Math.floor(minutes / 60) % 24, m = minutes % 60;
+  if (d) return t("{d} d {h} h", { d, h: hrs });
+  if (hrs) return t("{h} h {m} min", { h: hrs, m });
+  return t("{m} min", { m });
+}
+
 export function fmtDuration(seconds) {
   seconds = Math.max(0, Math.round(seconds));
   const m = Math.floor(seconds / 60), s = seconds % 60;

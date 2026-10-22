@@ -30,6 +30,8 @@ players log in to keep their YAML configs, see their games and download their pa
   their files. Admins also get the live console, file management, per-game settings and user management.
 - **A text client in the browser.** Players chat with the multiworld and use the server's commands (`!hint`,
   `!remaining`, …) on the game page, without Archipelago's own text client.
+- **Progress over time and an archive.** A chart shows how far each player got and when; finished games move to an
+  archive with the playing time and who reached their goal when.
 
 ## Quick start
 
@@ -103,6 +105,11 @@ by your players:
      about a minute and a half after you leave the page, or right away with *Disconnect*.
    - Commands that start with `/` belong to Archipelago's own clients and are not available here; the tracker above
      shows what `/received` and `/missing` would.
+6. **Progress over time** on the game page charts every player's share of their locations checked, from the first
+   check on, with a dot where someone reached their goal. Point at the chart (or focus it and use the arrow keys) for
+   everyone's numbers at that moment; pressing a name in the legend brings that player to the front. With more than
+   eight players, your own slots are in color and the others gray. The table below lists the standings: who reached
+   their goal first, and after how long, then who got furthest.
 
 **Sign-ups:** open rounds are on the dashboard and under **Sign-ups**. *Join* → pick one of your configs or upload a
 YAML. It is checked against the round's rules right away (allowed games, unique player names, how many configs each
@@ -175,6 +182,18 @@ itself. Both edit the same file, so switch whenever you like.
 - **Progress:** per slot checks and whether a player is online, read from the server's save (refreshed about once a
   minute while the game is running). The tracker on the game page lets you pick any slot and see its items, locations
   and hints.
+- **History and archive:** every look at the save is recorded: a point whenever a slot's checks change (timed by the
+  save itself, which knows when a slot last checked a location), when each slot first shows its goal, and when the first
+  location of the game was checked. Once every player has reached their goal, the game is *finished*: it gets a
+  *Finished* badge, its chart becomes the *Results*, and *Games* lists it under *Archive* with the playing time (from the
+  first check until everyone was done) and how many reached their goal. The Discord message that everyone finished says how long it took.
+  - *Move to the archive* (game page, admins) finishes a game by hand, for one that will not be played to the end;
+    *Back to the running games* undoes it. Nothing about the game's progress changes either way.
+  - *Share the spoiler log with the players when everyone has finished* (game settings) makes the spoiler log visible
+    to every player in the game at that moment.
+  - *Reset progress* starts the history over. Games that already had progress before the manager kept a history get a
+    first point where they stood at the next start of the manager, and finished ones go to the archive; their times
+    before that are unknown (shown as "before recording began").
 - **Backups of a game's progress:** *Backups* on the game page. While the save changes, a copy is kept every 30 minutes
   (the latest 48, about a day of play), plus one before every *Reset progress* and every restore, and whenever you
   press *Back up now* (the latest 20 of those). *Restore* puts a copy back while the server is stopped, after keeping
@@ -249,7 +268,7 @@ Everything lives in the `/config` volume:
 
 | Path | Contents |
 |---|---|
-| `manager.sqlite3` | Users, settings, config and game metadata |
+| `manager.sqlite3` | Users, settings, config and game metadata, the progress history |
 | `configs/` | Player YAMLs, one folder per user |
 | `games/<id>/` | Multiworld data, the server's save file (`multidata.apsave`), patch files, log |
 | `games/<id>/backups/` | Copies of the save (see below) |

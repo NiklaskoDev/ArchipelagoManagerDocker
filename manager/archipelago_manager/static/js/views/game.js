@@ -4,6 +4,7 @@ import { stateBadge, badge, chips, progressBar, copyField, copyButton, controlBu
          missingGamesPanel, isActive, serverOptionsForm } from "../components.js";
 import { t, tServer, plural } from "../i18n.js";
 import { textClientSection } from "../textclient.js";
+import { progressSection, playedText } from "../progresschart.js";
 
 // what a backup was made for, and the kind of a game file, as the server names them
 const BACKUP_REASONS = { auto: t("automatic"), manual: t("made by hand"), "before-reset": t("before a reset"), "before-restore": t("before a restore") };
@@ -19,6 +20,8 @@ export default async function render({ root, params, cleanup, isCurrent, query }
   const infoHost = h("div");
   const trackerHost = h("div");
   const textClientHost = h("div");
+  const progressHost = h("div");
+  const archiveHost = h("div");
   const slotsHost = h("div");
   const adminHost = h("div", { class: "stack section" });
   let drawnSignature = "";
@@ -31,7 +34,8 @@ export default async function render({ root, params, cleanup, isCurrent, query }
       h("div", { class: "muted small" }, h("a", { href: "#/games" }, t("← All games"))),
       h("div", { class: "page-head", style: { marginTop: "8px" } },
         h("div", {},
-          h("div", { class: "row" }, h("h1", {}, game.name), stateBadge(game.state), game.race_mode ? badge(t("Race mode"), "warn") : null),
+          h("div", { class: "row" }, h("h1", {}, game.name), stateBadge(game.state), game.race_mode ? badge(t("Race mode"), "warn") : null,
+            game.finished_at ? badge(t("Finished"), "ok") : null),
           h("p", { class: "muted" }, [
             game.seed_name ? t("Seed {name}", { name: game.seed_name }) : null,
             game.source === "generated" ? t("generated here") : t("uploaded"),
@@ -134,7 +138,8 @@ export default async function render({ root, params, cleanup, isCurrent, query }
   }
 
   function signature() {
-    return JSON.stringify([game.state, game.error, game.slots, game.progress, game.password, game.address, game.missing_games, game.my_slots]);
+    return JSON.stringify([game.state, game.error, game.slots, game.progress, game.password, game.address, game.missing_games, game.my_slots,
+      game.finished_at]);
   }
   function drawLive() {
     drawnSignature = signature();
@@ -143,6 +148,45 @@ export default async function render({ root, params, cleanup, isCurrent, query }
     drawSlots();
     syncTracker();
     syncTextClient();
+    if (admin) drawArchive();
+    loadHistory().catch(() => {});  // progress, a goal or the archive changed
+  }
+
+  // -------------------------------------------------------------------------------------------------------------------
+  // progress over time, and the results once everyone is done
+  // -------------------------------------------------------------------------------------------------------------------
+  let historySignature = "";
+  const historyStops = [];
+  cleanup(() => historyStops.splice(0).forEach((fn) => fn()));
+  async function loadHistory() {
+    const data = await get(`/api/games/${id}/history`);
+    const { now: _now, ...rest } = data;
+    const sig = JSON.stringify([rest, game.slots.filter((s) => s.mine).map((s) => s.slot)]);
+    if (!isCurrent() || sig === historySignature) return;
+    historySignature = sig;
+    historyStops.splice(0).forEach((fn) => fn());
+    clear(progressHost);
+    if (!data.recorded_from) return;  // the server never ran since the manager keeps a history
+    const mine = new Set(game.slots.filter((s) => s.mine).map((s) => s.slot));
+    progressHost.append(h("div", { class: "section" }, h("div", { class: "card stack" },
+      h("div", { class: "card-head" }, h("h2", {}, data.finished_at ? t("Results") : t("Progress over time")),
+        h("span", { class: "muted small" }, playedText(data))),
+      progressSection(data, { mine, cleanup: (fn) => historyStops.push(fn) }),
+      h("p", { class: "muted small", style: { margin: 0 } }, t("Read from the server's save about once a minute while the server runs.")))));
+  }
+  const historyTimer = setInterval(() => { if (!document.hidden) loadHistory().catch(() => {}); }, 30000);
+  cleanup(() => clearInterval(historyTimer));
+
+  // Games finish by themselves when everyone reached their goal; an admin can archive one by hand
+  function drawArchive() {
+    clear(archiveHost).append(h("div", { class: "card row spread" },
+      h("div", {}, h("strong", {}, game.finished_at ? t("In the archive since {date}", { date: fmtDate(game.finished_at) }) : t("Archive")),
+        h("div", { class: "muted small" }, game.finished_at
+          ? t("Finished games are listed apart from the running ones. Taking a game back out does not change its progress.")
+          : t("A game moves to the archive by itself once every player has reached their goal. Move one there by hand when it will not be played to the end."))),
+      h("button", { class: "btn", type: "button", onclick: action(async () => {
+        applyGame(await patch(`/api/games/${id}`, { finished: !game.finished_at }));
+      }) }, game.finished_at ? t("Back to the running games") : t("Move to the archive"))));
   }
 
   // The text client, for the player's own slots only: it speaks in their name
@@ -304,13 +348,15 @@ export default async function render({ root, params, cleanup, isCurrent, query }
     const claimable = checkbox(t("Let users claim unowned slots themselves"), game.claimable,
       t("Handy when you upload a seed and your friends should pick their own slot."));
     const notes = h("textarea", { class: "input", rows: 2, maxLength: 2000, placeholder: t("Only visible to administrators") }, game.notes ?? "");
+    const shareSpoiler = checkbox(t("Share the spoiler log with the players when everyone has finished"), game.share_spoiler_when_done,
+      t("When every player has reached their goal (or you move the game to the archive), the spoiler log becomes visible to every player in the game."));
     const rules = serverOptionsForm(opts);
     const save = h("button", { class: "btn primary", type: "button" }, t("Save settings"));
     save.onclick = action(async () => {
       const options = rules.read();
       const body = { name: name.value, password: password.value, server_password: adminPassword.value, options,
         visibility: visibility.value, claimable: claimable.input.checked, single_claim: singleClaim.input.checked,
-        notes: notes.value };
+        notes: notes.value, share_spoiler_when_done: shareSpoiler.input.checked };
       if (port.value) body.port = Number(port.value);
       const result = await patch(`/api/games/${id}`, body);
       game = result;
@@ -324,7 +370,7 @@ export default async function render({ root, params, cleanup, isCurrent, query }
           field(t("Room password"), password, t("Players need it to connect")),
           field(t("Remote admin password"), adminPassword, t("Lets clients use !admin; leave empty to disable")),
           field(t("Who can see this game"), visibility)),
-        claimable, singleClaim, field(t("Notes"), notes),
+        claimable, singleClaim, shareSpoiler, field(t("Notes"), notes),
         h("h3", {}, t("Server rules")), rules.node,
         h("div", { class: "row" }, save)));
   }
@@ -476,10 +522,10 @@ export default async function render({ root, params, cleanup, isCurrent, query }
   }
 
   // -------------------------------------------------------------------------------------------------------------------
-  root.append(headerHost, infoHost, trackerHost, textClientHost, slotsHost, adminHost);
+  root.append(headerHost, infoHost, trackerHost, textClientHost, progressHost, slotsHost, adminHost);
   drawLive();
   if (admin) {
-    adminHost.append(settingsSection(), filesSection(), consoleSection(), backupsSection(), dangerSection());
+    adminHost.append(settingsSection(), archiveHost, filesSection(), consoleSection(), backupsSection(), dangerSection());
     if (query.get("tab") === "console") adminHost.querySelector("details:nth-of-type(3)")?.setAttribute("open", "");
   }
   const timer = setInterval(() => { if (!document.hidden) refresh().catch(() => {}); }, 4000);

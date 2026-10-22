@@ -39,6 +39,10 @@ MESSAGES = {
     "{finished} of {total} players": "{finished} von {total} Spielern",
     "Everyone finished {game}!": "Alle haben {game} geschafft!",
     "All {n} players reached their goal. Congratulations!": "Alle {n} Spieler haben ihr Ziel erreicht. Glückwunsch!",
+    "Time": "Zeit",
+    "{d} d {h} h": "{d} T. {h} Std.",
+    "{h} h {m} min": "{h} Std. {m} Min.",
+    "{m} min": "{m} Min.",
 
     # generation
     "Job #{id}": "Generierung #{id}",

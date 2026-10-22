@@ -12,8 +12,9 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from . import apbridge, backups, db, gamepaths, notify, settings as app_settings
+from . import apbridge, backups, db, gamepaths, history, notify, settings as app_settings
 from .config import CONFIG
+from .history import STATUS_GOAL
 
 log = logging.getLogger(__name__)
 
@@ -24,7 +25,6 @@ READY_TIMEOUT = 90
 CRASH_RESTART_WINDOW = 10 * 60
 CRASH_RESTART_LIMIT = 3
 PROGRESS_CHECK_INTERVAL = 20
-STATUS_GOAL = 30  # ClientStatus.CLIENT_GOAL
 
 # A password is handed to the server as a console argument, so it must survive being split on whitespace.
 _PASSWORD_OK = re.compile(r"[^\s\x00-\x1f\x7f]{1,64}")
@@ -164,6 +164,8 @@ class RoomManager:
         # Per game, what the last look at the save showed: the slots that had reached their goal, and the checked
         # locations per slot. Notifications are about the difference to the next look.
         self._seen: dict[int, tuple[set[int], dict[int, set[int]]]] = {}
+        # Per game, the reading of the save last written to the history (history.py): only a new one can change it
+        self._recorded: dict[int, dict] = {}
         self._background: set[asyncio.Task] = set()
         self._trackers: dict[tuple[int, int], tuple[tuple[float, int] | None, dict]] = {}
         # one reading of a save at a time per game (and per tracker): the others wait and then share its result
@@ -174,6 +176,7 @@ class RoomManager:
         self.rooms.clear()
         self._progress.clear()
         self._seen.clear()
+        self._recorded.clear()
         self._trackers.clear()
         self.closing = False
 
@@ -501,6 +504,7 @@ class RoomManager:
         """For a save that was replaced or removed: read it afresh, and take it as the new starting point."""
         self._progress.pop(game_id, None)
         self._seen.pop(game_id, None)
+        self._recorded.pop(game_id, None)
         for key in [k for k in self._trackers if k[0] == game_id]:
             del self._trackers[key]
 
@@ -532,6 +536,7 @@ class RoomManager:
             del self._reading[key]
         self._progress.pop(game_id, None)
         self._seen.pop(game_id, None)
+        self._recorded.pop(game_id, None)
         for key in [k for k in self._trackers if k[0] == game_id]:
             del self._trackers[key]
 
@@ -579,11 +584,33 @@ class RoomManager:
         state = await self._read_save(game_id)
         if state is not None and game_id not in self._seen:
             self._seen[game_id] = self._summary(state)
+            self._record(game_id, state)
+
+    def _record(self, game_id: int, state: dict) -> None:
+        # a save that did not change is read from the cache as the same object
+        if self._recorded.get(game_id) is not state:
+            history.record(game_id, state)
+            self._recorded[game_id] = state
+
+    async def catch_up_history(self) -> None:
+        """Notes where games stand that have a save but no history yet: from before the manager kept one, or uploaded
+        with progress. Finished ones go to the archive."""
+        for row in db.query("SELECT id FROM games g WHERE NOT EXISTS "
+                            "(SELECT 1 FROM game_progress p WHERE p.game_id = g.id) ORDER BY id"):
+            if not gamepaths.save_path(row["id"]).is_file():
+                continue
+            try:
+                state = await self._read_save(row["id"])
+                if state is not None:
+                    self._record(row["id"], state)
+            except Exception:  # noqa: BLE001 - one broken save must not stop the others
+                log.exception("Reading the progress of game %s failed", row["id"])
 
     async def _check_progress(self, game_id: int) -> None:
         state = await self._read_save(game_id)
         if state is None:
             return
+        self._record(game_id, state)
         seen = self._seen.get(game_id)
         self._seen[game_id] = self._summary(state)
         if seen is None:  # the first look is the starting point: what came before was announced back then
@@ -661,8 +688,12 @@ class RoomManager:
                                                                         finished=finished, total=len(players)), True)],
                         color="success")
         if players.keys() <= done and not players.keys() <= known:
+            game = db.query_one("SELECT play_started_at, finished_at FROM games WHERE id = ?", (game_id,))
+            fields = None
+            if game and game["play_started_at"] and game["finished_at"]:
+                fields = [(notify.tr("Time"), notify.duration(game["finished_at"] - game["play_started_at"]), True)]
             notify.emit("player_goal", notify.tr("Everyone finished {game}!", game=game_name),
                         notify.tr("All {n} players reached their goal. Congratulations!", n=len(players)), url=url,
-                        color="success")
+                        fields=fields, color="success")
 
 ROOMS = RoomManager()

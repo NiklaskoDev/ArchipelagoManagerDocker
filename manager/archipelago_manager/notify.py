@@ -87,6 +87,17 @@ def game_address(port: int | None) -> str | None:
     return f"{host}:{port}" if host and port else None
 
 
+def duration(seconds: float) -> str:
+    """A playing time such as "2 d 5 h", "3 h 12 min" or "40 min"."""
+    minutes = max(0, int(seconds // 60))
+    days, hours, mins = minutes // 1440, minutes // 60 % 24, minutes % 60
+    if days:
+        return tr("{d} d {h} h", d=days, h=hours)
+    if hours:
+        return tr("{h} h {m} min", h=hours, m=mins)
+    return tr("{m} min", m=mins)
+
+
 def timestamp(ts: float, style: str = "f") -> str:
     """A Discord timestamp: every reader sees it in their own time zone."""
     return f"<t:{int(ts)}:{style}>"
