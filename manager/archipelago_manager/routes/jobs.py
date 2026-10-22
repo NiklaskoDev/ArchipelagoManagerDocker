@@ -8,27 +8,35 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from .. import db, settings as app_settings
-from ..generation import GENERATION, JobRequestError, create_job, prepare_players
+from ..generation import GENERATION, JobRequestError, create_job, job_dir, prepare_players
 from ..security import current_user, is_admin
 
 router = APIRouter(prefix="/api")
 
 
 def job_json(row: sqlite3.Row, *, with_players: bool = True) -> dict:
+    options = db.jloads(row["options"], {})
     result = {
         "id": row["id"], "name": row["name"], "status": row["status"], "created_at": row["created_at"],
         "started_at": row["started_at"], "finished_at": row["finished_at"], "game_id": row["game_id"],
-        "error": row["error"], "options": db.jloads(row["options"], {}), "host_after": bool(row["host_after"]),
+        "error": row["error"], "options": options, "host_after": bool(row["host_after"]),
+        "test": bool(options.get("test")),
         "created_by": row["created_by"], "creator": row["creator"] if "creator" in row.keys() else None,
         "queue_position": GENERATION.queue_position(row["id"]) if row["status"] == "queued" else None,
     }
     if with_players:
+        # config_id is the library config a player file was copied from, to generate with the same configs again
         result["players"] = [
-            {"filename": p["filename"], "user_id": p["user_id"], "owner": p["owner"],
-             "names": db.jloads(p["player_names"], []), "games": db.jloads(p["games"], [])}
+            {"filename": p["filename"], "user_id": p["user_id"], "owner": p["owner"], "config_id": p["config_id"],
+             "names": db.jloads(p["player_names"], []), "games": db.jloads(p["games"], []), "error": p["error"]}
             for p in db.query("SELECT p.*, u.username AS owner FROM job_players p "
                               "LEFT JOIN users u ON u.id = p.user_id WHERE p.job_id = ? ORDER BY p.rowid",
                               (row["id"],))]
+        meta = job_dir(row["id"]) / "Players" / "meta.yaml"
+        result["meta"] = meta.read_text(encoding="utf-8", errors="replace") if options.get("has_meta") and \
+            meta.is_file() else None
+        signup = db.query_one("SELECT id, name FROM signups WHERE job_id = ? OR test_job_id = ?", (row["id"], row["id"]))
+        result["signup"] = {"id": signup["id"], "name": signup["name"]} if signup else None
     return result
 
 

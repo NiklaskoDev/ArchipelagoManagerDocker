@@ -186,6 +186,60 @@ def test_a_failed_generation_can_be_fixed_and_retried(admin, make_user, discord)
     admin.delete(f"/api/games/{done['game_id']}")
 
 
+def test_a_round_can_be_tested_before_it_is_generated(admin, make_user, discord):
+    _a, ann = make_user("ann")
+    _b, bo = make_user("bo")
+    sid = new_round(admin, "Dry run", options={"spoiler": 0})["id"]
+    r = admin.post(f"/api/signups/{sid}/test")
+    assert r.status_code == 400 and r.json()["detail"] == "Nobody signed up for this round"
+    assert enter(ann, sid, config(ann, "Tessa")).status_code == 200
+    # accepted when entered: only the generator knows every option of every game
+    banana = "name: Brock\ngame: APQuest\nAPQuest:\n  player_sprite: banana\n"
+    r = enter(bo, sid, config(bo, "Brock", "APQuest", content=banana))
+    assert r.status_code == 200 and r.json()["test"] is None
+    bad_entry = next(e["id"] for e in r.json()["entries"] if e["mine"])
+
+    assert bo.post(f"/api/signups/{sid}/test").status_code == 403
+    r = admin.post(f"/api/signups/{sid}/test")
+    assert r.status_code == 200 and r.json()["test"]["status"] in ("queued", "running")
+    assert admin.post(f"/api/signups/{sid}/test").status_code == 409  # one test at a time
+    failed = wait_for(lambda: (s := admin.get(f"/api/signups/{sid}").json())["test"]["status"] == "failed" and s,
+                      timeout=180, message="the test to fail")
+    assert failed["status"] == "open" and failed["open"] and failed["error"] is None  # a test leaves the round alone
+    assert failed["test"]["current"] is True
+    errors = {e["player_names"][0]: e["generation_error"] for e in failed["entries"]}
+    assert "banana" in errors["Brock"] and errors["Tessa"] is None
+    # bo sees what is wrong with his entry; ann sees neither his error nor the test
+    mine = next(e for e in bo.get(f"/api/signups/{sid}").json()["entries"] if e["mine"])
+    assert "banana" in mine["generation_error"]
+    view = ann.get(f"/api/signups/{sid}").json()
+    assert view["test"] is None
+    assert "generation_error" not in next(e for e in view["entries"] if not e["mine"])
+    # the test is a job like others, only it never becomes a game and Discord is not told
+    job = admin.get(f"/api/jobs/{failed['test']['job_id']}").json()
+    assert job["test"] is True and job["signup"] == {"id": sid, "name": "Dry run"}
+    assert "Generation failed: Dry run" not in discord.titles()
+
+    # bo swaps in a working config: nothing is marked any more, and the test no longer matches the entries
+    bo.delete(f"/api/signups/{sid}/entries/{bad_entry}")
+    assert enter(bo, sid, config(bo, "Brock", "APQuest")).status_code == 200
+    view = admin.get(f"/api/signups/{sid}").json()
+    assert view["test"]["current"] is False
+    assert [e["generation_error"] for e in view["entries"]] == [None, None]
+    assert admin.post(f"/api/signups/{sid}/test").status_code == 200
+    passed = wait_for(lambda: (s := admin.get(f"/api/signups/{sid}").json())["test"]["status"] == "succeeded" and s,
+                      timeout=180, message="the test to pass")
+    assert passed["status"] == "open" and passed["test"]["current"] is True and passed["game_id"] is None
+    job = admin.get(f"/api/jobs/{passed['test']['job_id']}").json()
+    assert job["game_id"] is None and "Dry run" not in [g["name"] for g in admin.get("/api/games").json()]
+    log = [l["text"] for l in admin.get(f"/api/jobs/{job['id']}/log").json()["lines"]]
+    assert any(l.startswith("Test passed") for l in log)
+    # other options than the tested ones make the test out of date too
+    r = admin.patch(f"/api/signups/{sid}", json={"options": {"spoiler": 1}})
+    assert r.json()["test"]["current"] is False
+    admin.delete(f"/api/signups/{sid}")
+
+
 def test_deadlines_close_rounds_and_remind_players(admin, make_user, discord, ap_server):
     """The clock runs every 20 seconds; the test moves the times in the database instead of waiting days."""
     _a, ann = make_user("ann")

@@ -3,6 +3,9 @@
 A round is 'open' while it takes entries, 'closed' once the deadline passed or an admin closed it, 'generating' while
 its generation job runs and 'done' when the game exists. A failed generation sends it back to 'closed' with the error,
 so an admin can fix the entries and try again.
+
+Before that, an admin can test the round: the entries are generated as they are, and the result is thrown away. A failed
+test, like a failed generation, marks the entries the generator complained about, so their players see what to fix.
 """
 from __future__ import annotations
 
@@ -17,7 +20,8 @@ from pathlib import Path
 
 from . import apbridge, configstore, db, notify, yamlinfo
 from .config import CONFIG
-from .generation import GENERATION, PLANDO_OPTIONS, JobRequestError, check_players, create_job, prepare_player
+from .generation import (GENERATION, PLANDO_OPTIONS, JobRequestError, PreparedPlayer, check_players, create_job,
+                         prepare_player)
 
 log = logging.getLogger(__name__)
 
@@ -256,6 +260,32 @@ def close(signup_id: int, *, user: sqlite3.Row | None = None) -> None:
             log.warning("Sign-up round %s closed, but generating failed: %s", signup_id, e.message)
 
 
+def _players(signup: sqlite3.Row, rows: list[sqlite3.Row]) -> list[PreparedPlayer]:
+    """The entries as players for the generator, checked like a generation checks them."""
+    if not rows:
+        raise SignupError("Nobody signed up for this round")
+    issues = entry_issues(signup, rows)
+    problems = [f"{row['username']}: {issue}" for row in rows for issue in issues[row["id"]]]
+    if problems:
+        raise SignupError("Some entries break the round's rules: " + "; ".join(problems))
+    players, used = [], set()
+    for row in rows:
+        try:
+            data = entry_path(signup["id"], row["id"]).read_bytes()
+        except FileNotFoundError:
+            raise SignupError(f"The file of {row['username']}'s entry '{row['name']}' is missing", 410) from None
+        players.append(prepare_player(row["config_id"], row["user_id"], row["name"], data, used))
+    check_players(players)
+    return players
+
+
+def _start_job(signup: sqlite3.Row, rows: list[sqlite3.Row], owner: sqlite3.Row, *, test: bool) -> int:
+    opts = clean_options(db.jloads(signup["options"], {}))
+    return create_job(owner, _players(signup, rows), name=signup["name"], spoiler=opts["spoiler"], race=opts["race"],
+                      seed=None, skip_prog_balancing=opts["skip_prog_balancing"], plando=opts["plando"], meta=None,
+                      host_after=opts["host_after"], test=test)
+
+
 def generate(signup_id: int, *, user: sqlite3.Row | None = None) -> int:
     """Starts generating the round's game from its entries. Returns the job id."""
     with _LOCK:
@@ -265,26 +295,8 @@ def generate(signup_id: int, *, user: sqlite3.Row | None = None) -> int:
         if signup["status"] != "closed":
             raise SignupError("Close the sign-ups before generating" if signup["status"] == "open"
                               else "This round was already generated", 409)
-        rows = entries(signup_id)
         try:
-            if not rows:
-                raise SignupError("Nobody signed up for this round")
-            issues = entry_issues(signup, rows)
-            problems = [f"{row['username']}: {issue}" for row in rows for issue in issues[row["id"]]]
-            if problems:
-                raise SignupError("Some entries break the round's rules: " + "; ".join(problems))
-            players, used = [], set()
-            for row in rows:
-                try:
-                    data = entry_path(signup_id, row["id"]).read_bytes()
-                except FileNotFoundError:
-                    raise SignupError(f"The file of {row['username']}'s entry '{row['name']}' is missing", 410) from None
-                players.append(prepare_player(row["config_id"], row["user_id"], row["name"], data, used))
-            check_players(players)
-            opts = clean_options(db.jloads(signup["options"], {}))
-            job_id = create_job(_job_owner(signup, user), players, name=signup["name"], spoiler=opts["spoiler"],
-                                race=opts["race"], seed=None, skip_prog_balancing=opts["skip_prog_balancing"],
-                                plando=opts["plando"], meta=None, host_after=opts["host_after"])
+            job_id = _start_job(signup, entries(signup_id), _job_owner(signup, user), test=False)
         except (SignupError, JobRequestError) as e:
             db.execute("UPDATE signups SET error = ? WHERE id = ?", (e.message, signup_id))
             if user is None:  # nobody is looking at the page to see the error: this ran at the deadline
@@ -297,6 +309,60 @@ def generate(signup_id: int, *, user: sqlite3.Row | None = None) -> int:
                    (job_id, signup_id))
     GENERATION.enqueue(job_id)
     return job_id
+
+
+def test(signup_id: int, *, user: sqlite3.Row) -> int:
+    """Generates the current entries without keeping the result, to find problems before the real generation."""
+    with _LOCK:
+        signup = get(signup_id)
+        if not signup:
+            raise SignupError("No such round", 404)
+        if signup["status"] not in ("open", "closed"):
+            raise SignupError("This round was already generated", 409)
+        running = db.query_one("SELECT 1 FROM jobs WHERE id = ? AND status IN ('queued', 'running')",
+                               (signup["test_job_id"],))
+        if running:
+            raise SignupError("A test of this round is already running", 409)
+        try:
+            job_id = _start_job(signup, entries(signup_id), user, test=True)
+        except JobRequestError as e:
+            raise SignupError(e.message, e.status, e.missing_games) from None
+        db.execute("UPDATE signups SET test_job_id = ? WHERE id = ?", (job_id, signup_id))
+    GENERATION.enqueue(job_id)
+    return job_id
+
+
+def _same_options(job: sqlite3.Row, signup: sqlite3.Row) -> bool:
+    """Whether a job generated with the options the round has now."""
+    done, now = db.jloads(job["options"], {}), clean_options(db.jloads(signup["options"], {}))
+    return all(done.get(key) == now[key] for key in ("spoiler", "race", "skip_prog_balancing")) and \
+        sorted(done.get("plando") or []) == sorted(now["plando"])
+
+
+def test_result(signup: sqlite3.Row, rows: list[sqlite3.Row]) -> dict | None:
+    """The round's latest test, and whether it tested the entries and options the round has now."""
+    job = db.query_one("SELECT * FROM jobs WHERE id = ?", (signup["test_job_id"],)) if signup["test_job_id"] else None
+    if not job:
+        return None
+    tested = sorted(p["sha256"] for p in db.query("SELECT sha256 FROM job_players WHERE job_id = ?", (job["id"],)))
+    return {"job_id": job["id"], "status": job["status"], "error": job["error"], "created_at": job["created_at"],
+            "finished_at": job["finished_at"], "queue_position": GENERATION.queue_position(job["id"]),
+            "current": tested == sorted(row["sha256"] for row in rows) and _same_options(job, signup)}
+
+
+def entry_errors(signup: sqlite3.Row, rows: list[sqlite3.Row]) -> dict[int, str]:
+    """What the generator said is wrong with an entry, per entry, if the round's latest test or generation failed.
+
+    An entry the player changed since is not the file the generator complained about, so it has no error."""
+    if signup["status"] not in ("open", "closed"):
+        return {}
+    latest = db.query_one("SELECT id, status FROM jobs WHERE id IN (?, ?) AND status IN ('succeeded', 'failed') "
+                          "ORDER BY id DESC LIMIT 1", (signup["test_job_id"] or 0, signup["job_id"] or 0))
+    if not latest or latest["status"] != "failed":
+        return {}
+    by_hash = {p["sha256"]: p["error"] for p in db.query(
+        "SELECT sha256, error FROM job_players WHERE job_id = ? AND error IS NOT NULL", (latest["id"],))}
+    return {row["id"]: by_hash[row["sha256"]] for row in rows if row["sha256"] in by_hash}
 
 
 def reopen(signup_id: int, deadline: float | None) -> None:

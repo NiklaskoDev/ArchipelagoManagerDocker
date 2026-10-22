@@ -158,6 +158,11 @@ export default async function render({ root, params, cleanup, isCurrent }) {
           if (await confirmDialog(text, { title: t("Close sign-ups now?"), confirmText: t("Close sign-ups") })) await run("POST", `/api/signups/${id}/close`);
         }) }, icon("stop", 14), t("Close now")));
       }
+      if (["open", "closed"].includes(signup.status)) {
+        actions.push(h("button", { class: "btn", type: "button", disabled: !signup.entry_count || testRunning(),
+          title: t("Generate the entries once without keeping the result, to find problems before the real generation"),
+          onclick: action(() => run("POST", `/api/signups/${id}/test`)) }, icon("check", 14), t("Test generation")));
+      }
       if (signup.status === "closed") {
         actions.push(h("button", { class: "btn", type: "button", onclick: action(reopenDialog) }, icon("restart", 14), t("Reopen")));
         actions.push(h("button", { class: "btn primary", type: "button", disabled: !signup.entry_count,
@@ -223,6 +228,38 @@ export default async function render({ root, params, cleanup, isCurrent }) {
     return null;
   }
 
+  const testRunning = () => ["queued", "running"].includes(signup.test?.status);
+
+  // The latest test generation, for the admin who will generate the round
+  function testBanner() {
+    const test = signup.test;
+    if (!test || !["open", "closed"].includes(signup.status)) return null;
+    const log = h("a", { href: `#/jobs/${test.job_id}` }, t("Show the log"));
+    const changed = test.current ? null : h("div", { class: "small" }, t("Entries or options have changed since."));
+    if (testRunning()) {
+      return banner("info", h("span", { class: "spinner" }), h("div", { class: "grow" }, h("strong", {}, t("Testing the entries…")), " ",
+        test.queue_position ? t("#{n} in queue", { n: test.queue_position }) + " · " : "", log));
+    }
+    if (test.status === "succeeded") {
+      return banner(test.current ? "ok" : "info", icon("check", 18), h("div", { class: "grow" },
+        h("strong", {}, t("Test passed {ago}.", { ago: fmtAgo(test.finished_at) })), " ",
+        t("The entries generate together. A different seed can still fail in rare cases."), " ", log, changed));
+    }
+    if (test.status === "failed") {
+      return banner("error", icon("alert", 18), h("div", { class: "grow" },
+        h("strong", {}, t("Test failed {ago}.", { ago: fmtAgo(test.finished_at) })), " ", log,
+        h("pre", { class: "mono", style: { margin: "6px 0 0", whiteSpace: "pre-wrap" } }, tServer(test.error) || ""),
+        signup.entries.some((e) => e.generation_error) ? h("div", { class: "small" }, t("The entries the generator complained about are marked below.")) : null,
+        changed));
+    }
+    return null;
+  }
+
+  function generationError(e, cls = "") {
+    return e.generation_error ? h("div", { class: `form-error ${cls}` }, t("The generator could not use this config:"),
+      h("pre", { class: "mono", style: { margin: "4px 0 0", whiteSpace: "pre-wrap" } }, e.generation_error)) : null;
+  }
+
   function rulesCard() {
     const o = signup.options;
     const extras = [o.race ? t("race mode") : null, t("spoiler level {level}", { level: o.spoiler }), o.host_after ? t("server starts after generating") : null,
@@ -279,7 +316,7 @@ export default async function render({ root, params, cleanup, isCurrent }) {
             }) }, t("Withdraw")) : null)),
         e.outdated && editable ? banner("info", icon("edit", 16), h("div", { class: "grow" }, t("You changed this config after entering it. The round still has the old version.")),
           h("button", { class: "btn sm primary", type: "button", onclick: action(() => run("POST", `/api/signups/${id}/entries/${e.id}/refresh`)) }, t("Use the new version"))) : null,
-        e.issues.map((issue) => h("div", { class: "form-error" }, tServer(issue)))))) : h("p", { class: "muted" }, t("You have not entered yet.")),
+        e.issues.map((issue) => h("div", { class: "form-error" }, tServer(issue))), generationError(e)))) : h("p", { class: "muted" }, t("You have not entered yet.")),
       // admins see these for every entry at the top of the page
       !admin && missing.length ? missingGamesPanel(missing.map((game) => ({ game, configs: [], games: [], pending: [] })), reloadConfigs) : null,
       admin ? null : missingRomsPanel(mine.map((e) => e.missing_roms)),
@@ -297,7 +334,7 @@ export default async function render({ root, params, cleanup, isCurrent }) {
       h("thead", {}, h("tr", {}, [t("Player"), t("Games"), t("Entered by"), t("When"), ""].map((text) => h("th", {}, text)))),
       h("tbody", {}, signup.entries.map((e) => h("tr", {},
         h("td", {}, h("span", { class: "slot-name" }, e.player_names.join(", ") || h("span", { class: "muted" }, t("name from file"))),
-          e.issues.map((issue) => h("div", { class: "form-error small" }, tServer(issue)))),
+          e.issues.map((issue) => h("div", { class: "form-error small" }, tServer(issue))), admin ? generationError(e, "small") : null),
         h("td", {}, chips(e.games, e.missing_games)),
         h("td", {}, e.username, e.mine ? h("span", { class: "muted" }, " ", t("(you)")) : null),
         h("td", { class: "muted" }, fmtAgo(e.created_at)),
@@ -322,7 +359,7 @@ export default async function render({ root, params, cleanup, isCurrent }) {
   }
 
   function draw() {
-    clear(host).append(header(), h("div", { class: "stack" }, stateBanner(), adminWarnings(), rulesCard(), myCard(),
+    clear(host).append(header(), h("div", { class: "stack" }, stateBanner(), testBanner(), adminWarnings(), rulesCard(), myCard(),
       h("div", { class: "section" }, h("div", { class: "section-head" }, h("h2", {}, t("Entries"))), entriesCard())));
   }
 

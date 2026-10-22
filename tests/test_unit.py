@@ -3,7 +3,7 @@ import pytest
 
 from archipelago_manager import apbridge, settings, yamlform, yamlinfo
 from archipelago_manager.config import CONFIG
-from archipelago_manager.generation import _summarize_failure
+from archipelago_manager.generation import _player_file_errors, _summarize_failure
 from archipelago_manager.gamestore import classify
 from archipelago_manager.security import hash_password, verify_password, LoginThrottle
 
@@ -158,6 +158,30 @@ class TestBaseRomMessages:
         assert apbridge.file_location_text(inside) == '"Game (USA).sfc" into ap-data/Archipelago/ in the data folder'
         outside = apbridge.describe_file("/opt/archipelago/Game (USA).sfc")
         assert apbridge.file_location_text(outside) == '"Game (USA).sfc" into /opt/archipelago/'
+
+
+class TestPlayerFileErrors:
+    def test_each_file_gets_the_causes_listed_under_it(self):
+        lines = [
+            "ValueError: Encountered 2 error(s) in player files. See logs for full tracebacks.",
+            "",
+            "1. File Alice.yaml document #1 (with name: Alice) is invalid. Please fix your yaml.",
+            "KeyError: 'Could not find option \"banana\" for \"PlayerSprite\"'",
+            " Which caused: Options.OptionError: Error generating option player_sprite in APQuest",
+            "",
+            "2. File /data/jobs/3/Players/Bob-2.yaml is invalid. Please fix your yaml.",
+            "Press enter to close.Exception ignored in atexit callback: <built-in function input>",
+            "EOFError: EOF when reading a line",
+        ]
+        assert _player_file_errors(lines) == {
+            "Alice.yaml": "KeyError: 'Could not find option \"banana\" for \"PlayerSprite\"'\n"
+                          "Which caused: Options.OptionError: Error generating option player_sprite in APQuest",
+            # nothing listed under it: the line naming the file is all there is
+            "Bob-2.yaml": "2. File /data/jobs/3/Players/Bob-2.yaml is invalid. Please fix your yaml.",
+        }
+
+    def test_failures_of_the_whole_multiworld_name_no_file(self):
+        assert _player_file_errors(["Exception: Game appears as unbeatable. Aborting."]) == {}
 
 
 class TestYamlForm:

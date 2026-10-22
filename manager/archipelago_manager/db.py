@@ -10,7 +10,7 @@ from collections.abc import Iterable, Iterator
 
 from .config import CONFIG
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 # Added in schema version 3
 _SIGNUPS = """
@@ -202,10 +202,13 @@ CREATE TABLE job_players (
     user_id      INTEGER REFERENCES users(id) ON DELETE SET NULL,
     filename     TEXT NOT NULL,
     player_names TEXT NOT NULL DEFAULT '[]',
-    games        TEXT NOT NULL DEFAULT '[]'
+    games        TEXT NOT NULL DEFAULT '[]',
+    sha256       TEXT,
+    error        TEXT
 );
 CREATE INDEX job_players_job ON job_players(job_id);
-""" + _SIGNUPS + _SOURCES + "ALTER TABLE apworld_sources ADD COLUMN latest_asset TEXT;"
+""" + _SIGNUPS + _SOURCES + "ALTER TABLE apworld_sources ADD COLUMN latest_asset TEXT; " + \
+    "ALTER TABLE signups ADD COLUMN test_job_id INTEGER;"
 
 
 # Upgrades for databases created by older versions: MIGRATIONS[n] turns schema n - 1 into schema n. New databases get
@@ -219,6 +222,9 @@ MIGRATIONS: dict[int, str] = {
        "CREATE UNIQUE INDEX users_discord ON users(discord_id) WHERE discord_id IS NOT NULL; "
        # which exact file of the newest release an administrator was shown (see sources.fingerprint)
        "ALTER TABLE apworld_sources ADD COLUMN latest_asset TEXT;",
+    # the hash of each player file and what the generator said was wrong with it; a sign-up round's test generation
+    6: "ALTER TABLE job_players ADD COLUMN sha256 TEXT; ALTER TABLE job_players ADD COLUMN error TEXT; "
+       "ALTER TABLE signups ADD COLUMN test_job_id INTEGER;",
 }
 
 

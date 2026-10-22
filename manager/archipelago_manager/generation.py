@@ -4,8 +4,10 @@ from __future__ import annotations
 import asyncio
 import collections
 import contextlib
+import hashlib
 import logging
 import os
+import re
 import shutil
 import signal
 import sqlite3
@@ -127,7 +129,9 @@ def clean_meta(meta: str | None) -> str | None:
 
 def create_job(user: sqlite3.Row, players: list[PreparedPlayer], *, name: str | None, spoiler: int, race: bool,
                seed: int | None, skip_prog_balancing: bool, plando: list[str], meta: str | None,
-               host_after: bool) -> int:
+               host_after: bool, test: bool = False) -> int:
+    """Queues a generation. A test generation only finds out whether the players generate together: its result is
+    thrown away instead of becoming a game."""
     if spoiler not in (0, 1, 2, 3):
         raise JobRequestError("Spoiler level must be between 0 and 3")
     if seed is not None and not (0 <= seed < 10 ** 18):
@@ -137,9 +141,12 @@ def create_job(user: sqlite3.Row, players: list[PreparedPlayer], *, name: str | 
     meta = clean_meta(meta)
     options = {"spoiler": spoiler, "race": race, "seed": seed, "skip_prog_balancing": skip_prog_balancing,
                "plando": plando, "has_meta": meta is not None}
+    if test:
+        options["test"] = True
     job_id = db.execute(
         "INSERT INTO jobs(name, created_by, status, options, host_after, created_at) VALUES (?,?,?,?,?,?)",
-        ((name or "").strip()[:120] or None, user["id"], "queued", db.jdumps(options), int(host_after), db.now()))
+        ((name or "").strip()[:120] or None, user["id"], "queued", db.jdumps(options), int(host_after and not test),
+         db.now()))
     directory = job_dir(job_id)
     try:
         (directory / "Players").mkdir(parents=True)
@@ -149,10 +156,10 @@ def create_job(user: sqlite3.Row, players: list[PreparedPlayer], *, name: str | 
             (directory / "Players" / "meta.yaml").write_text(meta, encoding="utf-8")
         with db.connection() as conn:
             for p in players:
-                conn.execute("INSERT INTO job_players(job_id, config_id, user_id, filename, player_names, games) "
-                             "VALUES (?,?,?,?,?,?)",
-                             (job_id, p.config_id, p.user_id, p.filename,
-                              db.jdumps(p.info.player_names), db.jdumps(p.info.games)))
+                conn.execute("INSERT INTO job_players(job_id, config_id, user_id, filename, player_names, games, "
+                             "sha256) VALUES (?,?,?,?,?,?,?)",
+                             (job_id, p.config_id, p.user_id, p.filename, db.jdumps(p.info.player_names),
+                              db.jdumps(p.info.games), hashlib.sha256(p.data).hexdigest()))
     except BaseException:
         db.execute("DELETE FROM jobs WHERE id = ?", (job_id,))
         shutil.rmtree(directory, ignore_errors=True)
@@ -183,6 +190,29 @@ def _explain_failure(lines: list[str]) -> str | None:
             return ("The base ROM on the server is not the version the game needs. Its setup guide says which region "
                     "and revision to use.")
     return None
+
+
+# Generate.py lists what is wrong with each player file: "1. File Alice.yaml document #1 (with name: Alice) is
+# invalid. Please fix your yaml." and on the following lines the causes, up to an empty line.
+_PLAYER_FILE_ERROR = re.compile(r"^\d+\. File (.+?)(?: document #\d+ \(with name: .*\))? is invalid\. Please fix your yaml\.$")
+
+
+def _player_file_errors(lines: list[str]) -> dict[str, str]:
+    """What the generator said is wrong with which player file, by file name."""
+    errors: dict[str, list[str]] = {}
+    current = None
+    for text in lines:
+        text = text.replace("Press enter to close.", "").strip()
+        match = _PLAYER_FILE_ERROR.match(text)
+        if match:
+            current = errors.setdefault(os.path.basename(match.group(1)), [text])
+        elif current is not None:
+            if not text or text.startswith(_NOISE_PREFIXES):
+                current = None
+            else:
+                current.append(text)
+    # the causes say what is wrong; only when there are none, the line naming the file has to do
+    return {filename: "\n".join(found[1:] or found)[:1500] for filename, found in errors.items()}
 
 
 def _summarize_failure(lines: list[str]) -> str:
@@ -289,7 +319,9 @@ class GenerationManager:
     def _finish(self, job_id: int, status: str, error: str | None = None, game_id: int | None = None) -> None:
         db.execute("UPDATE jobs SET status = ?, finished_at = ?, error = ?, game_id = ? WHERE id = ?",
                    (status, time.time(), error, game_id, job_id))
-        if status == "failed":
+        job = db.query_one("SELECT options FROM jobs WHERE id = ?", (job_id,))
+        # a test is started by an administrator who is looking at its outcome
+        if status == "failed" and job and not db.jloads(job["options"], {}).get("test"):
             name, origin = _describe_job(job_id)
             notify.emit("generation", notify.tr("Generation failed: {name}", name=name), f"{origin}\n```\n{error}\n```",
                         url=notify.link(f"/jobs/{job_id}"), color="error")
@@ -356,12 +388,21 @@ class GenerationManager:
             self._finish(job_id, "failed", f"Generation took longer than {CONFIG.generation_timeout // 60} minutes")
             return
         if proc.returncode != 0:
+            with db.connection() as conn:
+                for filename, error in _player_file_errors(lines).items():
+                    conn.execute("UPDATE job_players SET error = ? WHERE job_id = ? AND filename = ?",
+                                 (error, job_id, filename))
             self._finish(job_id, "failed", _summarize_failure(lines))
             return
 
         archives = sorted(output.glob("AP_*.zip"), key=lambda p: p.stat().st_mtime)
         if not archives:
             self._finish(job_id, "failed", "The generator finished but produced no output file")
+            return
+        if opts.get("test"):
+            shutil.rmtree(output, ignore_errors=True)
+            self._log(job_id, "Test passed: these players generate together. The result was not kept.")
+            self._finish(job_id, "succeeded")
             return
 
         owners = {}
