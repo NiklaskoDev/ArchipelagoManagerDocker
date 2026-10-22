@@ -1,14 +1,18 @@
 """Player yaml files, stored per user."""
 from __future__ import annotations
 
+import asyncio
+import gzip
 import hashlib
 import sqlite3
+from pathlib import Path
+from typing import Any
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Response, UploadFile
 from fastapi.responses import FileResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 
-from .. import apbridge, configstore, db, yamlinfo
+from .. import apbridge, configstore, db, yamlform, yamlinfo
 from ..configstore import config_path
 from ..security import current_user, is_admin
 
@@ -166,9 +170,10 @@ async def list_templates(_user: sqlite3.Row = Depends(current_user)) -> list[dic
     except apbridge.APBridgeError as e:
         raise HTTPException(503, str(e)) from None
     installed = apbridge.installed_games()
+    templates, forms = available["templates"], available["forms"]
     return [{"game": game, "source": installed.get(game, {}).get("source"),
-             "version": installed.get(game, {}).get("version")}
-            for game in sorted(available, key=str.lower)]
+             "version": installed.get(game, {}).get("version"), "template": game in templates, "form": game in forms}
+            for game in sorted(set(templates) | set(forms), key=str.lower)]
 
 
 @router.get("/templates/yaml", response_class=PlainTextResponse)
@@ -180,3 +185,69 @@ async def get_template(game: str = Query(max_length=200), _user: sqlite3.Row = D
     if text is None:
         raise HTTPException(404, f"No template for {game}")
     return text
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+# the options form: a game's options as form fields, and the conversion between a yaml and the form's values
+# ----------------------------------------------------------------------------------------------------------------------
+async def _form_schema_path(game: str) -> Path:
+    try:
+        path = await apbridge.options_form_path(game)
+    except apbridge.APBridgeError as e:
+        raise HTTPException(503, str(e)) from None
+    if path is None or not path.is_file():
+        raise yamlform.NoFormError(f"There is no form for {game}: it is not installed on this server.")
+    return path
+
+
+@router.get("/templates/options")
+async def get_options_form(request: Request, game: str = Query(max_length=200),
+                           _user: sqlite3.Row = Depends(current_user)) -> Response:
+    try:
+        path = await _form_schema_path(game)
+    except yamlform.NoFormError as e:
+        raise HTTPException(404, str(e)) from None
+    data = await asyncio.to_thread(path.read_bytes)
+    # Item and location names make a big game's form half a megabyte; as gzip it is a tenth of that.
+    if "gzip" in request.headers.get("accept-encoding", ""):
+        data = await asyncio.to_thread(gzip.compress, data, 6)
+        return Response(data, media_type="application/json", headers={"Content-Encoding": "gzip", "Vary": "Accept-Encoding"})
+    return Response(data, media_type="application/json", headers={"Vary": "Accept-Encoding"})
+
+
+class YamlText(BaseModel):
+    content: str = Field(max_length=yamlinfo.MAX_YAML_BYTES)
+
+
+@router.post("/configs/form/read")
+async def read_form(body: YamlText, _user: sqlite3.Row = Depends(current_user)) -> dict:
+    """The form's values for a yaml, or {"unavailable": reason} if it is a file the form cannot edit."""
+    try:
+        doc, game = await asyncio.to_thread(yamlform.single_player, body.content)
+        schema = await asyncio.to_thread(yamlform.load_schema, await _form_schema_path(game))
+        return await asyncio.to_thread(yamlform.form_state, doc, game, schema)
+    except yamlinfo.YamlError as e:
+        raise HTTPException(400, str(e)) from None
+    except yamlform.NoFormError as e:
+        return {"unavailable": str(e)}
+
+
+class FormValues(BaseModel):
+    content: str | None = Field(default=None, max_length=yamlinfo.MAX_YAML_BYTES)
+    game: str = Field(max_length=200)
+    name: str = Field(max_length=200)
+    description: str = Field(default="", max_length=2000)
+    options: dict[str, Any] = Field(default_factory=dict)
+
+
+@router.post("/configs/form/write")
+async def write_form(body: FormValues, _user: sqlite3.Row = Depends(current_user)) -> dict:
+    """The yaml for the form's values, built on `content` (the file being edited) so that what the form does not show
+    stays as it is. Nothing is saved: the editor saves the text like any other."""
+    try:
+        schema = await asyncio.to_thread(yamlform.load_schema, await _form_schema_path(body.game))
+        content = await asyncio.to_thread(yamlform.write, body.content, body.game, schema, name=body.name,
+                                          description=body.description, values=body.options)
+    except (yamlinfo.YamlError, yamlform.FormError, yamlform.NoFormError) as e:
+        raise HTTPException(400, str(e)) from None
+    return {"content": content}

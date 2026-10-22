@@ -71,10 +71,10 @@ export default async function render({ root, cleanup, isCurrent }) {
   if (!configs.length) {
     root.append(h("div", { class: "section" }, h("div", { class: "card stack" },
       h("h2", {}, t("Get started")),
-      h("p", {}, t("Players need a YAML file that describes how their game should be randomized. Upload yours or start from a template.")),
+      h("p", {}, t("Players need a YAML file that describes how their game should be randomized. Upload yours or create one here.")),
       h("div", { class: "row" },
         h("a", { class: "btn primary", href: "#/configs" }, icon("upload", 14), t("Upload a YAML")),
-        h("a", { class: "btn", href: "#/configs/new" }, icon("file", 14), t("Create from template"))))));
+        h("a", { class: "btn", href: "#/configs/new" }, icon("file", 14), t("Create a config"))))));
   }
 
   const timer = setInterval(() => { if (!document.hidden) load().catch(() => {}); }, 6000);

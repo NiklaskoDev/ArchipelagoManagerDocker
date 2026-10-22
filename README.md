@@ -11,8 +11,9 @@ players log in to keep their YAML configs, see their games and download their pa
 - **Hosts pregenerated games.** Upload the zip a generator produced (or just the `.archipelago` file). The patch files
   are extracted and handed to the players they belong to, matched by slot name. YAMLs bundled in the zip are copied
   into the library of the user who owns the slot.
-- **Stores configs per user.** Everyone has a private library of player YAMLs: upload, edit in the browser, or start
-  from a documented template for any installed game.
+- **Stores configs per user.** Everyone has a private library of player YAMLs: upload one, or create it in a form with
+  every option of the game (custom games included), like the player options page on archipelago.gg. The YAML can be
+  edited directly too, or started from the documented template.
 - **Generates games.** Pick configs, choose spoiler level, seed, race mode, plando and an optional `meta.yaml`, and
   generate with the real `Generate.py`. The result is imported as a game, with slots linked to the configs' owners, and
   can be hosted straight away. Jobs queue, show a live log and can be cancelled.
@@ -77,8 +78,9 @@ by your players:
 
 ### As a player
 
-1. **My configs** → upload your YAML, or *New from template* and pick your game. The editor checks the file when you
-   save and tells you what is wrong. The player name in the YAML is the slot name in the game.
+1. **My configs** → upload your YAML, or *New config* and pick your game: its options open as a form (see
+   [The options form](#the-options-form)). The editor checks the file when you save and tells you what is wrong. The
+   player name is the slot name in the game.
 2. When an admin generates a game with your config, or uploads a game with a slot of that name, it appears under
    **Games** with the server address, password, your slot name and your files. If the game allows it you can *claim*
    a slot yourself ("This is mine").
@@ -91,6 +93,25 @@ by your players:
 YAML. It is checked against the round's rules right away (allowed games, unique player names, how many configs each
 player may enter). Your entry is a copy: if you edit the config afterwards, the round page offers to use the new version.
 You can withdraw until the round closes.
+
+#### The options form
+
+Every config opens in two tabs: **Options**, a form with one field per option of the game, and **YAML**, the file
+itself. Both edit the same file, so switch whenever you like.
+
+- The fields come from Archipelago: the same options, groups, descriptions, defaults and limits as the player options
+  page on archipelago.gg, for every installed game. That includes **custom games**: an APWorld's own options show up as
+  soon as it is installed.
+- Choices, numbers (with their named values such as *Normal (50)*), on/off switches, your own text where a game takes
+  one (a boss plando in A Link to the Past, say), items and locations to pick by name (local items, start inventory,
+  excluded locations, …). *Random* lets Archipelago choose when it generates. *Find an option* narrows a long form down,
+  and a game's own presets set everything at once.
+- What the form cannot show stays in the file as it is: weights over several values (`full: 50, minimal: 50`), random
+  ranges, plando, triggers and keys it does not know. The form says which. Only when you change something in the form
+  is the file written anew, and then comments in it are not kept; edit in the YAML tab if they matter to you.
+- A file with several players, or one whose game is picked at random, opens as YAML only.
+- *Start from the documented template instead* (YAML tab of a new config) gives the template with every option
+  explained in comments.
 
 ### As an admin
 
@@ -145,7 +166,8 @@ page or in the user menu (the choice is remembered in that browser).
 
 Games that are not part of Archipelago itself come as `.apworld` files.
 
-- An admin uploads one under **Custom games**. It is installed immediately and available for generating.
+- An admin uploads one under **Custom games**. It is installed immediately and available for generating, and players
+  can create configs for it in the [options form](#the-options-form) with the world's own options.
 - When a config or an uploaded seed needs a game that is not installed, a prompt says which one and offers to add it.
   *Hosting a seed does not need the APWorld* (the seed carries what the server needs), but players need it to patch and
   play, so installed APWorlds can be downloaded from the same page.
@@ -298,8 +320,9 @@ DATA_DIR=../data AP_DIR=$PWD/../Archipelago AP_PYTHON=$PWD/../ap-venv/bin/python
 - **Image smoke test:** `python tests/smoke.py http://localhost:8080` against a fresh instance. CI runs it against the
   built image before publishing.
 - The front end is plain ES modules in `manager/archipelago_manager/static/`, with no build step.
-- `ap_helper.py` runs inside Archipelago's own Python environment: it lists worlds, decodes multidata and saves, and
-  renders templates, so the manager never imports Archipelago's code itself.
+- `ap_helper.py` runs inside Archipelago's own Python environment: it lists worlds, decodes multidata and saves,
+  renders templates and describes each game's options for the options form, so the manager never imports Archipelago's
+  code itself. `yamlform.py` turns a YAML into the form's values and back.
 
 ## Limitations
 

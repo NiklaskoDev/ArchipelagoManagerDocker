@@ -287,7 +287,7 @@ export default async function render({ root, params, cleanup, isCurrent }) {
         h("span", { class: "field-label" }, mine.length ? t("Enter another config") : t("Enter with one of your configs")),
         h("div", { class: "row" }, picker ? h("div", { class: "grow" }, picker) : h("span", { class: "muted" }, configs.length ? t("You have no other configs.") : t("You have no configs yet.")), enter,
           h("button", { class: "btn", type: "button", onclick: () => file.click() }, icon("upload", 14), t("Upload a YAML")),
-          h("a", { class: "btn ghost", href: "#/configs/new" }, t("Create from a template"))), file) : null);
+          h("a", { class: "btn ghost", href: "#/configs/new" }, t("Create a config"))), file) : null);
   }
 
   function entriesCard() {

@@ -1,7 +1,7 @@
 """Pure unit tests: no server, no Archipelago."""
 import pytest
 
-from archipelago_manager import apbridge, settings, yamlinfo
+from archipelago_manager import apbridge, settings, yamlform, yamlinfo
 from archipelago_manager.config import CONFIG
 from archipelago_manager.generation import _summarize_failure
 from archipelago_manager.gamestore import classify
@@ -158,3 +158,70 @@ class TestBaseRomMessages:
         assert apbridge.file_location_text(inside) == '"Game (USA).sfc" into ap-data/Archipelago/ in the data folder'
         outside = apbridge.describe_file("/opt/archipelago/Game (USA).sfc")
         assert apbridge.file_location_text(outside) == '"Game (USA).sfc" into /opt/archipelago/'
+
+
+class TestYamlForm:
+    """The options form's reading and writing, with a made-up game described the way ap_helper.py describes one."""
+    SCHEMA = {"game": "G", "presets": {}, "items": ["Sword", "Shield"], "item_groups": ["Weapons"], "locations": [],
+              "location_groups": [], "groups": [{"name": "Game Options", "collapsed": False, "options": [
+                  {"key": "mode", "label": "Mode", "type": "choice", "choices": [["easy", "Easy", 0], ["hard", "Hard", 1]],
+                   "aliases": {"on": "hard"}, "random": True, "default": "easy"},
+                  {"key": "boss", "label": "Boss", "type": "text_choice", "choices": [["none", "None", 0]], "aliases": {},
+                   "random": True, "default": "none"},
+                  {"key": "size", "label": "Size", "type": "range", "min": 1, "max": 10, "named": [["unlimited", -1]],
+                   "random": True, "default": 5},
+                  {"key": "fast", "label": "Fast", "type": "toggle", "random": True, "default": False},
+                  {"key": "seed", "label": "Seed", "type": "text", "random": False, "default": ""},
+                  {"key": "traps", "label": "Traps", "type": "counter", "keys": ["Bee", "Ice"], "min": 0, "max": None,
+                   "random": False, "default": {}},
+                  {"key": "local_items", "label": "Local Items", "type": "set", "names": "items", "groups": True,
+                   "random": False, "default": []},
+              ]}]}
+
+    def read(self, key, value):
+        doc = {"name": "P", "game": "G", "G": {key: value}}
+        return yamlform.form_state(doc, "G", self.SCHEMA)["options"][key]
+
+    @pytest.mark.parametrize("key,raw,expected", [
+        ("mode", {"easy": 0, "hard": 50}, {"value": "hard"}),  # the one value the weights can roll
+        ("mode", {"easy": 1, "hard": 1}, {"kept": "{easy: 1, hard: 1}"}),
+        ("mode", "on", {"value": "hard"}),  # an alias
+        ("mode", 1, {"value": "hard"}),  # the choice's number
+        ("mode", "Random", {"random": True}),
+        ("mode", "medium", {"kept": "medium"}),
+        ("boss", "Moldorm", {"value": "Moldorm"}),  # a text of one's own
+        ("size", "high", {"value": 10}),
+        ("size", "unlimited", {"value": -1}),
+        ("size", "7", {"value": 7}),
+        ("size", 11, {"kept": "11"}),
+        ("size", "random-range-2-4", {"kept": "random-range-2-4"}),
+        ("fast", "yes", {"value": True}),
+        ("fast", {"false": 50, "true": 0}, {"value": False}),
+        ("seed", "random", {"value": "random"}),  # for text, just a word
+        ("traps", {"Bee": 2}, {"value": {"Bee": 2}}),
+        ("traps", {"Wasp": 1}, {"kept": "{Wasp: 1}"}),
+        ("local_items", ["Weapons", "Shield"], {"value": ["Weapons", "Shield"]}),
+        ("local_items", ["Bow"], {"kept": "[Bow]"}),
+    ])
+    def test_reading(self, key, raw, expected):
+        assert self.read(key, raw) == expected
+
+    def test_writing_keeps_the_rest_of_the_file(self):
+        text = "# a comment\nname: Old\ngame: G\nrequires: {version: 0.6.0}\nG:\n  mode: {easy: 1, hard: 1}\n  extra: 3\n"
+        written = yamlform.write(text, "G", self.SCHEMA, name="New", description="d",
+                                 values={"size": -1, "local_items": ["Sword", "Sword"], "traps": {"Bee": 0}})
+        assert written == ("name: New\ndescription: d\ngame: G\nrequires:\n  version: 0.6.0\nG:\n"
+                           "  mode:\n    easy: 1\n    hard: 1\n  extra: 3\n  size: -1\n  local_items:\n  - Sword\n"
+                           "  traps:\n    Bee: 0\n")
+
+    @pytest.mark.parametrize("values", [{"mode": "medium"}, {"mode": ["easy"]}, {"size": 0}, {"fast": "yes"},
+                                        {"seed": "random", "local_items": ["Bow"]}, {"traps": {"Bee": -1}},
+                                        {"unknown": 1}])
+    def test_values_the_options_do_not_take_are_refused(self, values):
+        with pytest.raises(yamlform.FormError):
+            yamlform.write(None, "G", self.SCHEMA, name="P", description="", values=values)
+
+    def test_files_the_form_cannot_edit(self):
+        for text in ("name: A\ngame: G\n---\nname: B\ngame: G\n", "game: {G: 1, H: 1}\n", "- a list\n", "name: {A: 1, B: 1}\ngame: G\n"):
+            with pytest.raises(yamlform.NoFormError):
+                yamlform.single_player(text)

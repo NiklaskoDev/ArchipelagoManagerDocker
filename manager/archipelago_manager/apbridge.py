@@ -225,16 +225,26 @@ async def remove_apworld_file(module: str) -> None:
 # ------------------------------------------------------------------------------------------------------------------
 # yaml templates
 # ------------------------------------------------------------------------------------------------------------------
-async def ensure_templates() -> dict[str, str]:
-    """Returns {game name: template file name}, generating the templates if the set of worlds changed."""
+# Raise when the helper's templates run writes something new, so folders written by an older manager are made again.
+TEMPLATES_FORMAT = 2
+
+
+async def ensure_templates() -> dict[str, dict[str, str]]:
+    """Returns {"templates": {game: template file}, "forms": {game: options form file}}, generating both when the set
+    of worlds changed."""
     async with _templates_lock():
         if STATE.templates is not None:
             return STATE.templates
         info = STATE.info or await refresh_info()
         if not info:
             raise APBridgeError(STATE.error or "Archipelago is unavailable")
+        # A custom world installed again gets a new library entry, so its options count as new even when its version
+        # and its numbers of items and locations stay the same.
+        custom = [(r["id"], r["module"]) for r in db.query("SELECT id, module FROM apworlds WHERE status = 'installed' "
+                                                            "ORDER BY id")]
         signature = hashlib.sha256(json.dumps(
-            [(g["name"], g["version"], g["items"], g["locations"]) for g in info["games"]] + [info["version"]]
+            [(g["name"], g["version"], g["items"], g["locations"]) for g in info["games"]]
+            + [info["version"], TEMPLATES_FORMAT, custom]
         ).encode()).hexdigest()[:16]
         target = CONFIG.templates_dir / signature
         index = target / "index.json"
@@ -242,7 +252,12 @@ async def ensure_templates() -> dict[str, str]:
             tmp = CONFIG.templates_dir / f"{signature}.tmp"
             shutil.rmtree(tmp, ignore_errors=True)
             result = await run_helper("templates", str(tmp), timeout=300)
-            mapping = {t["game"]: t["file"] for t in result["templates"] if t["game"]}
+            if result.get("templates_error"):
+                log.warning("Some yaml templates are missing: %s", result["templates_error"])
+            for game, error in result.get("form_errors", {}).items():
+                log.warning("No options form for %s: %s", game, error)
+            mapping = {"templates": {t["game"]: t["file"] for t in result["templates"] if t["game"]},
+                       "forms": result.get("forms", {})}
             (tmp / "index.json").write_text(json.dumps(mapping))
             shutil.rmtree(target, ignore_errors=True)
             tmp.rename(target)
@@ -256,7 +271,16 @@ async def ensure_templates() -> dict[str, str]:
 
 async def template_text(game: str) -> str | None:
     mapping = await ensure_templates()
-    filename = mapping.get(game)
+    filename = mapping["templates"].get(game)
     if not filename or STATE.templates_dir is None:
         return None
     return (STATE.templates_dir / filename).read_text(encoding="utf-8-sig")
+
+
+async def options_form_path(game: str) -> Path | None:
+    """The file describing a game's options for the form editor (JSON), or None if the game has none."""
+    mapping = await ensure_templates()
+    filename = mapping["forms"].get(game)
+    if not filename or STATE.templates_dir is None:
+        return None
+    return STATE.templates_dir / "forms" / filename
