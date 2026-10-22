@@ -50,6 +50,8 @@ class Config:
     # Look for newer Archipelago releases on GitHub (once at start, then twice a day) so admins know to update.
     update_check: bool
     releases_url: str
+    # GitHub's API, for custom games that come from a repository's releases (replaced by a fake in tests)
+    github_api: str
 
     # --- derived paths -------------------------------------------------------------------------------------------
     @property
@@ -106,6 +108,7 @@ def load_config() -> Config:
         update_check=os.environ.get("UPDATE_CHECK", "true").strip().lower() not in ("0", "false", "no", "off"),
         releases_url=os.environ.get("AP_RELEASES_URL",
                                     "https://api.github.com/repos/ArchipelagoMW/Archipelago/releases/latest"),
+        github_api=os.environ.get("GITHUB_API_URL", "https://api.github.com").rstrip("/"),
     )
 
 

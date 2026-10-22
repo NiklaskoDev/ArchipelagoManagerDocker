@@ -102,7 +102,8 @@ const EVENTS = [
   ["hint_found", "A hinted item is found", "Many at once, for example after a !release, come as one message."],
   ["generation", "A new game is generated, or generating fails"],
   ["signup", "Sign-up rounds open, close soon and close"],
-  ["apworld_pending", "A custom game waits for approval"],
+  ["apworld_pending", "A custom game or GitHub repository waits for approval"],
+  ["apworld_update", "A custom game from GitHub has a new release"],
   ["ap_update", "A new Archipelago version is out"],
 ];
 

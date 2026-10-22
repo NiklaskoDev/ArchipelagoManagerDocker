@@ -121,6 +121,14 @@ Games that are not part of Archipelago itself come as `.apworld` files.
   play, so installed APWorlds can be downloaded from the same page.
 - Users can *submit* an APWorld; it waits for an admin to approve it (switch this off under Admin → Settings).
 - Files placed by hand in Archipelago's worlds folder are adopted automatically at startup.
+- **From GitHub:** many APWorlds are published as releases of a GitHub repository. *Custom games → From GitHub*, paste
+  the repository (`owner/name` or its address) and *Look up*: it shows the newest release and its `.apworld` file.
+  - A repository a **player** adds waits for an administrator, like a submitted file. Nothing is downloaded from it
+    until it is approved; *Approve* downloads the newest release and installs it. Discord can announce waiting ones.
+  - A repository an **admin** adds is installed right away.
+  - Approved repositories are checked for new releases twice a day (or with the check button). A new release shows up
+    with an *Update* button and can be announced on Discord, but it is never installed on its own: a new release is new
+    code, so an admin decides. Removing a repository from the list keeps the game installed.
 
 > **An `.apworld` is code that runs on your server.** Only install files from sources you trust. This is why users
 > can only submit, never install.
@@ -156,7 +164,7 @@ Everything is optional except the volume. Set these as environment variables (Un
 | `MAX_EXTRACT_MB` | `2048` | Largest total size a game archive may unpack to. |
 | `GENERATION_TIMEOUT` | `3600` | Seconds before a generation is stopped. |
 | `TZ` | *(empty)* | Time zone for logs. |
-| `UPDATE_CHECK` | `true` | Ask GitHub for new Archipelago releases and show a notice to admins. |
+| `UPDATE_CHECK` | `true` | Ask GitHub for new releases of Archipelago and of custom games added from GitHub, and show them to admins. `false` stops all requests the manager makes to GitHub on its own. |
 
 ## Data and backups
 

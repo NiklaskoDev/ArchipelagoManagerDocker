@@ -10,12 +10,13 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import __version__, apbridge, db, notify, signups, updates
+from . import __version__, apbridge, db, notify, signups, sources, updates
 from .config import CONFIG
 from .generation import GENERATION
 from .rooms import ROOMS
 from .routes import admin, apworlds, auth, configs, games, jobs
 from .routes import signups as signup_routes
+from .routes import sources as source_routes
 from .security import CSRF_HEADER, CSRF_VALUE
 
 log = logging.getLogger("archipelago_manager")
@@ -52,8 +53,9 @@ async def lifespan(_app: FastAPI):
     await GENERATION.start()
     tasks = [asyncio.create_task(init_archipelago()), asyncio.create_task(ROOMS.watch_progress()),
              asyncio.create_task(signups.run_periodically())]
-    if CONFIG.update_check:
+    if CONFIG.update_check:  # both talk to GitHub on their own, which UPDATE_CHECK=false rules out
         tasks.append(asyncio.create_task(updates.run_periodically()))
+        tasks.append(asyncio.create_task(sources.run_periodically()))
     log.info("Archipelago Manager %s listening, data in %s", __version__, CONFIG.data_dir)
     yield
     for task in tasks:
@@ -162,7 +164,7 @@ def health() -> dict:
             "ready": apbridge.STATE.info is not None, "archipelago_error": apbridge.STATE.error}
 
 
-for module in (auth, configs, apworlds, games, jobs, signup_routes, admin):
+for module in (auth, configs, apworlds, source_routes, games, jobs, signup_routes, admin):
     app.include_router(module.router)
 
 app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")

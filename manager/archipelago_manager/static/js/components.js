@@ -1,6 +1,6 @@
 // Reusable pieces shared by several views.
-import { h, icon, copyText, openModal, toast, action, fmtBytes, fmtAgo } from "./util.js";
-import { api, post, state, isAdmin } from "./api.js";
+import { h, clear, icon, copyText, openModal, toast, action, fmtBytes, fmtAgo } from "./util.js";
+import { api, get, post, state, isAdmin } from "./api.js";
 
 const STATE_LABELS = {
   running: ["ok", "Running"], starting: ["warn", "Starting…"], stopping: ["warn", "Stopping…"],
@@ -125,7 +125,69 @@ export function uploadApworldModal({ game, onDone } = {}) {
         ? "Choose an .apworld file. It is installed immediately and available for generating."
         : "Choose an .apworld file. An administrator has to approve it before it can be used."),
       h("p", { class: "muted" }, "APWorlds contain code that runs on the server. Only add files from sources you trust."),
-      input, status),
+      input, status,
+      h("p", { class: "muted small" }, "Published on GitHub? ",
+        h("a", { href: "#", onclick: (e) => { e.preventDefault(); modal.close(); githubSourceModal({ onDone }); } },
+          "Add it from its repository instead"), ", so new releases show up here.")),
+    actions: [h("button", { class: "btn", type: "button", onclick: () => modal.close() }, "Cancel"), submit],
+  });
+  return modal;
+}
+
+// Adds a GitHub repository as the source of a custom game. A player's repository waits for an administrator; nothing
+// is downloaded from it before that.
+export function githubSourceModal({ onDone } = {}) {
+  const admin = isAdmin();
+  const repo = h("input", { class: "input", placeholder: "owner/name or https://github.com/owner/name", autocomplete: "off" });
+  const note = h("input", { class: "input", maxLength: 300, placeholder: "e.g. Pokemon Crystal, for Friday's round" });
+  const found = h("div", { class: "stack tight" });
+  const submit = h("button", { class: "btn primary", type: "button", disabled: true },
+    icon(admin ? "download" : "upload", 14), admin ? "Install" : "Submit for approval");
+  let release = null, assetSelect = null;
+
+  const lookUp = action(async () => {
+    release = null;
+    submit.disabled = true;
+    clear(found).append(h("span", { class: "muted small" }, "Looking it up on GitHub…"));
+    try {
+      release = await get(`/api/apworld-sources/lookup?repo=${encodeURIComponent(repo.value.trim())}`);
+    } catch (err) {
+      clear(found).append(banner("error", icon("alert", 16), err.message));
+      return;
+    }
+    assetSelect = release.assets.length > 1 ? select(release.assets.map((a) => [a.name, `${a.name} (${fmtBytes(a.size)})`]), release.assets[0].name) : null;
+    clear(found).append(
+      h("div", {}, h("a", { href: `https://github.com/${release.repo}`, target: "_blank", rel: "noopener" }, h("strong", {}, release.repo)),
+        release.description ? h("div", { class: "muted small" }, release.description) : null),
+      h("div", { class: "small" }, "Newest release: ", h("a", { href: release.release_url, target: "_blank", rel: "noopener" }, release.tag)),
+      !release.assets.length ? banner("error", icon("alert", 16), "This release has no .apworld file.")
+        : assetSelect ? field("File to install", assetSelect, "The release has several .apworld files.")
+        : h("div", { class: "small" }, "File: ", h("code", {}, release.assets[0].name)),
+      release.existing ? banner("warn", icon("alert", 16), release.existing.status === "pending"
+        ? "This repository was already submitted and waits for approval." : "This repository was already added.") : null);
+    submit.disabled = !release.assets.length || !!release.existing;
+  });
+  const lookButton = h("button", { class: "btn", type: "button", onclick: lookUp }, "Look up");
+  repo.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); lookButton.click(); } });
+  repo.addEventListener("input", () => { release = null; submit.disabled = true; clear(found); });
+
+  submit.onclick = action(async () => {
+    const result = await post("/api/apworld-sources", {
+      repo: release.repo, asset: assetSelect ? assetSelect.value : release.assets[0].name, note: note.value || null });
+    modal.close();
+    toast(admin ? `${result.game} installed from ${result.repo}` : `${result.repo} submitted for approval`, "success");
+    onDone?.(result);
+  });
+  const modal = openModal({
+    title: "Add a custom game from GitHub",
+    body: h("div", { class: "stack" },
+      h("p", {}, admin
+        ? "The newest release's .apworld is installed now. New releases show up on this page; installing one is your call."
+        : "An administrator has to approve the repository. Nothing is downloaded from it before that."),
+      h("p", { class: "muted small" }, "APWorlds contain code that runs on the server. Only add repositories you trust."),
+      field("Repository", h("div", { class: "row" }, h("div", { class: "grow" }, repo), lookButton)),
+      found,
+      admin ? null : field("Note for the administrator", note)),
     actions: [h("button", { class: "btn", type: "button", onclick: () => modal.close() }, "Cancel"), submit],
   });
   return modal;

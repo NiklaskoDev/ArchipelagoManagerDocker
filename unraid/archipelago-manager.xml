@@ -41,6 +41,6 @@ Open the web UI after starting the container to create the administrator account
   <Config Name="PUID" Target="PUID" Default="99" Mode="" Description="User id the manager runs as. 99 is Unraid's 'nobody'." Type="Variable" Display="advanced" Required="true" Mask="false">99</Config>
   <Config Name="PGID" Target="PGID" Default="100" Mode="" Description="Group id the manager runs as. 100 is Unraid's 'users'." Type="Variable" Display="advanced" Required="true" Mask="false">100</Config>
   <Config Name="UMASK" Target="UMASK" Default="022" Mode="" Description="File creation mask." Type="Variable" Display="advanced" Required="false" Mask="false">022</Config>
-  <Config Name="Update check" Target="UPDATE_CHECK" Default="true" Mode="" Description="Ask GitHub for new Archipelago releases and tell admins when an image update is worthwhile. Set to false to turn off." Type="Variable" Display="advanced" Required="false" Mask="false">true</Config>
+  <Config Name="Update check" Target="UPDATE_CHECK" Default="true" Mode="" Description="Ask GitHub for new releases of Archipelago and of custom games added from GitHub, and tell admins about them. Set to false to stop all requests to GitHub the manager makes on its own." Type="Variable" Display="advanced" Required="false" Mask="false">true</Config>
   <Config Name="Timezone" Target="TZ" Default="" Mode="" Description="For example Europe/Berlin. Affects timestamps in server logs." Type="Variable" Display="advanced" Required="false" Mask="false"/>
 </Container>

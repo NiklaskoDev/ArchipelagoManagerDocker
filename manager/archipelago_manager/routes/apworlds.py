@@ -177,6 +177,30 @@ def list_apworlds(user: sqlite3.Row = Depends(current_user)) -> dict:
     }
 
 
+async def add_to_library(path: Path, filename: str, *, uploaded_by: int | None, install: bool) -> dict:
+    """Checks an .apworld and adds it to the library: installed right away, or waiting for approval.
+
+    Moves the file. Raises InvalidAPWorld with a reason fit for the user.
+    """
+    meta = inspect_apworld(path)
+    version_tuple = apbridge.version_tuple()
+    minimum = str(meta["manifest"].get("minimum_ap_version") or "")
+    if version_tuple and re.fullmatch(r"\d+\.\d+\.\d+", minimum):
+        if tuple(int(p) for p in minimum.split(".")) > version_tuple:
+            raise InvalidAPWorld(f"This world needs Archipelago {minimum} or newer, "
+                                 f"but this server runs {apbridge.ap_version()}")
+    apworld_id = db.execute(
+        "INSERT INTO apworlds(game, module, original_name, version, status, size, manifest, uploaded_by, "
+        "uploaded_at) VALUES (?,?,?,?,?,?,?,?,?)",
+        (meta["game"], meta["module"], filename, meta["version"], "pending", path.stat().st_size,
+         db.jdumps(meta["manifest"]), uploaded_by, db.now()))
+    shutil.move(path, apbridge.apworld_library_path(apworld_id))
+    replaced = await _install(apworld_id) if install else []
+    row = db.query_one("SELECT a.*, u.username AS uploader FROM apworlds a LEFT JOIN users u ON u.id = a.uploaded_by "
+                       "WHERE a.id = ?", (apworld_id,))
+    return {**_row_json(row, uploader=row["uploader"]), "replaced": replaced}
+
+
 @router.post("/apworlds")
 async def upload_apworld(file: UploadFile = File(...), user: sqlite3.Row = Depends(current_user)) -> dict:
     if not is_admin(user) and not app_settings.get_setting("users_can_upload_apworlds"):
@@ -194,39 +218,18 @@ async def upload_apworld(file: UploadFile = File(...), user: sqlite3.Row = Depen
                     raise HTTPException(413, "File is too large")
                 out.write(chunk)
         try:
-            meta = inspect_apworld(tmp)
+            entry = await add_to_library(tmp, filename, uploaded_by=user["id"], install=is_admin(user))
         except InvalidAPWorld as e:
             raise HTTPException(400, str(e)) from None
-
-        version_tuple = apbridge.version_tuple()
-        minimum = str(meta["manifest"].get("minimum_ap_version") or "")
-        if version_tuple and re.fullmatch(r"\d+\.\d+\.\d+", minimum):
-            if tuple(int(p) for p in minimum.split(".")) > version_tuple:
-                raise HTTPException(400, f"This world needs Archipelago {minimum} or newer, "
-                                         f"but this server runs {apbridge.ap_version()}")
-
-        status = "installed" if is_admin(user) else "pending"
-        apworld_id = db.execute(
-            "INSERT INTO apworlds(game, module, original_name, version, status, size, manifest, uploaded_by, "
-            "uploaded_at) VALUES (?,?,?,?,?,?,?,?,?)",
-            (meta["game"], meta["module"], filename, meta["version"], "pending", size, db.jdumps(meta["manifest"]),
-             user["id"], db.now()))
-        shutil.move(tmp, apbridge.apworld_library_path(apworld_id))
     finally:
         tmp.unlink(missing_ok=True)
-
-    replaced: list[dict] = []
-    if status == "installed":
-        replaced = await _install(apworld_id)
-    else:
-        version = f" {meta['version']}" if meta["version"] else ""
-        notify.emit("apworld_pending", f"Custom game waiting for approval: {meta['game']}",
-                    f"{notify.md(user['username'])} submitted **{notify.md(meta['game'])}**{notify.md(version)} "
+    if entry["status"] == "pending":
+        version = f" {entry['version']}" if entry["version"] else ""
+        notify.emit("apworld_pending", f"Custom game waiting for approval: {entry['game']}",
+                    f"{notify.md(user['username'])} submitted **{notify.md(entry['game'])}**{notify.md(version)} "
                     f"({notify.md(filename)}). An administrator has to approve it before it can be used.",
                     url=notify.link("/worlds"), color="warning")
-    row = db.query_one("SELECT a.*, u.username AS uploader FROM apworlds a LEFT JOIN users u ON u.id = a.uploaded_by "
-                       "WHERE a.id = ?", (apworld_id,))
-    return {**_row_json(row, uploader=row["uploader"]), "replaced": replaced}
+    return entry
 
 
 def _get(apworld_id: int) -> sqlite3.Row:

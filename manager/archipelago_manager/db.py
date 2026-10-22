@@ -10,7 +10,7 @@ from collections.abc import Iterable, Iterator
 
 from .config import CONFIG
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 # Added in schema version 3
 _SIGNUPS = """
@@ -49,6 +49,31 @@ CREATE TABLE signup_entries (
     updated_at   REAL NOT NULL
 );
 CREATE INDEX signup_entries_signup ON signup_entries(signup_id);
+"""
+
+# Added in schema version 4
+_SOURCES = """
+-- GitHub repositories whose releases provide a custom game. 'pending' ones were proposed by a player and are not used
+-- until an administrator approves them.
+CREATE TABLE apworld_sources (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    repo          TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    asset         TEXT,
+    status        TEXT NOT NULL CHECK (status IN ('pending', 'approved')),
+    note          TEXT,
+    added_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    added_at      REAL NOT NULL,
+    approved_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    approved_at   REAL,
+    game          TEXT,
+    installed_tag TEXT,
+    apworld_id    INTEGER,
+    latest_tag    TEXT,
+    latest_url    TEXT,
+    checked_at    REAL,
+    announced_tag TEXT,
+    error         TEXT
+);
 """
 
 SCHEMA = """
@@ -177,7 +202,7 @@ CREATE TABLE job_players (
     games        TEXT NOT NULL DEFAULT '[]'
 );
 CREATE INDEX job_players_job ON job_players(job_id);
-""" + _SIGNUPS
+""" + _SIGNUPS + _SOURCES
 
 
 # Upgrades for databases created by older versions: MIGRATIONS[n] turns schema n - 1 into schema n. New databases get
@@ -185,6 +210,7 @@ CREATE INDEX job_players_job ON job_players(job_id);
 MIGRATIONS: dict[int, str] = {
     2: "ALTER TABLE games ADD COLUMN single_claim INTEGER NOT NULL DEFAULT 0;",
     3: _SIGNUPS,
+    4: _SOURCES,
 }
 
 

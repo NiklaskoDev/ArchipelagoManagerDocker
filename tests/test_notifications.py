@@ -10,7 +10,7 @@ from helpers import (APClient, FakeWebhook, build_apworld, make_game, player_yam
                      upload_yaml, wait_for, wait_state)
 
 ALL_EVENTS = ["game_online", "game_crashed", "player_goal", "hint_found", "generation", "signup", "apworld_pending",
-              "ap_update"]
+              "apworld_update", "ap_update"]
 CHECKS_FINDER_BASE = 81000  # ChecksFinder's locations are "Tile 1" (81000) to "Tile 25"
 
 
