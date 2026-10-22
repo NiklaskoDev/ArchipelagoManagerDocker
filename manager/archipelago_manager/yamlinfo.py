@@ -90,17 +90,21 @@ def static_name(raw: str) -> str | None:
     return raw.strip()[:MAX_NAME_LENGTH].strip() or None
 
 
-def analyze(text: str, fallback_name: str) -> YamlInfo:
-    """Parses `text`. `fallback_name` stands in for the file name stem, which is what AP uses if a yaml has no name."""
-    text = text.lstrip("﻿")
+def load_documents(text: str) -> list[Any]:
+    """The documents of a yaml file, as Archipelago reads them. Raises YamlError with the line of a syntax error."""
     try:
-        documents = list(yaml.load_all(text, Loader=UniqueKeyLoader))
+        return list(yaml.load_all(text.lstrip("﻿"), Loader=UniqueKeyLoader))
     except yaml.MarkedYAMLError as e:
         mark = e.problem_mark
         where = f" (line {mark.line + 1}, column {mark.column + 1})" if mark else ""
         raise YamlError(f"Invalid YAML{where}: {e.problem or e}") from None
     except yaml.YAMLError as e:
         raise YamlError(f"Invalid YAML: {e}") from None
+
+
+def analyze(text: str, fallback_name: str) -> YamlInfo:
+    """Parses `text`. `fallback_name` stands in for the file name stem, which is what AP uses if a yaml has no name."""
+    documents = load_documents(text)
 
     info = YamlInfo()
     for index, doc in enumerate(documents, start=1):

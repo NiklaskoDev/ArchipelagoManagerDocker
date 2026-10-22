@@ -69,14 +69,16 @@ assert not system["failed_worlds"], f"worlds failed to load: {system['failed_wor
 assert system["world_count"] > 70, f"only {system['world_count']} games loaded"
 step(f"{system['world_count']} games loaded, none failed")
 
-yamls = {"Alice": "ChecksFinder", "Bob": "APQuest"}
-ids = []
-for name, game in yamls.items():
-    created = call("POST", "/api/configs/text", {"name": name, "content": f"name: {name}\ngame: {game}\n{game}: {{}}\n"})
-    ids.append(created["id"])
+created = call("POST", "/api/configs/text", {"name": "Alice", "content": "name: Alice\ngame: ChecksFinder\nChecksFinder: {}\n"})
+ids = [created["id"]]
 templates = call("GET", "/api/templates")
 assert len(templates) > 70, "yaml templates were not generated"
-step(f"configs stored, {len(templates)} templates available")
+assert sum(t["form"] for t in templates) > 70, "the options forms were not generated"
+# the second player's config comes from the options form, as a player would make it
+form = call("POST", "/api/configs/form/write", {"game": "APQuest", "name": "Bob", "options": {"progression_balancing": 25}})
+created = call("POST", "/api/configs/text", {"name": "Bob", "content": form["content"]})
+ids.append(created["id"])
+step(f"configs stored, one from the options form; {len(templates)} templates available")
 
 job = call("POST", "/api/jobs", {"config_ids": ids, "name": "Smoke test", "host_after": True})
 job = wait("generation to finish", lambda: (j := call("GET", f"/api/jobs/{job['id']}"))["status"] in ("succeeded", "failed") and j)

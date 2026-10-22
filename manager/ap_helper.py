@@ -317,15 +317,22 @@ def cmd_tracker(args) -> dict:
 
 
 # --------------------------------------------------------------------------------------------------------------------
-# templates
+# templates, and the options of every game as a form (what archipelago.gg's player options page shows)
 # --------------------------------------------------------------------------------------------------------------------
 def cmd_templates(args) -> dict:
     cmd_where(args)
     import yaml
     import worlds  # noqa: F401  (registers all worlds)
     import Options
+    from worlds.AutoWorld import AutoWorldRegister
     target = os.path.abspath(args.out)
-    Options.generate_yaml_templates(target, generate_hidden=False)
+    templates_error = None
+    try:
+        Options.generate_yaml_templates(target, generate_hidden=False)
+    except Exception as e:  # noqa: BLE001 - a broken world stops the templates after it, but not the forms
+        cause = f" ({type(e.__cause__).__name__}: {e.__cause__})" if e.__cause__ else ""
+        templates_error = f"{e}{cause}"
+        os.makedirs(target, exist_ok=True)
     templates = []
     for entry in sorted(os.scandir(target), key=lambda e: e.name.lower()):
         if entry.is_file() and entry.name.endswith(".yaml"):
@@ -336,7 +343,161 @@ def cmd_templates(args) -> dict:
             except Exception:
                 game = None
             templates.append({"file": entry.name, "game": game if isinstance(game, str) else None})
-    return {"templates": templates}
+
+    # One file per game: the item and location names alone can be a few hundred kilobytes for a big game.
+    forms_dir = os.path.join(target, "forms")
+    os.makedirs(forms_dir, exist_ok=True)
+    forms, form_errors = {}, {}
+    for number, (game, world) in enumerate(sorted(AutoWorldRegister.world_types.items())):
+        if world.hidden:
+            continue
+        try:
+            form = option_form(world)
+        except Exception as e:  # noqa: BLE001 - a broken custom world must not cost everyone else their forms
+            form_errors[game] = f"{type(e).__name__}: {e}"
+            continue
+        name = f"{number:04d}.json"
+        with open(os.path.join(forms_dir, name), "w", encoding="utf-8") as f:
+            json.dump(form, f, ensure_ascii=False, separators=(",", ":"))
+        forms[game] = name
+    return {"templates": templates, "templates_error": templates_error, "forms": forms, "form_errors": form_errors}
+
+
+def _plain(value):
+    """A value as JSON has it. Option keys are nearly always text; anything else becomes text rather than an error."""
+    if value is None or isinstance(value, (str, bool, int, float)):
+        return value
+    if isinstance(value, dict):
+        return {str(k): _plain(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_plain(v) for v in value]
+    if isinstance(value, (set, frozenset)):
+        return sorted((_plain(v) for v in value), key=str)
+    return str(value)
+
+
+def _keys(keys) -> list:
+    """Valid keys in their own order if they have one, else sorted (as the player options page shows them)."""
+    import collections.abc
+    keys = list(keys) if isinstance(keys, collections.abc.Sequence) else sorted(keys, key=str)
+    return [_plain(k) for k in keys]
+
+
+def option_field(key: str, option, world) -> dict | None:
+    """How to show one option in a form, or None if it is not one a form can edit (plando, free dictionaries)."""
+    import Options
+    from inspect import cleandoc
+    rich = option.rich_text_doc if option.rich_text_doc is not None else bool(world.web.rich_text_options_doc)
+    field = {"key": key, "label": str(getattr(option, "display_name", None) or key),
+             "doc": cleandoc(option.__doc__ or "").strip(), "rich": rich}
+    if issubclass(option, Options.Toggle):
+        field.update(type="toggle")
+    elif issubclass(option, Options.Choice):
+        # [name, label, number]; a yaml can also use an alias ("on" for "true") or the number
+        choices = [[name, str(option.get_option_name(value)), _plain(value)] for value, name in option.name_lookup.items()
+                   if name != "random"]
+        aliases = {alias: option.name_lookup[value] for alias, value in option.options.items()
+                   if value in option.name_lookup and option.name_lookup[value] != alias}
+        if issubclass(option, Options.TextChoice):
+            field.update(type="text_choice", choices=sorted(choices), aliases=aliases)
+        else:
+            field.update(type="choice", choices=choices, aliases=aliases)
+    elif issubclass(option, Options.Range):
+        field.update(type="range", min=option.range_start, max=option.range_end,
+                     named=[[name, value] for name, value in getattr(option, "special_range_names", {}).items()])
+    elif issubclass(option, Options.FreeText):
+        field.update(type="text")
+    elif issubclass(option, Options.OptionCounter):
+        if option.valid_keys:
+            field.update(keys=_keys(option.valid_keys))
+        elif option.verify_item_name or option.verify_location_name:
+            field.update(names="items" if option.verify_item_name else "locations")
+        else:
+            return None
+        field.update(type="counter", min=option.min, max=option.max)
+    elif issubclass(option, (Options.OptionSet, Options.OptionList)):
+        field.update(type="set" if issubclass(option, Options.OptionSet) else "list")
+        if option.valid_keys:
+            field.update(keys=_keys(option.valid_keys))
+        if option.verify_item_name or option.verify_location_name:
+            field.update(names="items" if option.verify_item_name else "locations",
+                         groups=bool(option.convert_name_groups))
+        elif not option.valid_keys and not (isinstance(option.default, (list, tuple, set, frozenset))
+                                            and all(isinstance(entry, str) for entry in option.default)):
+            return None
+    else:
+        return None
+    # "random" picks one of the choices; for the other kinds it is not a value a form can offer
+    field["random"] = bool(option.supports_weighting) and field["type"] in ("toggle", "choice", "text_choice", "range")
+    try:
+        field["default"] = form_value(option, option.default)
+    except Exception:  # noqa: BLE001 - a default Archipelago would only notice when generating with it
+        field["default"] = _plain(option.default)
+    return field
+
+
+def form_value(option, raw):
+    """A value the way a form holds it: the option's own name for choices, numbers for ranges, lists for sets."""
+    import Options
+    if issubclass(option, Options.FreeText):  # the text itself; some worlds turn it into a number as they read it
+        return raw if isinstance(raw, str) else str(option.from_any(raw).value)
+    if raw == "random" or (isinstance(raw, str) and raw.startswith("random") and issubclass(option, Options.Range)):
+        return "random"
+    value = option.from_any(raw)
+    if isinstance(value, Options.Toggle):
+        return bool(value.value)
+    if isinstance(value, Options.Choice):  # TextChoice too: its own text when that is not one of the choices
+        key = value.current_key
+        if isinstance(key, str) and option.options.get(key.lower()) in option.name_lookup:
+            return option.name_lookup[option.options[key.lower()]]  # "M" or an alias as the choice's own name
+        return key
+    if isinstance(value, Options.Range):
+        return int(value.value)
+    if isinstance(value, Options.OptionCounter):
+        return {str(k): int(v) for k, v in value.value.items()}
+    if isinstance(value, Options.OptionSet):
+        return sorted((_plain(v) for v in value.value), key=str)
+    return _plain(value.value)
+
+
+def option_form(world) -> dict:
+    """A world's options for the form: in its option groups, with the item and location names some of them pick from."""
+    import Options
+    collapsed = {group.name: group.start_collapsed for group in world.web.option_groups}
+    groups, names = [], set()
+    for group, options in Options.get_option_groups(world, visibility_level=Options.Visibility.simple_ui).items():
+        fields = []
+        for key, option in options.items():
+            field = option_field(key, option, world)
+            if field:
+                fields.append(field)
+                if field.get("names"):
+                    names.add(field["names"])
+        if fields:
+            groups.append({"name": group, "collapsed": bool(collapsed.get(group, False)), "options": fields})
+
+    presets = {}
+    for preset_name, preset in world.web.options_presets.items():
+        values = {}
+        for key, raw in preset.items():
+            option = world.options_dataclass.type_hints.get(key)
+            try:
+                values[key] = form_value(option, raw)
+            except Exception:  # noqa: BLE001 - a preset value the option does not take; Archipelago would refuse it too
+                continue
+        presets[str(preset_name)] = values
+
+    hide = {"Everything", "Everywhere"}  # the groups of all items and all locations; picking them is not useful here
+    return {
+        "game": world.game,
+        "version": version_str(getattr(world, "world_version", None)),
+        "groups": groups,
+        "presets": presets,
+        "items": sorted(world.item_names) if "items" in names else [],
+        "item_groups": sorted(set(world.item_name_groups) - hide) if "items" in names else [],
+        "locations": sorted(world.location_names) if "locations" in names else [],
+        "location_groups": sorted(set(world.location_name_groups) - hide) if "locations" in names else [],
+    }
 
 
 # --------------------------------------------------------------------------------------------------------------------

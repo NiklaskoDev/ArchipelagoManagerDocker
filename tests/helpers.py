@@ -85,9 +85,57 @@ def pregenerated_zip(admin, game_id: int, *, with_zip_slip: bool = True) -> byte
     return buf.getvalue()
 
 
+# Options of the world's own, for build_apworld(with_options=True): one of each kind the options form shows
+CUSTOM_OPTIONS = b'''
+from dataclasses import dataclass
+from Options import Choice, OptionSet, Range, Toggle
+
+
+class BoardShape(Choice):
+    """The shape of the board.
+
+    - **Square:** the classic board
+    - **Wide:** more columns than rows"""
+    display_name = "Board shape"
+    option_square = 0
+    option_wide = 1
+    alias_classic = 0
+    default = 0
+
+
+class BoardSize(Range):
+    """How many cells a side of the board has."""
+    display_name = "Board size"
+    range_start = 5
+    range_end = 20
+    default = 10
+
+
+class Hardcore(Toggle):
+    """No second tries."""
+    display_name = "Hardcore"
+
+
+class Colors(OptionSet):
+    """Colors the board may use."""
+    display_name = "Colors"
+    valid_keys = ["Red", "Green", "Blue"]
+    default = frozenset({"Red"})
+
+
+@dataclass
+class CustomOptions(PerGameCommonOptions):
+    board_shape: BoardShape
+    board_size: BoardSize
+    hardcore: Hardcore
+    colors: Colors
+'''
+
+
 def build_apworld(path: Path, *, game="Custom Checks", module="customchecks", version="1.2.0", minimum="0.6.0",
-                  slow_seconds: int = 0) -> Path:
-    """Repackages the built-in ChecksFinder world under another name: a real, loadable custom world."""
+                  slow_seconds: int = 0, with_options: bool = False) -> Path:
+    """Repackages the built-in ChecksFinder world under another name: a real, loadable custom world. `with_options`
+    gives it options of its own (CUSTOM_OPTIONS) besides the ones every game has."""
     src = Path(AP_DIR) / "worlds" / "checksfinder"
     manifest = {"version": 7, "compatible_version": 7, "game": game, "world_version": version, "minimum_ap_version": minimum}
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -100,6 +148,10 @@ def build_apworld(path: Path, *, game="Custom Checks", module="customchecks", ve
             if slow_seconds and f.name == "__init__.py":  # make generation take a while, for cancellation tests
                 data = data.replace(b"    def create_regions(self):",
                                     f"    def create_regions(self):\n        import time; time.sleep({slow_seconds})".encode())
+            if with_options and f.name == "__init__.py" and f.parent == src:
+                data = data.replace(b"from Options import PerGameCommonOptions\n",
+                                    b"from Options import PerGameCommonOptions\n" + CUSTOM_OPTIONS)
+                data = data.replace(b"options_dataclass = PerGameCommonOptions", b"options_dataclass = CustomOptions")
             zf.writestr(f"{module}/{f.relative_to(src)}", data)
         zf.writestr(f"{module}/archipelago.json", json.dumps(manifest))
     return path

@@ -24,7 +24,7 @@ export default async function render({ root, cleanup, isCurrent }) {
         h("p", { class: "muted" }, t("A config (YAML file) tells the randomizer which game you play and how it should be set up. Drop files here, or:")),
         h("div", { class: "row center" },
           h("button", { class: "btn primary", type: "button", onclick: pickFiles }, icon("upload", 14), t("Upload YAML files")),
-          h("a", { class: "btn", href: "#/configs/new" }, icon("file", 14), t("Create from template")))));
+          h("a", { class: "btn", href: "#/configs/new" }, icon("file", 14), t("Create a config")))));
       return;
     }
     listHost.append(dropArea(null), h("div", { class: "card flush table-wrap", style: { marginTop: "14px" } }, h("table", { class: "table" },
@@ -87,7 +87,7 @@ export default async function render({ root, cleanup, isCurrent }) {
     pageHeader(admin ? t("Player configs") : t("My configs"), t("YAML files that describe how each player's game is randomized."),
       allToggle,
       h("button", { class: "btn", type: "button", onclick: pickFiles }, icon("upload", 14), t("Upload YAML")),
-      h("a", { class: "btn primary", href: "#/configs/new" }, icon("plus", 14), t("New from template"))),
+      h("a", { class: "btn primary", href: "#/configs/new" }, icon("plus", 14), t("New config"))),
     fileInput, missingHost, listHost);
   await load();
 }

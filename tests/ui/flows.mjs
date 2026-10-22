@@ -2,8 +2,8 @@
 //
 //   BASE=http://127.0.0.1:8080 FIXTURES=/path/to/fixtures SHOTS=/tmp/shots node tests/ui/flows.mjs
 //
-// FIXTURES must contain customchecks.apworld and a pregenerated zip named pregenerated.zip (see tests/helpers.py for
-// how the integration tests build them). Playwright is resolved from NODE_PATH or the global node_modules.
+// FIXTURES must contain customchecks.apworld (with options of its own: build_apworld(..., with_options=True)) and a
+// pregenerated zip named pregenerated.zip (see tests/helpers.py for how the integration tests build them). Playwright is resolved from NODE_PATH or the global node_modules.
 import { createRequire } from "module";
 import fs from "fs";
 
@@ -120,24 +120,52 @@ await admin.locator(".banner.warn", { hasText: "Custom Checks" }).waitFor();
 await shot(admin, "configs");
 log("config for an uninstalled game prompts for the APWorld and stays flagged on the page");
 
-// template picker + editor ----------------------------------------------------------------------------------------------
-await admin.getByRole("link", { name: "New from template" }).first().click();
+// new config in the options form ---------------------------------------------------------------------------------------
+await admin.getByRole("link", { name: "New config" }).first().click();
 await admin.waitForSelector("a.tile");
 await admin.fill("input[type=search]", "checksf");
 await admin.locator("a.tile", { hasText: "ChecksFinder" }).click();
-await admin.waitForSelector("textarea.editor");
+await admin.waitForSelector(".opt-row");
+if (await admin.getByLabel("Player name").inputValue() !== "boss") problems.push("the form did not prefill the player name");
+await admin.getByLabel("Accessibility").selectOption("minimal");
+await admin.locator(".opt-row", { hasText: "Progression Balancing" }).locator(".opt-random").click();
+await admin.locator("summary", { hasText: "Item & Location Options" }).click();  // starts folded, as on archipelago.gg
+const localItems = admin.locator(".opt-row", { has: admin.getByText("Local Items", { exact: true }) });
+await localItems.locator("input[list]").fill("map width");
+await localItems.locator("input[list]").press("Enter");
+await localItems.locator(".chip", { hasText: "Map Width" }).waitFor();
+await admin.getByPlaceholder("Find an option").fill("start inv");
+if (await admin.locator(".opt-row:visible").count() !== 1) problems.push("finding an option did not narrow the form down");
+await admin.getByPlaceholder("Find an option").fill("");
+await shot(admin, "options-form");
+log("a new config opens as a form with the username as player name; options set by choice, random and name");
+await admin.getByRole("tab", { name: "YAML" }).click();
+await admin.locator("textarea.editor").waitFor();  // visible once the server has written the YAML
 const text = await admin.inputValue("textarea.editor");
-if (!text.includes("game: ChecksFinder") || !/^name: boss$/m.test(text)) problems.push("template editor did not prefill name/game");
-log("template opens in the editor with the username as player name");
+for (const line of ["name: boss", "game: ChecksFinder", "  accessibility: minimal", "  progression_balancing: random", "  - Map Width"]) {
+  if (!text.includes(line)) problems.push(`the YAML written from the form lacks "${line}"`);
+}
+log("the YAML tab shows what the form set");
 await admin.fill("textarea.editor", "name: Tmpl\ngame: [broken");
 await admin.getByRole("button", { name: "Save" }).click();
 await admin.locator(".banner.error", { hasText: "Invalid YAML" }).waitFor();  // not the toast left over from the upload
 log("saving broken YAML shows the error and does not save");
+await admin.getByRole("tab", { name: "Options" }).click();
+await admin.locator("[role=tablist] ~ div .banner.error", { hasText: "Invalid YAML" }).waitFor();
+await admin.getByRole("tab", { name: "YAML" }).click();
+log("the form says why it cannot open broken YAML");
 await admin.fill("textarea.editor", "name: Tmpl\ngame: ChecksFinder\nChecksFinder: {}\n");
 await admin.keyboard.press("Control+s");
 await admin.waitForURL(/#\/configs\/\d+$/);
 await expectText(admin, "Tmpl");
 log("Ctrl+S saves and moves to the saved config");
+await admin.getByRole("tab", { name: "Options" }).click();
+await admin.getByLabel("Accessibility").selectOption("minimal");
+await admin.getByRole("button", { name: "Save" }).click();
+await expectText(admin, "Saved");
+await admin.getByRole("tab", { name: "YAML" }).click();
+if (!(await admin.inputValue("textarea.editor")).includes("accessibility: minimal")) problems.push("a change in the form of a saved config was not saved");
+log("a saved config opens in the form; a change there is saved into the YAML");
 admin.once("dialog", (d) => d.accept());  // the unsaved-changes guard
 await admin.fill("textarea.editor", "name: Tmpl\ngame: ChecksFinder\nChecksFinder: {}\n# edited\n");
 await admin.getByRole("link", { name: "My configs" }).click();
@@ -159,6 +187,12 @@ log("APWorld installed from the UI and listed as Installed");
 await nav(admin, "#/configs");
 if (await admin.locator(".banner.warn", { hasText: "Custom Checks" }).count()) problems.push("missing-game prompt still shown after installing the world");
 log("the 'not installed' prompt is gone after installing");
+await nav(admin, "#/configs/new?game=Custom%20Checks");
+await admin.locator(".opt-row", { hasText: "Board shape" }).waitFor();
+await admin.getByLabel("Board shape").selectOption("wide");
+await shot(admin, "options-form-custom");
+log("a custom game gets a form with its own options");
+admin.once("dialog", (d) => d.accept());  // leaving the unsaved new config
 
 // generate ------------------------------------------------------------------------------------------------------------
 await nav(admin, "#/generate");
