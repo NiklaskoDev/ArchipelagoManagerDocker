@@ -301,7 +301,7 @@ const roundUrl = admin.url();
 await expectText(admin, "Sign-ups are open");
 log("admin opens a sign-up round limited to ChecksFinder");
 await nav(user, "#/");
-await expectText(user, "Open sign-ups");
+await expectText(user, "Open sign-up rounds");
 await user.getByRole("link", { name: "Join" }).first().click();
 await user.waitForURL(/#\/signups\/\d+$/);
 await user.locator("input[type=file][accept='.yaml,.yml']").setInputFiles({
