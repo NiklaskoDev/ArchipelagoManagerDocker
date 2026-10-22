@@ -98,6 +98,9 @@ def test_unambiguous_names_link_automatically(admin, seed_game, make_user):
 def test_a_slot_is_not_handed_to_whoever_names_a_config_after_it(admin, seed_game, make_user):
     seed = admin.get(f"/api/games/{seed_game}").json()
     bundled, other = seed["slots"][0], seed["slots"][1]  # the zip bundles the first slot's yaml
+    for c in admin.get("/api/configs?all=true").json():  # earlier tests left configs with these names
+        if {n.casefold() for n in c["player_names"]} & {bundled["name"].casefold(), other["name"].casefold()}:
+            admin.delete(f"/api/configs/{c['id']}")
     owner_name, owner = make_user()
     squatter_name, squatter = make_user()
     # the squatter copies the name and game; the owner's config is the yaml that came with the game, byte for byte
