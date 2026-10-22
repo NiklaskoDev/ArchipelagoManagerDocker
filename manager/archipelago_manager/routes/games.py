@@ -185,6 +185,8 @@ async def _detail(game_id: int, user: sqlite3.Row, request: Request) -> dict:
     shared = [_file_json(f) for f in visible_files if not (f["slot"] is not None and f["kind"] == "patch")]
     total = sum(s["locations"] for s in slots if s["type"] == 1)
     checked = sum(i["checked"] for i in slot_items if i["type"] == 1)
+    # The generation job knows the configs and options of the game, to generate it again (jobs are pruned eventually)
+    job = db.query_one("SELECT created_by FROM jobs WHERE id = ?", (row["job_id"],)) if row["job_id"] else None
 
     detail = {
         **summary,
@@ -194,6 +196,7 @@ async def _detail(game_id: int, user: sqlite3.Row, request: Request) -> dict:
         "options": db.jloads(row["options"], {}),
         "generator_version": row["generator_version"], "min_server_version": row["min_server_version"],
         "notes": row["notes"], "job_id": row["job_id"],
+        "job_available": bool(job and (admin or job["created_by"] == user["id"])),
         "ap_version": apbridge.ap_version(),
     }
     if admin:

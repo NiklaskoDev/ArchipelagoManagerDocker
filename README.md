@@ -16,9 +16,11 @@ players log in to keep their YAML configs, see their games and download their pa
   edited directly too, or started from the documented template.
 - **Generates games.** Pick configs, choose spoiler level, seed, race mode, plando and an optional `meta.yaml`, and
   generate with the real `Generate.py`. The result is imported as a game, with slots linked to the configs' owners, and
-  can be hosted straight away. Jobs queue, show a live log and can be cancelled.
+  can be hosted straight away. Jobs queue, show a live log and can be cancelled. *Generate again* repeats a game or a
+  job with the same configs and options and a new seed.
 - **Runs sign-up rounds.** An admin opens a round with a deadline; players enter their YAMLs, which are checked on the
-  spot. When the deadline passes the game is generated from all entries and everyone is added to it.
+  spot. A test generation before the deadline shows whether the entries generate together. When the deadline passes the
+  game is generated from all entries and everyone is added to it.
 - **Posts to Discord.** A webhook message when a game goes online or crashes, a player reaches their goal, a hinted
   item is found, a game is generated, sign-ups open or close, a custom game waits for approval, or a new Archipelago
   version is out.
@@ -121,10 +123,20 @@ itself. Both edit the same file, so switch whenever you like.
   assign it from the slot's *Owner* drop-down. Turning on *claimable* in the game's settings lets players pick their own;
   add *only one slot each* so nobody can take more than one (you can still assign extra slots by hand).
 - **Generate a game:** *Generate*, tick the configs, set the options, *Generate*. Slot owners are taken from the configs.
+  If a generation fails, the job page marks the configs the generator complained about and says what is wrong with them.
+- **Generate again:** *Generate again* on a game (or a finished job, or the arrow in *Recent jobs*) opens *Generate* with
+  the same configs and options filled in, to roll a new seed or to retry after fixing a config. The configs are used as
+  they are now; one that was deleted since is left out, and the page says which. The button is there as long as the
+  generation job is kept (the latest 50).
 - **Run a sign-up round:** *Sign-ups → New round*: a name, a deadline (or none, to close it by hand), optionally the
   allowed games and how many configs each player may enter, and the generation options. At the deadline the sign-ups
   close and the game is generated and started; switch that off to generate by hand. If generating fails (for example a
   game is not installed), the round stays closed with the error: fix the entries, then *Generate* again or *Reopen*.
+- **Test a round before the deadline:** *Test generation* on the round generates the current entries with the round's
+  options and throws the result away; the round stays open. The page shows whether it passed and says when entries or
+  options have changed since. When it fails because of an entry, that entry is marked with the generator's error, for the
+  admin and for the player who entered it (who can fix the config and *Use the new version*), so the real generation at
+  the deadline does not fail on it. A passed test is a good sign, not a promise: the real generation rolls a new seed.
 - **Discord notifications:** *Admin → Settings → Discord notifications*. In Discord, open the channel's settings →
   *Integrations* → *Webhooks* → *New Webhook* → *Copy Webhook URL*, paste it, and *Send a test message*. Set *Address of
   this web UI* (under *General*) so messages link to the right page, pick the language of the messages (English or

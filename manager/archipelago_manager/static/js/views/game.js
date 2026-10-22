@@ -1,5 +1,5 @@
 import { h, clear, icon, toast, action, confirmDialog, fmtBytes, fmtAgo, fmtDate, shortName } from "../util.js";
-import { api, get, post, patch, del, isAdmin } from "../api.js";
+import { api, get, post, patch, del, isAdmin, state } from "../api.js";
 import { stateBadge, badge, chips, progressBar, copyField, copyButton, controlButtons, banner, field, checkbox, select,
          missingGamesPanel, isActive, serverOptionsForm } from "../components.js";
 import { t, tServer, plural } from "../i18n.js";
@@ -35,7 +35,10 @@ export default async function render({ root, params, cleanup, isCurrent, query }
             game.source === "generated" ? t("generated here") : t("uploaded"),
             t("added {date}", { date: fmtDate(game.created_at) }),
           ].filter(Boolean).join(" · "))),
-        h("div", { class: "page-actions" }, controlButtons(game, applyGame))),
+        h("div", { class: "page-actions" }, controlButtons(game, applyGame),
+          // the same configs and options once more, with a new seed
+          game.job_available && (admin || state.status?.permissions?.generate)
+            ? h("a", { class: "btn sm", href: `#/generate?from=${game.job_id}` }, icon("restart", 14), t("Generate again")) : null)),
       game.state === "crashed" ? banner("error", icon("alert", 18), h("div", { class: "grow" },
         h("strong", {}, t("The server stopped unexpectedly.")), " ", game.error ? tServer(game.error) : t("See the console for details."))) : null,
       game.missing_games.length ? missingGamesPanel(game.missing_games.map((g) => ({ game: g, configs: [], games: [{ id, name: game.name }], pending: [] })),

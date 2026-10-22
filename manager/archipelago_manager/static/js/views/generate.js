@@ -1,15 +1,26 @@
 import { h, clear, icon, toast, action, fmtAgo, fmtDuration } from "../util.js";
 import { api, get, isAdmin, state } from "../api.js";
-import { pageHeader, chips, banner, field, checkbox, select, jobBadge, missingGamesPanel, missingRomsPanel, promptMissingGames, empty } from "../components.js";
+import { pageHeader, chips, banner, badge, field, checkbox, select, jobBadge, missingGamesPanel, missingRomsPanel, promptMissingGames, empty } from "../components.js";
 import { t, tServer } from "../i18n.js";
 
 const SPOILER_CHOICES = [[1, t("Basic spoiler log")], [0, t("No spoiler log")], [2, t("With playthrough")], [3, t("Playthrough and paths")]];
 const PLANDO = [["bosses", t("Bosses")], ["connections", t("Connections")], ["texts", t("Texts")], ["items", t("Items")]];
 
-export default async function render({ root, cleanup, isCurrent }) {
+export default async function render({ root, cleanup, isCurrent, query }) {
   const admin = isAdmin();
   const [configs, jobs] = await Promise.all([get(`/api/configs${admin ? "?all=true" : ""}`), get("/api/jobs")]);
-  const selected = new Set(new URLSearchParams(location.hash.split("?")[1] || "").getAll("config").map(Number));
+  const selected = new Set(query.getAll("config").map(Number));
+
+  // ?from=<job>: generate again with the configs and options of an earlier job
+  const fromId = Number(query.get("from")) || null;
+  const source = fromId ? await get(`/api/jobs/${fromId}`).catch(() => null) : null;
+  if (fromId && !source) toast(t("That job no longer exists."), "error");
+  const unavailable = [];
+  for (const p of source?.players || []) {
+    if (configs.some((c) => c.id === p.config_id)) selected.add(p.config_id);
+    else unavailable.push(p);
+  }
+  const opts = source?.options || {};
 
   const missingHost = h("div");
   const countLabel = h("span", { class: "muted" });
@@ -55,14 +66,14 @@ export default async function render({ root, cleanup, isCurrent }) {
   filter.oninput = drawRows;
 
   // options -------------------------------------------------------------------------------------------------------------
-  const name = h("input", { class: "input", placeholder: t("Optional, e.g. Friday run"), maxLength: 120 });
-  const spoiler = select(SPOILER_CHOICES, 1);
+  const name = h("input", { class: "input", placeholder: t("Optional, e.g. Friday run"), maxLength: 120, value: source?.name || "" });
+  const spoiler = select(SPOILER_CHOICES, opts.spoiler ?? 1);
   const seed = h("input", { class: "input", inputMode: "numeric", placeholder: t("Random"), pattern: "[0-9]*" });
-  const race = checkbox(t("Race mode"), false, t("Spoiler log is withheld and patches are encrypted where supported."));
-  const skipBalance = checkbox(t("Skip progression balancing"), false);
-  const plando = PLANDO.map(([key, label]) => ({ key, box: checkbox(label, ["bosses", "connections", "texts"].includes(key)) }));
-  const meta = h("textarea", { class: "input", rows: 8, placeholder: t("meta_description: My meta file\nnull:\n  progression_balancing: 50"), spellcheck: false });
-  const hostAfter = checkbox(t("Start the server when generation finishes"), true);
+  const race = checkbox(t("Race mode"), !!opts.race, t("Spoiler log is withheld and patches are encrypted where supported."));
+  const skipBalance = checkbox(t("Skip progression balancing"), !!opts.skip_prog_balancing);
+  const plando = PLANDO.map(([key, label]) => ({ key, box: checkbox(label, (opts.plando || ["bosses", "connections", "texts"]).includes(key)) }));
+  const meta = h("textarea", { class: "input", rows: 8, placeholder: t("meta_description: My meta file\nnull:\n  progression_balancing: 50"), spellcheck: false, value: source?.meta || "" });
+  const hostAfter = checkbox(t("Start the server when generation finishes"), source && !source.test ? source.host_after : true);
   const errorHost = h("div");
   const submit = h("button", { class: "btn primary", type: "button" }, icon("zap", 14), t("Generate"));
   submit.onclick = action(async () => {
@@ -96,11 +107,16 @@ export default async function render({ root, cleanup, isCurrent }) {
     jobsHost.append(h("div", { class: "card flush table-wrap" }, h("table", { class: "table" },
       h("thead", {}, h("tr", {}, [t("Job"), t("Status"), t("Started"), t("Result"), ""].map((text) => h("th", {}, text)))),
       h("tbody", {}, list.slice(0, 12).map((j) => h("tr", {},
-        h("td", {}, h("a", { href: `#/jobs/${j.id}`, class: "slot-name" }, j.name || t("Job #{id}", { id: j.id })), admin && j.creator ? h("div", { class: "muted small" }, j.creator) : null),
+        h("td", {}, h("a", { href: `#/jobs/${j.id}`, class: "slot-name" }, j.name || t("Job #{id}", { id: j.id })), j.test ? [" ", badge(t("Test"), "accent")] : null,
+          admin && j.creator ? h("div", { class: "muted small" }, j.creator) : null),
         h("td", {}, jobBadge(j.status), j.queue_position ? h("span", { class: "muted small" }, ` ${t("#{n} in queue", { n: j.queue_position })}`) : null),
         h("td", { class: "muted" }, fmtAgo(j.started_at || j.created_at)),
-        h("td", {}, j.game_id ? h("a", { href: `#/games/${j.game_id}` }, t("Open game")) : j.error ? h("span", { class: "muted small" }, tServer(j.error.split("\n")[0]).slice(0, 70)) : "—"),
-        h("td", { class: "actions" }, h("a", { class: "btn sm", href: `#/jobs/${j.id}` }, t("Log")))))))));
+        h("td", {}, j.game_id ? h("a", { href: `#/games/${j.game_id}` }, t("Open game"))
+          : j.test && j.status === "succeeded" ? h("span", { class: "muted small" }, t("Test passed"))
+          : j.error ? h("span", { class: "muted small" }, tServer(j.error.split("\n")[0]).slice(0, 70)) : "—"),
+        h("td", { class: "actions" }, h("div", { class: "row", style: { justifyContent: "flex-end" } },
+          !j.test && !["queued", "running"].includes(j.status) ? h("a", { class: "btn sm", href: `#/generate?from=${j.id}`, title: t("Generate again"), "aria-label": t("Generate again") }, icon("restart", 14)) : null,
+          h("a", { class: "btn sm", href: `#/jobs/${j.id}` }, t("Log"))))))))));
   }
   async function pollJobs() {
     const list = await get("/api/jobs");
@@ -116,6 +132,11 @@ export default async function render({ root, cleanup, isCurrent }) {
   } else {
     root.append(
       pageHeader(t("Generate"), admin ? t("Pick the players for a new multiworld, then generate it.") : t("Generate a multiworld from your own configs.")),
+      source ? banner("info", icon("restart", 18), h("div", { class: "grow" },
+        h("strong", {}, t("Generating again:")), " ", h("a", { href: `#/jobs/${source.id}` }, source.name || t("Job #{id}", { id: source.id })), ". ",
+        t("Its configs and options are filled in. The configs are used as they are now, with a new seed."),
+        unavailable.length ? h("div", { class: "small" }, t("No longer available, so not selected: {players}",
+          { players: unavailable.map((p) => (p.names.join(", ") || p.filename) + (admin && p.owner ? ` (${p.owner})` : "")).join(", ") })) : null)) : null,
       missingHost,
       h("div", { class: "card flush" },
         h("div", { class: "row spread", style: { padding: "14px 16px" } }, h("div", { class: "grow" }, filter), countLabel),

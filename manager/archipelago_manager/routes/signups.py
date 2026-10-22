@@ -42,7 +42,7 @@ def signup_json(row: sqlite3.Row, user: sqlite3.Row, rows: list[sqlite3.Row] | N
     }
 
 
-def entry_json(row: sqlite3.Row, user: sqlite3.Row, issues: list[str]) -> dict:
+def entry_json(row: sqlite3.Row, user: sqlite3.Row, issues: list[str], error: str | None) -> dict:
     mine = row["user_id"] == user["id"]
     games = db.jloads(row["games"], [])
     result = {
@@ -57,6 +57,8 @@ def entry_json(row: sqlite3.Row, user: sqlite3.Row, issues: list[str]) -> dict:
         result["config_id"] = row["config_id"]
         # The library copy was edited after entering: offer to update the entry
         result["outdated"] = bool(row["library_sha256"] and row["library_sha256"] != row["sha256"])
+        # what the generator said is wrong with this file, when the latest test or generation failed because of it
+        result["generation_error"] = error
     return result
 
 
@@ -128,8 +130,9 @@ def create_signup(body: SignupBody, user: sqlite3.Row = Depends(admin_user)) -> 
 def signup_detail(signup_id: int, user: sqlite3.Row = Depends(current_user)) -> dict:
     row = _get(signup_id)
     rows = signups.entries(signup_id)
-    issues = signups.entry_issues(row, rows)
-    return {**signup_json(row, user, rows), "entries": [entry_json(r, user, issues[r["id"]]) for r in rows]}
+    issues, errors = signups.entry_issues(row, rows), signups.entry_errors(row, rows)
+    return {**signup_json(row, user, rows), "test": signups.test_result(row, rows) if is_admin(user) else None,
+            "entries": [entry_json(r, user, issues[r["id"]], errors.get(r["id"])) for r in rows]}
 
 
 @router.patch("/signups/{signup_id}")
@@ -185,6 +188,16 @@ def generate_signup(signup_id: int, user: sqlite3.Row = Depends(admin_user)):
     _get(signup_id)
     try:
         signups.generate(signup_id, user=user)
+    except signups.SignupError as e:
+        return _error(e)
+    return signup_detail(signup_id, user)
+
+
+@router.post("/signups/{signup_id}/test")
+def test_signup(signup_id: int, user: sqlite3.Row = Depends(admin_user)):
+    _get(signup_id)
+    try:
+        signups.test(signup_id, user=user)
     except signups.SignupError as e:
         return _error(e)
     return signup_detail(signup_id, user)

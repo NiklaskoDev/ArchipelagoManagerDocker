@@ -113,6 +113,33 @@ def test_generation_failure_is_reported_readably(admin):
     assert job["game_id"] is None
     log = [l["text"] for l in admin.get(f"/api/jobs/{job['id']}/log").json()["lines"]]
     assert any("Traceback" in l or "Exception" in l for l in log)
+    # and with the file it is about
+    [player] = admin.get(f"/api/jobs/{job['id']}").json()["players"]
+    assert "banana" in player["error"] and "Press enter" not in player["error"], player["error"]
+
+
+def test_a_job_can_be_generated_again_with_its_configs_and_options(admin, make_user):
+    _name, alice = make_user("alice")
+    mine, hers = cfg(admin, "Again"), cfg(alice, "Hers", "APQuest")
+    meta = "meta_description: again\nnull:\n  progression_balancing: 50\n"
+    job = run_job(admin, [mine, hers], name="Twice", spoiler=2, plando=["bosses"], meta=meta)
+    assert job["status"] == "succeeded", job["error"]
+    # what the generate page fills in: the library configs the files came from, the options and the meta file
+    assert [p["config_id"] for p in job["players"]] == [mine, hers]
+    assert [p["error"] for p in job["players"]] == [None, None]
+    assert job["name"] == "Twice" and job["meta"] == meta and job["test"] is False and job["signup"] is None
+    assert job["options"]["spoiler"] == 2 and job["options"]["plando"] == ["bosses"]
+    assert admin.get("/api/jobs").json()[0]["test"] is False
+
+    game = admin.get(f"/api/games/{job['game_id']}").json()
+    assert game["job_id"] == job["id"] and game["job_available"] is True
+    # a player of the game (alice owns her slot) cannot see the job, so it is not offered to them
+    assert alice.get(f"/api/games/{job['game_id']}").json()["job_available"] is False
+    assert alice.get(f"/api/jobs/{job['id']}").status_code == 404
+    # once the job is gone, there is nothing to generate again from
+    admin.delete(f"/api/jobs/{job['id']}")
+    assert admin.get(f"/api/games/{job['game_id']}").json()["job_available"] is False
+    admin.delete(f"/api/games/{job['game_id']}")
 
 
 def test_games_that_need_a_base_rom_are_caught_before_generating(admin, make_user):

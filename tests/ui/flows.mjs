@@ -212,6 +212,15 @@ await admin.waitForURL(/#\/games\/\d+$/);
 const gameUrl = admin.url();
 await expectText(admin, "UI run");
 log("result opens as a game");
+await admin.locator(".page-actions").getByRole("link", { name: "Generate again" }).click();
+await admin.waitForURL(/#\/generate\?from=\d+$/);
+await expectText(admin, "Generating again:");
+await expectText(admin, "2 selected");
+if (await admin.locator("input[placeholder^='Optional']").inputValue() !== "UI run") problems.push("“Generate again” did not fill in the name");
+await assertNoStrayText(admin, "generate again");
+await shot(admin, "generate-again");
+log("“Generate again” fills in the configs and options of the game");
+await nav(admin, gameUrl.slice(BASE.length + 1));
 
 // game page ------------------------------------------------------------------------------------------------------------
 await admin.locator(".page-actions").getByRole("button", { name: "Start" }).click();
@@ -353,6 +362,12 @@ await expectText(user, "garth-round.yaml · entered");
 log("player withdraws and enters again from their library");
 await nav(admin, roundUrl.slice(BASE.length + 1));
 await admin.locator("tbody tr", { hasText: "garth" }).waitFor();
+await admin.getByRole("button", { name: "Test generation" }).click();
+await admin.getByText("Test passed").first().waitFor({ timeout: 120000 });
+await expectText(admin, "Sign-ups are open");
+await assertNoStrayText(admin, "tested round");
+await shot(admin, "signup-tested");
+log("a test generation of the round passes and leaves it open");
 await admin.getByRole("button", { name: "Close now" }).click();
 await admin.locator(".modal").getByRole("button", { name: "Close sign-ups" }).click();
 await admin.getByText("The game is ready").waitFor({ timeout: 120000 });
