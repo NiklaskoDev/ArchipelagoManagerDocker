@@ -1,4 +1,6 @@
 """Pure unit tests: no server, no Archipelago."""
+import json
+
 import pytest
 
 from archipelago_manager import apbridge, settings, yamlform, yamlinfo
@@ -6,6 +8,7 @@ from archipelago_manager.config import CONFIG
 from archipelago_manager.generation import _player_file_errors, _summarize_failure
 from archipelago_manager.gamestore import classify
 from archipelago_manager.security import hash_password, verify_password, LoginThrottle
+from archipelago_manager.textclient import Session, concerns_me, render
 
 
 class TestYamlInfo:
@@ -182,6 +185,36 @@ class TestPlayerFileErrors:
 
     def test_failures_of_the_whole_multiworld_name_no_file(self):
         assert _player_file_errors(["Exception: Game appears as unbeatable. Aborting."]) == {}
+
+
+class TestTextClientMessages:
+    def test_messages_are_shown_as_archipelago_shows_them(self):
+        session = Session(game_id=1, slot=1, user_id=1)
+        session.players = {1: "Me", 2: "You"}
+        session.slot_games = {1: "A", 2: "B"}
+        session.names = {"A": ({10: "Sword"}, {20: "Cave"}), "B": ({11: "Bomb"}, {21: "Tower"}),
+                         "Archipelago": ({}, {-2: "Cheat Console"})}
+        data = [{"type": "player_id", "text": "2"}, {"text": " sent "},
+                {"type": "item_id", "text": "10", "player": 1, "flags": 1}, {"text": " to "},
+                {"type": "player_id", "text": "1"}, {"text": " ("}, {"type": "location_id", "text": "21", "player": 2},
+                {"text": ")"}]
+        assert render(session, data) == [
+            {"text": "You", "kind": "player", "me": False}, {"text": " sent "},
+            {"text": "Sword", "kind": "item", "item": "progression"}, {"text": " to "},
+            {"text": "Me", "kind": "player", "me": True}, {"text": " ("}, {"text": "Tower", "kind": "location"},
+            {"text": ")"}]
+        assert concerns_me(session, {"type": "ItemSend", "data": data, "receiving": 1})
+        assert not concerns_me(session, {"type": "ItemSend", "data": [{"type": "player_id", "text": "2"}],
+                                         "receiving": 2, "item": {"player": 2}})
+        # the server's own slot 0 hands out items from the "Archipelago" game
+        assert render(session, [{"type": "location_id", "text": "-2", "player": 0}]) == [
+            {"text": "Cheat Console", "kind": "location"}]
+        assert render(session, [{"type": "item_id", "text": "99", "player": 2, "flags": 4},
+                                {"type": "hint_status", "text": "(found)", "hint_status": 40},
+                                {"type": "color", "text": "x", "color": "red"}, "junk"]) == [
+            {"text": "Unknown item", "kind": "item", "item": "trap"},
+            {"text": "(found)", "kind": "hint_status", "status": 40}, {"text": "x", "kind": "color", "color": "red"}]
+        assert json.dumps(render(session, [])) == "[]"
 
 
 class TestYamlForm:

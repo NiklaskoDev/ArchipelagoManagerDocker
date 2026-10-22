@@ -378,6 +378,29 @@ await user.getByRole("link", { name: "Open the game" }).click();
 await user.waitForURL(/#\/games\/\d+$/);
 await expectText(user, "Your slot");
 log("the player is in the generated game");
+await user.getByRole("button", { name: "Connect", exact: true }).click();
+await user.locator(".badge", { hasText: "Connected" }).waitFor({ timeout: 30000 });
+await user.locator(".textclient .msg", { hasText: "viewing" }).first().waitFor({ timeout: 15000 });
+const say = async (text) => {
+  await user.locator("input[placeholder^='Chat, or a command']").fill(text);
+  await user.keyboard.press("Enter");
+};
+await say("!hint");
+await user.locator(".textclient .msg", { hasText: "points" }).first().waitFor({ timeout: 15000 });
+await say("hello from the browser");
+await user.locator(".textclient .msg", { hasText: "hello from the browser" }).first().waitFor({ timeout: 15000 });
+await say("/received");
+await expectText(user, "start with !");
+await assertNoStrayText(user, "text client");
+await shot(user, "textclient");
+log("the player chats and asks for hints in the text client");
+await user.reload();
+await user.locator(".badge", { hasText: "Connected" }).waitFor({ timeout: 30000 });
+await user.locator(".textclient .msg", { hasText: "hello from the browser" }).first().waitFor({ timeout: 15000 });
+log("the text client opens again after a reload, with the messages so far");
+await user.getByRole("button", { name: "Disconnect" }).click();
+await user.getByRole("button", { name: "Connect", exact: true }).waitFor();
+log("the player disconnects");
 
 // ---------------------------------------------------------------------------------------------------------------------
 console.log("settings persist");

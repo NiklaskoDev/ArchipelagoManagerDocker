@@ -28,6 +28,8 @@ players log in to keep their YAML configs, see their games and download their pa
   UI says so and offers to add it. Regular users can *submit* an APWorld; an admin approves it.
 - **One UI for admins and players.** Players see only their games, can start and stop them (if allowed) and download
   their files. Admins also get the live console, file management, per-game settings and user management.
+- **A text client in the browser.** Players chat with the multiworld and use the server's commands (`!hint`,
+  `!remaining`, …) on the game page, without Archipelago's own text client.
 
 ## Quick start
 
@@ -90,6 +92,17 @@ by your players:
 4. While you play, **Your tracker** on the game page shows the items you received (and from whom), the locations you
    still have to check, and your hints: where your items are, and which items of other players are in your world. It
    is read from the server's save, so it can be up to a minute behind.
+5. The **Text client** on the game page does what Archipelago's text client does, in the browser: *Connect*, then chat
+   with everyone in the multiworld or type the server's commands, such as `!hint Hookshot` (a hint for an item; the
+   names of your items are suggested as you type), `!hint_location`, `!remaining` or `!help`. It shows what happens in
+   the multiworld (items sent and found, hints, chat) in Archipelago's colors; *Only messages about me* hides the rest.
+   - The manager connects to the server for you, as your slot with Archipelago's `TextOnly` tag: the other players
+     see you as "viewing", and it neither receives items nor checks locations, so it does not get in the way of your
+     game's own client.
+   - The connection stays open while the page is open (also across a reload, with the messages so far) and closes
+     about a minute and a half after you leave the page, or right away with *Disconnect*.
+   - Commands that start with `/` belong to Archipelago's own clients and are not available here; the tracker above
+     shows what `/received` and `/missing` would.
 
 **Sign-ups:** open rounds are on the dashboard and under **Sign-ups**. *Join* → pick one of your configs or upload a
 YAML. It is checked against the round's rules right away (allowed games, unique player names, how many configs each
@@ -282,6 +295,10 @@ approve pull requests*. You can also run the workflow by hand (*Actions → Arch
 - The web UI speaks plain HTTP. Do not expose it to the internet without an HTTPS reverse proxy.
 - Spoiler logs, bundled YAMLs and other players' files are visible to admins only, unless an admin shares them.
 - The console is admin-only and runs real server commands. Remote admin (`!admin`) is off unless you set a password.
+- The text client speaks in a slot's name, so only the player who owns the slot can use it, admins included. The
+  manager connects to the server inside the container, so the browser only talks to the web UI (through your HTTPS
+  proxy, if you use one), never to the game's unencrypted port. Opening the connection is a state-changing request
+  like any other, so another website cannot open it in a player's name.
 - Discord messages never contain passwords and cannot mention anyone (`@everyone` in a player name stays plain text).
   Treat the webhook address like a password: anyone who has it can post to the channel.
 - Signing in with Discord uses OAuth2 with a single-use `state` bound to the browser that started it, a fixed redirect

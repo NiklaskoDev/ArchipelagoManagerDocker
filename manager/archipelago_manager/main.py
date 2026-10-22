@@ -14,6 +14,7 @@ from . import __version__, apbridge, db, notify, signups, sources, updates
 from .config import CONFIG
 from .generation import GENERATION
 from .rooms import ROOMS
+from .textclient import TEXT_CLIENTS
 from .routes import admin, apworlds, auth, configs, games, jobs
 from .routes import signups as signup_routes
 from .routes import sources as source_routes
@@ -52,7 +53,7 @@ async def lifespan(_app: FastAPI):
     notify.start()
     await GENERATION.start()
     tasks = [asyncio.create_task(init_archipelago()), asyncio.create_task(ROOMS.watch_progress()),
-             asyncio.create_task(signups.run_periodically())]
+             asyncio.create_task(signups.run_periodically()), asyncio.create_task(TEXT_CLIENTS.run_periodically())]
     if CONFIG.update_check:  # both talk to GitHub on their own, which UPDATE_CHECK=false rules out
         tasks.append(asyncio.create_task(updates.run_periodically()))
         tasks.append(asyncio.create_task(sources.run_periodically()))
@@ -61,6 +62,7 @@ async def lifespan(_app: FastAPI):
     for task in tasks:
         task.cancel()
     await GENERATION.stop()
+    await TEXT_CLIENTS.shutdown()
     await ROOMS.shutdown()
     notify.stop()
 
