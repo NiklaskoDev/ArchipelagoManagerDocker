@@ -226,7 +226,23 @@ await nav(admin, gameUrl.slice(BASE.length + 1));
 await admin.locator(".page-actions").getByRole("button", { name: "Start" }).click();
 await admin.locator(".badge", { hasText: "Running" }).first().waitFor({ timeout: 60000 });
 log("server starts from the UI");
-const ownerSelects = admin.locator("table").first().locator("select");  // the slots table; Files has selects too
+await admin.locator("h2", { hasText: "Progress over time" }).waitFor({ timeout: 45000 });
+// nobody checked anything yet: flat lines at 0 %, which have no height and so never count as visible
+await admin.locator(".chart svg path.series").first().waitFor({ state: "attached" });
+log("the game's progress over time appears once the server runs");
+await admin.getByRole("button", { name: "Move to the archive" }).click();
+await admin.locator(".page-head .badge", { hasText: "Finished" }).waitFor();
+await admin.locator("h2", { hasText: "Results" }).waitFor({ timeout: 15000 });
+await nav(admin, "#/games");
+await admin.locator("h2", { hasText: "Archive" }).waitFor();
+await expectText(admin, "No game is being played right now");
+await shot(admin, "archive");
+await nav(admin, gameUrl.slice(BASE.length + 1));
+await admin.getByRole("button", { name: "Back to the running games" }).click();
+await admin.locator("h2", { hasText: "Progress over time" }).waitFor({ timeout: 15000 });
+log("an admin moves the game to the archive and back");
+// the slots table (the standings above it have no selects, Files below has)
+const ownerSelects = admin.locator(".section", { has: admin.locator("h2", { hasText: "Slots" }) }).locator("table select");
 if (await ownerSelects.count() !== 2) problems.push(`expected 2 owner selects, got ${await ownerSelects.count()}`);
 const ownerValues = await ownerSelects.evaluateAll((els) => els.map((e) => e.selectedOptions[0].textContent));
 if (ownerValues.some((v) => !v.includes("boss"))) problems.push(`slots should belong to boss, got ${ownerValues}`);

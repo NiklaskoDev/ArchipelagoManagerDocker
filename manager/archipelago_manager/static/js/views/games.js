@@ -1,4 +1,4 @@
-import { h, clear, icon, openModal, toast, action } from "../util.js";
+import { h, clear, icon, openModal, toast, action, fmtDate, fmtSpan } from "../util.js";
 import { api, get, isAdmin } from "../api.js";
 import { pageHeader, empty, stateBadge, chips, badge, controlButtons, copyField, checkbox, field, promptMissingGames } from "../components.js";
 import { t, tServer } from "../i18n.js";
@@ -27,7 +27,19 @@ export default async function render({ root, cleanup, isCurrent }) {
         admin ? h("a", { class: "btn", href: "#/generate" }, icon("zap", 14), t("Generate")) : null));
       return;
     }
-    host.append(h("div", { class: "card flush table-wrap" }, h("table", { class: "table" },
+    const running = games.filter((g) => !g.finished_at);
+    const finished = games.filter((g) => g.finished_at).sort((a, b) => b.finished_at - a.finished_at);
+    if (running.length) host.append(activeTable(running));
+    else host.append(h("p", { class: "muted" }, t("No game is being played right now.")));
+    if (finished.length) {
+      host.append(h("div", { class: "section" }, h("div", { class: "section-head" }, h("h2", {}, t("Archive"))),
+        h("p", { class: "muted small" }, t("Games where every player reached their goal, or that an administrator moved here.")),
+        archiveTable(finished)));
+    }
+  }
+
+  function activeTable(games) {
+    return h("div", { class: "card flush table-wrap" }, h("table", { class: "table" },
       h("thead", {}, h("tr", {}, [t("Game"), t("Status"), t("Server"), t("Players"), t("Worlds"), ""].map((text) => h("th", {}, text)))),
       h("tbody", {}, games.map((g) => h("tr", {},
         h("td", {}, h("a", { href: `#/games/${g.id}`, class: "slot-name" }, g.name),
@@ -38,7 +50,20 @@ export default async function render({ root, cleanup, isCurrent }) {
         h("td", {}, `${g.claimed_count} / ${g.player_count}`, h("div", { class: "muted small" }, t("with an owner"))),
         h("td", {}, chips(g.games, g.missing_games)),
         h("td", { class: "actions" }, h("div", { class: "row", style: { justifyContent: "flex-end" } },
-          controlButtons(g, () => load(true)), h("a", { class: "btn sm", href: `#/games/${g.id}` }, t("Open"))))))))));
+          controlButtons(g, () => load(true)), h("a", { class: "btn sm", href: `#/games/${g.id}` }, t("Open")))))))));
+  }
+
+  function archiveTable(games) {
+    return h("div", { class: "card flush table-wrap" }, h("table", { class: "table" },
+      h("thead", {}, h("tr", {}, [t("Game"), t("Finished"), t("Time played"), t("Goals reached"), t("Worlds"), ""].map((text) => h("th", {}, text)))),
+      h("tbody", {}, games.map((g) => h("tr", {},
+        h("td", {}, h("a", { href: `#/games/${g.id}`, class: "slot-name" }, g.name),
+          g.my_slots.length ? h("div", { class: "muted small" }, t("You: {names}", { names: g.my_slots.map((s) => s.name).join(", ") })) : null),
+        h("td", {}, fmtDate(g.finished_at)),
+        h("td", {}, g.play_started_at ? fmtSpan(g.finished_at - g.play_started_at) : h("span", { class: "muted" }, "—")),
+        h("td", {}, `${g.goal_count} / ${g.player_count}`),
+        h("td", {}, chips(g.games, g.missing_games)),
+        h("td", { class: "actions" }, h("a", { class: "btn sm", href: `#/games/${g.id}` }, t("Results"))))))));
   }
 
   function uploadDialog() {

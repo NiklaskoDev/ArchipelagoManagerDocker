@@ -40,6 +40,7 @@ async def init_archipelago() -> None:
         return
     await ROOMS.start_saved()
     await apworlds.refresh_load_status()
+    await ROOMS.catch_up_history()
     log.info("Archipelago %s ready, %d games available", apbridge.ap_version(),
              len(apbridge.installed_games(include_hidden=True)))
 

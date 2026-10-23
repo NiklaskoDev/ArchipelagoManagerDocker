@@ -12,7 +12,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPExcepti
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from .. import apbridge, backups, db, gamepaths, gamestore, settings as app_settings, textclient
+from .. import apbridge, backups, db, gamepaths, gamestore, history, settings as app_settings, textclient
 from ..config import CONFIG
 from ..rooms import ROOMS, STATUS_GOAL, RoomError, valid_password
 from ..security import admin_user, current_user, is_admin
@@ -93,6 +93,8 @@ def game_summary(row: sqlite3.Row, slots: list[sqlite3.Row], user: sqlite3.Row, 
         "player_count": len(players), "claimed_count": sum(1 for s in players if s["user_id"] is not None),
         "visibility": row["visibility"], "claimable": bool(row["claimable"]),
         "single_claim": bool(row["single_claim"]),
+        "play_started_at": row["play_started_at"], "finished_at": row["finished_at"],
+        "goal_count": sum(1 for s in players if s["goal_at"] is not None),
         "my_slots": [{"slot": s["slot"], "name": s["name"], "game": s["game"]} for s in mine],
         "my_file_count": db.query_one(
             "SELECT COUNT(*) AS n FROM game_files f JOIN game_slots s ON s.game_id = f.game_id AND s.slot = f.slot "
@@ -178,7 +180,7 @@ async def _detail(game_id: int, user: sqlite3.Row, request: Request) -> dict:
             "locations": s["locations"], "user_id": s["user_id"], "owner": s["owner"],
             "mine": s["user_id"] == user["id"],
             "claimable": may_claim and s["user_id"] is None and s["type"] == 1,
-            "checked": p.get("checked", 0), "hints_used": p.get("hints_used", 0),
+            "checked": p.get("checked", 0), "hints_used": p.get("hints_used", 0), "goal_at": s["goal_at"],
             "last_activity": p.get("last_activity"),
             "status": status_label(p.get("status", 0), running) if s["type"] == 1 else None,
             "files": files_by_slot.get(s["slot"], []),
@@ -198,6 +200,7 @@ async def _detail(game_id: int, user: sqlite3.Row, request: Request) -> dict:
         "generator_version": row["generator_version"], "min_server_version": row["min_server_version"],
         "notes": row["notes"], "job_id": row["job_id"],
         "job_available": bool(job and (admin or job["created_by"] == user["id"])),
+        "share_spoiler_when_done": bool(row["share_spoiler_when_done"]),
         "ap_version": apbridge.ap_version(),
     }
     if admin:
@@ -229,6 +232,8 @@ class GamePatch(BaseModel):
     claimable: bool | None = None
     single_claim: bool | None = None
     notes: str | None = Field(default=None, max_length=2000)
+    share_spoiler_when_done: bool | None = None
+    finished: bool | None = None
 
 
 @router.patch("/games/{game_id}")
@@ -276,11 +281,15 @@ async def patch_game(game_id: int, body: GamePatch, request: Request, user: sqli
         changes["single_claim"] = int(body.single_claim)
     if "notes" in given:
         changes["notes"] = (body.notes or "").strip() or None
+    if "share_spoiler_when_done" in given and body.share_spoiler_when_done is not None:
+        changes["share_spoiler_when_done"] = int(body.share_spoiler_when_done)
 
     if changes:
         assignments = ", ".join(f"{k} = ?" for k in changes)
         db.execute(f"UPDATE games SET {assignments} WHERE id = ?", [*changes.values(), game_id])
         await ROOMS.apply_options(game_id)
+    if "finished" in given and body.finished is not None:  # after the spoiler setting, which finishing applies
+        history.finish(game_id, body.finished)
     return {**await _detail(game_id, user, request), "restart_required": restart_required}
 
 
@@ -336,6 +345,7 @@ async def reset_save(game_id: int, request: Request, user: sqlite3.Row = Depends
     backups.create(game_id, "before-reset")  # so a reset can be undone
     gamepaths.save_path(game_id).unlink(missing_ok=True)
     ROOMS.forget_progress(game_id)
+    history.forget(game_id)
     return await _detail(game_id, user, request)
 
 
@@ -423,6 +433,13 @@ def _get_slot(game_id: int, slot: int) -> sqlite3.Row:
     if not row:
         raise HTTPException(404, "No such slot")
     return row
+
+
+@router.get("/games/{game_id}/history")
+def progress_history(game_id: int, user: sqlite3.Row = Depends(current_user)) -> dict:
+    """Every player's checked locations over time, when they reached their goal, and when the game was played."""
+    get_game(game_id, user)
+    return history.series(game_id)
 
 
 @router.get("/games/{game_id}/slots/{slot}/tracker")

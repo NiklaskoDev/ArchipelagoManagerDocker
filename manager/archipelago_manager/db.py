@@ -10,7 +10,7 @@ from collections.abc import Iterable, Iterator
 
 from .config import CONFIG
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 # Added in schema version 3
 _SIGNUPS = """
@@ -74,6 +74,18 @@ CREATE TABLE apworld_sources (
     announced_tag TEXT,
     error         TEXT
 );
+"""
+
+# Added in schema version 7
+_PROGRESS = """
+-- How far each player got over time: a point whenever the number of checked locations of a slot changed.
+CREATE TABLE game_progress (
+    game_id INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+    slot    INTEGER NOT NULL,
+    at      REAL NOT NULL,
+    checked INTEGER NOT NULL
+);
+CREATE INDEX game_progress_game ON game_progress(game_id, slot, at);
 """
 
 SCHEMA = """
@@ -155,7 +167,10 @@ CREATE TABLE games (
     visibility        TEXT NOT NULL DEFAULT 'participants' CHECK (visibility IN ('participants', 'all')),
     claimable         INTEGER NOT NULL DEFAULT 0,
     single_claim      INTEGER NOT NULL DEFAULT 0,
-    notes             TEXT
+    notes             TEXT,
+    play_started_at   REAL,
+    finished_at       REAL,
+    share_spoiler_when_done INTEGER NOT NULL DEFAULT 0
 );
 CREATE UNIQUE INDEX games_port ON games(port) WHERE port IS NOT NULL;
 
@@ -167,6 +182,7 @@ CREATE TABLE game_slots (
     type      INTEGER NOT NULL DEFAULT 1,
     locations INTEGER NOT NULL DEFAULT 0,
     user_id   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    goal_at   REAL,
     PRIMARY KEY (game_id, slot)
 );
 
@@ -208,7 +224,7 @@ CREATE TABLE job_players (
 );
 CREATE INDEX job_players_job ON job_players(job_id);
 """ + _SIGNUPS + _SOURCES + "ALTER TABLE apworld_sources ADD COLUMN latest_asset TEXT; " + \
-    "ALTER TABLE signups ADD COLUMN test_job_id INTEGER;"
+    "ALTER TABLE signups ADD COLUMN test_job_id INTEGER;" + _PROGRESS
 
 
 # Upgrades for databases created by older versions: MIGRATIONS[n] turns schema n - 1 into schema n. New databases get
@@ -225,6 +241,10 @@ MIGRATIONS: dict[int, str] = {
     # the hash of each player file and what the generator said was wrong with it; a sign-up round's test generation
     6: "ALTER TABLE job_players ADD COLUMN sha256 TEXT; ALTER TABLE job_players ADD COLUMN error TEXT; "
        "ALTER TABLE signups ADD COLUMN test_job_id INTEGER;",
+    # progress over time: when play began, when each player reached their goal, when the game was finished
+    7: _PROGRESS + "ALTER TABLE game_slots ADD COLUMN goal_at REAL; ALTER TABLE games ADD COLUMN play_started_at REAL; "
+       "ALTER TABLE games ADD COLUMN finished_at REAL; "
+       "ALTER TABLE games ADD COLUMN share_spoiler_when_done INTEGER NOT NULL DEFAULT 0;",
 }
 
 

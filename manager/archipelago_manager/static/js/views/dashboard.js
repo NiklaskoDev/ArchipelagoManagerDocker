@@ -2,7 +2,7 @@ import { h, clear, icon, fmtBytes } from "../util.js";
 import { get, state, isAdmin } from "../api.js";
 import { pageHeader, missingGamesPanel, gameCard, empty, updateBanner } from "../components.js";
 import { signupCard } from "./signups.js";
-import { t } from "../i18n.js";
+import { t, plural } from "../i18n.js";
 
 export default async function render({ root, cleanup, isCurrent }) {
   const admin = isAdmin();
@@ -22,12 +22,14 @@ export default async function render({ root, cleanup, isCurrent }) {
   };
   const missingHost = h("div");
   const drawMissing = (items) => clear(missingHost).append(missingGamesPanel(items, load) || "");
-  const drawGames = (list) => {
+  const drawGames = (all) => {
+    const list = all.filter((g) => !g.finished_at);  // finished ones are in the archive under Games
+    const archived = all.length - list.length;
     const mine = list.filter((g) => g.my_slots.length);
     const others = list.filter((g) => !g.my_slots.length);
     const onUpdate = () => load();
     clear(gridHost);
-    if (!list.length) {
+    if (!all.length) {
       gridHost.append(empty(t("No games yet"),
         admin ? t("Upload a pregenerated multiworld or generate a new one.") : t("When an administrator adds you to a game, it shows up here."),
         admin ? h("a", { class: "btn primary", href: "#/games" }, icon("upload", 14), t("Add a game")) : null,
@@ -43,6 +45,10 @@ export default async function render({ root, cleanup, isCurrent }) {
         h("div", { class: "section-head" }, h("h2", {}, mine.length ? t("Other games") : t("Games")),
           h("a", { href: "#/games" }, t("See all"))),
         h("div", { class: "grid" }, others.slice(0, 6).map((g) => gameCard(g, onUpdate)))));
+    }
+    if (archived) {
+      gridHost.append(h("p", { class: "muted small" }, h("a", { href: "#/games" },
+        plural(archived, "{n} finished game is in the archive", "{n} finished games are in the archive"))));
     }
   };
   async function load() {

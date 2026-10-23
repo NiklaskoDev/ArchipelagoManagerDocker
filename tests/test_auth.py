@@ -199,8 +199,8 @@ def test_oversized_uploads_are_rejected_before_they_are_stored(tmp_path):
 
 
 def test_a_database_from_the_first_version_is_upgraded(tmp_path):
-    """Schema v1 had no single_claim column, no Discord accounts, no errors per player file and none of the later
-    tables; a newer manager adds them, keeping the data."""
+    """Schema v1 had no single_claim column, no Discord accounts, no errors per player file, no progress history and
+    none of the later tables; a newer manager adds them, keeping the data."""
     import sqlite3
     from conftest import Server
     server = Server(tmp_path / "data", ap=False)
@@ -219,6 +219,10 @@ def test_a_database_from_the_first_version_is_upgraded(tmp_path):
     conn.execute("ALTER TABLE users DROP COLUMN discord_name")
     conn.execute("ALTER TABLE job_players DROP COLUMN sha256")
     conn.execute("ALTER TABLE job_players DROP COLUMN error")
+    conn.execute("DROP TABLE game_progress")
+    for column in ("play_started_at", "finished_at", "share_spoiler_when_done"):
+        conn.execute(f"ALTER TABLE games DROP COLUMN {column}")
+    conn.execute("ALTER TABLE game_slots DROP COLUMN goal_at")
     conn.execute("PRAGMA user_version = 1")
     conn.commit()
     conn.close()
@@ -227,14 +231,15 @@ def test_a_database_from_the_first_version_is_upgraded(tmp_path):
     try:
         admin = server.client("boss", "bosspass123")  # users survived
         games = admin.get("/api/games").json()
-        assert [(g["name"], g["single_claim"]) for g in games] == [("Old game", False)]
+        assert [(g["name"], g["single_claim"], g["finished_at"]) for g in games] == [("Old game", False, None)]
         conn = sqlite3.connect(db_path)
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 6
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 7
         conn.close()
         # tables added since then exist and work
         r = admin.post("/api/signups", json={"name": "After the upgrade"})
         assert r.status_code == 200 and admin.get("/api/signups").json()[0]["name"] == "After the upgrade"
         assert r.json()["test"] is None
+        assert admin.get(f"/api/games/{games[0]['id']}/history").json()["slots"] == []
         assert admin.get("/api/apworld-sources").json() == []
         assert admin.get("/api/users").json()[0]["discord_name"] is None
     finally:
