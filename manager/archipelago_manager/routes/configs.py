@@ -32,6 +32,8 @@ def config_json(row: sqlite3.Row, *, owner: str | None = None) -> dict:
         "source_game_id": row["source_game_id"],
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
+        "shared": row["shared_at"] is not None,
+        "shared_at": row["shared_at"],
         "missing_games": apbridge.missing_games(games),
         "missing_roms": apbridge.missing_files(games),
     }
@@ -68,6 +70,16 @@ def get_config(config_id: int, user: sqlite3.Row) -> sqlite3.Row:
     return row
 
 
+def readable_config(config_id: int, user: sqlite3.Row) -> sqlite3.Row:
+    """A config the user may read and copy: their own, any for an administrator, or one another player shares."""
+    row = db.query_one("SELECT c.*, u.username AS owner, u.disabled AS owner_disabled FROM configs c "
+                       "JOIN users u ON u.id = c.user_id WHERE c.id = ?", (config_id,))
+    if not row or not (row["user_id"] == user["id"] or is_admin(user)
+                       or (row["shared_at"] is not None and not row["owner_disabled"])):
+        raise HTTPException(404, "No such config")
+    return row
+
+
 def read_config_bytes(row: sqlite3.Row) -> bytes:
     try:
         return config_path(row["user_id"], row["id"]).read_bytes()
@@ -83,6 +95,57 @@ def list_configs(all: bool = False, user: sqlite3.Row = Depends(current_user)) -
     else:
         rows = db.query(base + "WHERE c.user_id = ? ORDER BY c.name COLLATE NOCASE", (user["id"],))
     return [config_json(r, owner=r["owner"]) for r in rows]
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+# sharing: players offer their configs to the others, who copy them into their own library
+# ----------------------------------------------------------------------------------------------------------------------
+def _shared_json(row: sqlite3.Row, user: sqlite3.Row) -> dict:
+    return {**config_json(row, owner=row["owner"]), "mine": row["user_id"] == user["id"]}
+
+
+@router.get("/configs/shared")
+def list_shared_configs(user: sqlite3.Row = Depends(current_user)) -> list[dict]:
+    rows = db.query("SELECT c.*, u.username AS owner FROM configs c JOIN users u ON u.id = c.user_id "
+                    "WHERE c.shared_at IS NOT NULL AND u.disabled = 0 ORDER BY c.shared_at DESC")
+    return [_shared_json(r, user) for r in rows]
+
+
+@router.get("/configs/shared/{config_id}")
+def shared_config_detail(config_id: int, user: sqlite3.Row = Depends(current_user)) -> dict:
+    row = readable_config(config_id, user)
+    return {**_shared_json(row, user), "content": read_config_bytes(row).decode("utf-8-sig")}
+
+
+class ShareChange(BaseModel):
+    shared: bool
+
+
+@router.put("/configs/{config_id}/shared")
+def share_config(config_id: int, body: ShareChange, user: sqlite3.Row = Depends(current_user)) -> dict:
+    row = get_config(config_id, user)
+    if body.shared and row["user_id"] != user["id"]:
+        raise HTTPException(403, "Only its owner can share a config")  # an administrator can stop sharing it
+    if body.shared != (row["shared_at"] is not None):
+        db.execute("UPDATE configs SET shared_at = ? WHERE id = ?", (db.now() if body.shared else None, config_id))
+    return config_json(db.query_one("SELECT * FROM configs WHERE id = ?", (config_id,)))
+
+
+class ConfigCopy(BaseModel):
+    player_name: str | None = Field(default=None, max_length=64)
+
+
+@router.post("/configs/{config_id}/copy")
+def copy_config(config_id: int, body: ConfigCopy, user: sqlite3.Row = Depends(current_user)) -> dict:
+    """A copy of a shared config in the user's own library, optionally with their own player name in it."""
+    row = readable_config(config_id, user)
+    data = read_config_bytes(row)
+    if body.player_name and body.player_name.strip():
+        try:
+            data = yamlinfo.with_player_name(yamlinfo.decode_text(data), body.player_name).encode()
+        except yamlinfo.YamlError as e:
+            raise HTTPException(400, str(e)) from None
+    return config_json(_store(user["id"], row["name"], data))
 
 
 # Not async: reading yaml takes a while for big files and must not hold up everyone else's requests
@@ -153,7 +216,7 @@ def delete_config(config_id: int, user: sqlite3.Row = Depends(current_user)) -> 
 
 @router.get("/configs/{config_id}/download")
 def download_config(config_id: int, user: sqlite3.Row = Depends(current_user)) -> FileResponse:
-    row = get_config(config_id, user)
+    row = readable_config(config_id, user)
     path = config_path(row["user_id"], config_id)
     if not path.is_file():
         raise HTTPException(410, "The file for this config is missing from disk")

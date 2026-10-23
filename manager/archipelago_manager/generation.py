@@ -451,7 +451,8 @@ class GenerationManager:
         # its players are told, and if it is already running, also those who want to know when a game goes online
         notify.emit("generation", notify.tr("New game ready: {name}", name=game["name"] or name), origin,
                     url=notify.link(f"/games/{game_id}"), fields=fields, color="success",
-                    ping=("game_ready", "game_online") if started else "game_ready", ping_users=slot_owners(game_id))
+                    ping=("game_ready", "game_online") if started else "game_ready", ping_users=slot_owners(game_id),
+                    game_id=game_id)
 
     async def cancel(self, job_id: int) -> bool:
         row = db.query_one("SELECT status FROM jobs WHERE id = ?", (job_id,))

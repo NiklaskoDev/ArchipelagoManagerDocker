@@ -10,7 +10,7 @@ from collections.abc import Iterable, Iterator
 
 from .config import CONFIG
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 # Added in schema version 3
 _SIGNUPS = """
@@ -128,7 +128,8 @@ CREATE TABLE configs (
     size           INTEGER NOT NULL,
     source_game_id INTEGER,
     created_at     REAL NOT NULL,
-    updated_at     REAL NOT NULL
+    updated_at     REAL NOT NULL,
+    shared_at      REAL
 );
 CREATE INDEX configs_user ON configs(user_id);
 
@@ -171,7 +172,8 @@ CREATE TABLE games (
     notes             TEXT,
     play_started_at   REAL,
     finished_at       REAL,
-    share_spoiler_when_done INTEGER NOT NULL DEFAULT 0
+    share_spoiler_when_done INTEGER NOT NULL DEFAULT 0,
+    discord_webhook_url TEXT
 );
 CREATE UNIQUE INDEX games_port ON games(port) WHERE port IS NOT NULL;
 
@@ -248,6 +250,8 @@ MIGRATIONS: dict[int, str] = {
        "ALTER TABLE games ADD COLUMN share_spoiler_when_done INTEGER NOT NULL DEFAULT 0;",
     # what a user with a linked Discord account wants to be mentioned for (notify.PING_KINDS)
     8: "ALTER TABLE users ADD COLUMN discord_pings TEXT NOT NULL DEFAULT '[]';",
+    # a game's own Discord channel; configs their owner shares with the other players (since when)
+    9: "ALTER TABLE games ADD COLUMN discord_webhook_url TEXT; ALTER TABLE configs ADD COLUMN shared_at REAL;",
 }
 
 

@@ -254,6 +254,71 @@ def test_a_game_announces_itself_its_finishers_and_its_crashes(admin, make_user,
 
 
 @pytest.mark.ap
+def test_a_game_can_post_to_its_own_channel(admin, make_user, discord, hook):
+    _ann_name, ann = make_user("ann")
+    gid, _job = make_game(admin, names=("Hook", "Line"), owners={"Hook": ann})
+    discord.wait_for("New game ready")
+    # like a password: only administrators see and set it
+    assert admin.get(f"/api/games/{gid}").json()["discord_webhook_url"] == ""
+    assert "discord_webhook_url" not in ann.get(f"/api/games/{gid}").json()
+    assert ann.patch(f"/api/games/{gid}", json={"discord_webhook_url": hook.url}).status_code == 403
+    r = admin.patch(f"/api/games/{gid}", json={"discord_webhook_url": "not a link"})
+    assert r.status_code == 400 and "http" in r.json()["detail"]
+    r = admin.patch(f"/api/games/{gid}", json={"discord_webhook_url": f" {hook.url} "})
+    assert r.status_code == 200 and r.json()["discord_webhook_url"] == hook.url
+    assert "discord_webhook_url" not in ann.get(f"/api/games/{gid}").json()
+
+    # a test message says which game the channel is for
+    assert ann.post(f"/api/games/{gid}/test-notification", json={}).status_code == 403
+    r = admin.post(f"/api/games/{gid}/test-notification", json={})
+    assert r.status_code == 200 and r.json()["notify_status"]["last_ok_at"]
+    test = hook.wait_for("Test message", timeout=10)
+    name = admin.get(f"/api/games/{gid}").json()["name"]
+    assert test["description"] == f"Messages about {name} arrive in this channel."
+    assert test["url"] == f"http://manager.test:8080/#/games/{gid}"
+
+    # messages about the game go to its channel instead of the main one, also without a main one
+    admin.patch("/api/settings", json={"discord_webhook_url": ""})
+    assert ann.post(f"/api/games/{gid}/start").status_code == 200
+    port = wait_state(admin, gid, "running")["port"]
+    hook.wait_for("is online", timeout=20)
+    with APClient(port, "Hook", "ChecksFinder") as client:
+        assert client.connected
+        client.ws.send(json.dumps([{"cmd": "StatusUpdate", "status": 30}]))
+        time.sleep(1)
+    save_now(admin, gid)
+    hook.wait_for("Hook reached their goal")
+    assert not [t for t in discord.titles() if "is online" in t or "reached their goal" in t]
+    assert admin.get(f"/api/games/{gid}").json()["notify_status"]["last_ok_at"]
+
+    # a channel that cannot be reached is reported on the game, not on the main webhook
+    main_before = admin.get("/api/settings").json()["notify_status"]
+    admin.patch(f"/api/games/{gid}", json={"discord_webhook_url": "http://127.0.0.1:9/nothing-listens-here"})
+    assert admin.get(f"/api/games/{gid}").json()["notify_status"] is None  # a new address starts over
+    admin.post(f"/api/games/{gid}/stop")
+    wait_state(admin, gid, "stopped")
+    admin.post(f"/api/games/{gid}/start")
+    wait_state(admin, gid, "running")
+    failed = wait_for(lambda: admin.get(f"/api/games/{gid}").json()["notify_status"], timeout=60,
+                      message="the failed delivery")
+    assert failed["last_error"].startswith("Could not reach the webhook") and not failed["last_ok_at"]
+    main_after = admin.get("/api/settings").json()["notify_status"]
+    assert (main_after["last_error"], main_after["last_error_at"]) == (main_before["last_error"],
+                                                                       main_before["last_error_at"])
+
+    # without its own channel, the game's messages are back in the main one
+    admin.patch("/api/settings", json={"discord_webhook_url": discord.url})
+    admin.patch(f"/api/games/{gid}", json={"discord_webhook_url": ""})
+    admin.post(f"/api/games/{gid}/stop")
+    wait_state(admin, gid, "stopped")
+    admin.post(f"/api/games/{gid}/start")
+    wait_state(admin, gid, "running")
+    discord.wait_for("is online", timeout=20)
+    admin.post(f"/api/games/{gid}/stop")
+    admin.delete(f"/api/games/{gid}")
+
+
+@pytest.mark.ap
 def test_failed_generation_and_waiting_custom_games_are_reported(admin, make_user, discord, tmp_path):
     r = upload_yaml(admin, f"broken-{time.time_ns()}", "name: Broken\ngame: APQuest\nAPQuest:\n  player_sprite: banana\n")
     job = run_job(admin, [r.json()["created"][0]["id"]], name="Doomed")

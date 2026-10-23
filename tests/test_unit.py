@@ -294,3 +294,25 @@ class TestYamlForm:
         for text in ("name: A\ngame: G\n---\nname: B\ngame: G\n", "game: {G: 1, H: 1}\n", "- a list\n", "name: {A: 1, B: 1}\ngame: G\n"):
             with pytest.raises(yamlform.NoFormError):
                 yamlform.single_player(text)
+
+
+def test_a_copied_config_gets_the_new_player_name_and_keeps_the_rest():
+    name = lambda text: yamlinfo.load_documents(yamlinfo.with_player_name(text, "Ann"))[0]["name"]  # noqa: E731
+    original = "# my settings\nname: Alice # me\ngame: ChecksFinder\nChecksFinder: {}\n"
+    copied = yamlinfo.with_player_name(original, "Ann")
+    assert copied == '# my settings\nname: "Ann"\ngame: ChecksFinder\nChecksFinder: {}\n'
+    # no name yet, also after a document marker; a "name" inside the game's options is not the player name
+    assert name("---\ngame: A\nA: {}\n") == "Ann"
+    assert yamlinfo.with_player_name("game: A\nA:\n  name: inner\n", "Ann").startswith('name: "Ann"\ngame: A')
+    assert name("name: {Alice: 1, Bob: 1}\ngame: A\nA: {}\n") == "Ann"
+    # names that are not safe to write, files where it cannot be done
+    for bad in ("", "x" * 17, "{player}", "Ann%number%", "a\tb"):
+        with pytest.raises(yamlinfo.YamlError):
+            yamlinfo.with_player_name(original, bad)
+    with pytest.raises(yamlinfo.YamlError, match="several players"):
+        yamlinfo.with_player_name("name: a\ngame: A\nA: {}\n---\nname: b\ngame: A\nA: {}\n", "Ann")
+    with pytest.raises(yamlinfo.YamlError, match="could not be set"):
+        yamlinfo.with_player_name("name: >\n  Long\n  Name\ngame: A\nA: {}\n", "Ann")
+    # what a name looks like in the file does not change what it is
+    assert name(original.replace("Alice", '"Al: ice"')) == "Ann"
+    assert yamlinfo.load_documents(yamlinfo.with_player_name(original, "Ä ö: \"x\""))[0]["name"] == 'Ä ö: "x"'
