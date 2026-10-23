@@ -433,6 +433,7 @@ await expectText(admin, "Settings saved");
 await admin.reload();
 await admin.waitForSelector("#view .card");
 if (!(await admin.getByLabel("Users can generate games from their own configs").isChecked())) problems.push("setting did not persist");
+if (!(await admin.getByLabel("Let players be mentioned").isChecked())) problems.push("mentions are not allowed by default");
 await shot(admin, "settings");
 log("settings survive a reload");
 await admin.getByRole("button", { name: "Send a test message" }).click();

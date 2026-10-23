@@ -10,7 +10,7 @@ from collections.abc import Iterable, Iterator
 
 from .config import CONFIG
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 # Added in schema version 3
 _SIGNUPS = """
@@ -98,7 +98,8 @@ CREATE TABLE users (
     created_at    REAL NOT NULL,
     last_login    REAL,
     discord_id    TEXT,
-    discord_name  TEXT
+    discord_name  TEXT,
+    discord_pings TEXT NOT NULL DEFAULT '[]'
 );
 CREATE UNIQUE INDEX users_discord ON users(discord_id) WHERE discord_id IS NOT NULL;
 
@@ -245,6 +246,8 @@ MIGRATIONS: dict[int, str] = {
     7: _PROGRESS + "ALTER TABLE game_slots ADD COLUMN goal_at REAL; ALTER TABLE games ADD COLUMN play_started_at REAL; "
        "ALTER TABLE games ADD COLUMN finished_at REAL; "
        "ALTER TABLE games ADD COLUMN share_spoiler_when_done INTEGER NOT NULL DEFAULT 0;",
+    # what a user with a linked Discord account wants to be mentioned for (notify.PING_KINDS)
+    8: "ALTER TABLE users ADD COLUMN discord_pings TEXT NOT NULL DEFAULT '[]';",
 }
 
 

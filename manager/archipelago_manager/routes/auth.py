@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
-from .. import __version__, db, discord_auth, settings as app_settings
+from .. import __version__, db, discord_auth, notify, settings as app_settings
 from ..config import CONFIG
 from ..security import (SESSION_COOKIE, LoginThrottle, admin_user, check_password_policy, check_username, create_session,
                         current_user, destroy_session, destroy_user_sessions, hash_password, https_in_use,
@@ -27,6 +27,7 @@ def user_json(row: sqlite3.Row) -> dict:
     return {"id": row["id"], "username": row["username"], "role": row["role"], "disabled": bool(row["disabled"]),
             "created_at": row["created_at"], "last_login": row["last_login"],
             "discord_name": row["discord_name"] if row["discord_id"] else None,
+            "discord_pings": db.jloads(row["discord_pings"], []),
             "has_password": bool(row["password_hash"])}
 
 
@@ -79,6 +80,8 @@ def status(request: Request) -> dict:
             "generate": cfg["users_can_generate"],
             "upload_apworlds": cfg["users_can_upload_apworlds"],
         },
+        # what players can ask to be mentioned for on Discord
+        "ping_kinds": notify.ping_kinds_offered(cfg) if user else [],
     }
 
 
@@ -259,6 +262,22 @@ def discord_unlink(user: sqlite3.Row = Depends(current_user)) -> dict:
     if not user["password_hash"]:
         raise HTTPException(409, "Set a password first, or you could not sign in any more")
     db.execute("UPDATE users SET discord_id = NULL, discord_name = NULL WHERE id = ?", (user["id"],))
+    return user_json(db.query_one("SELECT * FROM users WHERE id = ?", (user["id"],)))
+
+
+class Pings(BaseModel):
+    pings: list[str] = Field(max_length=len(notify.PING_KINDS))
+
+
+@router.put("/auth/discord/pings")
+def discord_pings(body: Pings, user: sqlite3.Row = Depends(current_user)) -> dict:
+    """What the signed-in user wants to be mentioned for in the Discord messages."""
+    if not user["discord_id"]:
+        raise HTTPException(409, "Link your Discord account first")
+    if any(kind not in notify.PING_KINDS for kind in body.pings):
+        raise HTTPException(400, "Unknown kind of mention")
+    pings = [kind for kind in notify.PING_KINDS if kind in body.pings]
+    db.execute("UPDATE users SET discord_pings = ? WHERE id = ?", (db.jdumps(pings), user["id"]))
     return user_json(db.query_one("SELECT * FROM users WHERE id = ?", (user["id"],)))
 
 

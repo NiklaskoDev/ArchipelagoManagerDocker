@@ -1,6 +1,6 @@
 import { h, clear, icon, toast, openModal, action, confirmDialog } from "./util.js";
-import { api, state, refreshStatus, setUnauthorizedHandler, isAdmin, post, ApiError } from "./api.js";
-import { banner, loading, field } from "./components.js";
+import { api, state, refreshStatus, setUnauthorizedHandler, isAdmin, post, put, ApiError } from "./api.js";
+import { banner, loading, field, checkbox } from "./components.js";
 import { t, lang, LANGUAGES, setLanguage } from "./i18n.js";
 
 const ROUTES = [
@@ -157,6 +157,8 @@ function drawUserMenu(menu) {
     user.discord_name
       ? [h("div", { class: "menu-note" }, t("Discord: {name}", { name: user.discord_name })), item("link", t("Unlink Discord"), unlinkDiscord)]
       : state.status.discord_login ? item("link", t("Link Discord"), linkDiscord) : null,
+    (user.discord_name || state.status.discord_login) && state.status.ping_kinds.length
+      ? item("bell", t("Discord mentions…"), pingsDialog) : null,
     item("globe", LANGUAGES[other], () => {
       if (dirtyCheck?.() && !confirm(t("You have unsaved changes. Leave this page anyway?"))) return;
       setLanguage(other);
@@ -209,6 +211,44 @@ async function unlinkDiscord() {
   } catch (err) {
     toast(err.message, "error");
   }
+}
+
+// What the server's Discord channel can mention a player for (notify.PING_KINDS)
+const PING_KINDS = [
+  ["game_ready", () => t("A new game you play in is ready")],
+  ["game_online", () => t("A game you play in is online")],
+  ["hint_found", () => t("Someone found an item that was hinted for you")],
+  ["signup_open", () => t("Sign-ups open")],
+  ["signup_closing", () => t("Sign-ups close soon and you have not entered yet")],
+];
+
+function pingsDialog() {
+  const linked = !!state.user.discord_name;
+  const offered = state.status.ping_kinds;
+  const boxes = PING_KINDS.map(([kind, label]) => {
+    const box = checkbox(label(), state.user.discord_pings.includes(kind),
+      offered.includes(kind) ? null : t("This server does not send these messages at the moment."));
+    box.input.disabled = !linked;
+    box.kind = kind;
+    return box;
+  });
+  const save = h("button", { class: "btn primary", type: "button", disabled: !linked }, t("Save"));
+  save.onclick = action(async () => {
+    state.user = await put("/api/auth/discord/pings", { pings: boxes.filter((b) => b.input.checked).map((b) => b.kind) });
+    modal.close();
+    toast(t("Saved"), "success");
+  });
+  const modal = openModal({
+    title: t("Discord mentions"),
+    body: h("div", { class: "stack" },
+      h("p", { class: "muted" }, t("Notifications on this server's Discord channel can mention you when they concern you, so Discord lets you know. Choose when:")),
+      linked ? null : banner("info", icon("link", 16), h("div", { class: "grow stack tight" },
+        h("span", {}, t("Link your Discord account first, so the messages know whom to mention.")),
+        state.status.discord_login ? h("div", {}, h("button", { class: "btn sm", type: "button",
+          onclick: () => { modal.close(); linkDiscord(); } }, t("Link Discord"))) : null)),
+      h("div", { class: "stack tight", role: "group", "aria-label": t("Mention me when") }, boxes)),
+    actions: [h("button", { class: "btn", type: "button", onclick: () => modal.close() }, t("Cancel")), save],
+  });
 }
 
 async function logout() {

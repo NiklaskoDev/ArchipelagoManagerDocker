@@ -42,6 +42,7 @@ DEFAULTS: dict[str, Any] = {
     "discord_webhook_url": "",
     "notify_events": list(NOTIFY_EVENTS),
     "notify_language": "en",
+    "notify_mentions": True,  # players who linked Discord may ask to be mentioned (notify.PING_KINDS)
     # Address of this web UI as players open it: links in notifications, and where Discord sends people back to
     "site_url": "",
     "discord_login": False,
@@ -52,7 +53,7 @@ DEFAULTS: dict[str, Any] = {
 }
 LANGUAGES = ("en", "de")
 
-_BOOL_KEYS = {"discord_login", "discord_signup",
+_BOOL_KEYS = {"discord_login", "discord_signup", "notify_mentions",
               "allow_registration", "users_can_start_rooms", "users_can_generate", "users_can_upload_apworlds",
               "auto_restart_crashed"}
 

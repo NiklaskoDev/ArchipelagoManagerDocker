@@ -42,6 +42,7 @@ class SettingsPatch(BaseModel):
     discord_webhook_url: str | None = Field(default=None, max_length=512)
     notify_events: list[str] | None = None
     notify_language: str | None = None
+    notify_mentions: bool | None = None
     site_url: str | None = Field(default=None, max_length=512)
     discord_login: bool | None = None
     discord_client_id: str | None = Field(default=None, max_length=64)

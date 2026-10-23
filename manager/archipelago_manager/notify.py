@@ -13,10 +13,11 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Collection
 from datetime import UTC, datetime
 from typing import Any
 
-from . import __version__, notify_de, settings as app_settings
+from . import __version__, db, notify_de, settings as app_settings
 
 log = logging.getLogger(__name__)
 
@@ -25,6 +26,14 @@ MAX_ATTEMPTS = 4
 # Discord allows 5 messages per 2 seconds per webhook; staying below that avoids most 429 answers.
 PAUSE_BETWEEN_MESSAGES = 0.5
 USER_AGENT = f"DiscordBot (https://github.com/NiklaskoDev/ArchipelagoManagerDocker, {__version__})"
+# What players with a linked Discord account can ask to be mentioned for, and the kind of message that carries it: they
+# are only mentioned in messages the admin has switched on.
+PING_EVENTS = {"game_ready": "generation", "game_online": "game_online", "hint_found": "hint_found",
+               "signup_open": "signup", "signup_closing": "signup"}
+PING_KINDS = tuple(PING_EVENTS)
+# A message holds 2000 characters, a mention of a Discord id with up to 20 digits takes 24 of them
+MAX_MENTIONS = 80
+_DISCORD_ID = re.compile(r"[0-9]{1,25}")
 
 
 class DeliveryError(Exception):
@@ -104,7 +113,7 @@ def timestamp(ts: float, style: str = "f") -> str:
 
 
 def build_payload(title: str, description: str = "", *, url: str | None = None,
-                  fields: list[tuple] | None = None, color: str = "info") -> dict:
+                  fields: list[tuple] | None = None, color: str = "info", mentions: list[str] | None = None) -> dict:
     embed: dict[str, Any] = {"title": _clip(title, 256), "color": COLORS[color],
                              "timestamp": datetime.now(UTC).isoformat()}
     if description:
@@ -114,8 +123,28 @@ def build_payload(title: str, description: str = "", *, url: str | None = None,
     if fields:
         embed["fields"] = [{"name": _clip(f[0], 256), "value": _clip(f[1], 1024) or "—",
                             "inline": f[2] if len(f) > 2 else False} for f in fields[:25]]
-    # Names come from users; never let one of them ping @everyone or a role.
-    return {"username": "Archipelago Manager", "embeds": [embed], "allowed_mentions": {"parse": []}}
+    # Names come from users; never let one of them ping @everyone, a role or anyone else. Only the users who asked for
+    # it are mentioned, and only by the ids listed here.
+    payload: dict[str, Any] = {"username": "Archipelago Manager", "embeds": [embed], "allowed_mentions": {"parse": []}}
+    mentions = [m for m in mentions or () if _DISCORD_ID.fullmatch(m)][:MAX_MENTIONS]
+    if mentions:
+        payload["content"] = " ".join(f"<@{m}>" for m in mentions)
+        payload["allowed_mentions"]["users"] = mentions
+    return payload
+
+
+def mentions(kinds: str | tuple[str, ...], users: Collection[int] | None = None) -> list[str]:
+    """The Discord ids of the users who asked to be mentioned for one of these kinds of message (of `users`, if given;
+    everyone otherwise), unless the admin does not let anyone be mentioned."""
+    if not app_settings.get_setting("notify_mentions"):
+        return []
+    kinds = {kinds} if isinstance(kinds, str) else set(kinds)
+    found = []
+    for row in db.query("SELECT id, discord_id, discord_pings FROM users "
+                        "WHERE discord_id IS NOT NULL AND disabled = 0 ORDER BY id"):
+        if (users is None or row["id"] in users) and kinds & set(db.jloads(row["discord_pings"], [])):
+            found.append(row["discord_id"])
+    return found
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -199,15 +228,18 @@ def wanted(event: str) -> bool:
 
 
 def emit(event: str, title: str, description: str = "", *, url: str | None = None,
-         fields: list[tuple] | None = None, color: str = "info") -> bool:
+         fields: list[tuple] | None = None, color: str = "info", ping: str | tuple[str, ...] | None = None,
+         ping_users: Collection[int] | None = None) -> bool:
     """Queues a message if a webhook is set and the admin wants this kind of event. Safe to call from any thread.
 
+    `ping` mentions the users who asked to be mentioned for that kind of message (PING_KINDS), of `ping_users` if given.
     Returns whether the message was queued.
     """
     if STATE.loop is None or not wanted(event):
         return False
     webhook = app_settings.get_setting("discord_webhook_url")
-    payload = build_payload(title, description, url=url, fields=fields, color=color)
+    payload = build_payload(title, description, url=url, fields=fields, color=color,
+                            mentions=mentions(ping, ping_users) if ping else None)
     STATE.loop.call_soon_threadsafe(STATE.queue.put_nowait, (webhook, payload))
     return True
 
@@ -219,6 +251,14 @@ async def send_test(webhook: str) -> None:
                             url=link("/admin/settings"), color="success")
     await asyncio.to_thread(_post, webhook, payload)
     STATE.last_ok_at, STATE.last_error, STATE.last_error_at = time.time(), None, None
+
+
+def ping_kinds_offered(values: dict[str, Any] | None = None) -> list[str]:
+    """The kinds of mention players can ask for: those whose messages are sent."""
+    values = values or app_settings.get_settings()
+    if not (values["discord_webhook_url"] and values["notify_mentions"]):
+        return []
+    return [kind for kind, event in PING_EVENTS.items() if event in values["notify_events"]]
 
 
 def status() -> dict:
