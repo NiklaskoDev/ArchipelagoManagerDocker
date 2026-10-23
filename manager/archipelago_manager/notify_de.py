@@ -46,6 +46,12 @@ MESSAGES = {
     "{finished} of {total} players": "{finished} von {total} Spielern",
     "Everyone finished {game}!": "Alle haben {game} geschafft!",
     "All {n} players reached their goal. Congratulations!": "Alle {n} Spieler haben ihr Ziel erreicht. Glückwunsch!",
+    # a player says they are stuck
+    "{player} is stuck": "{player} hängt fest",
+    "In {game}: {note}": "In {game}: {note}",
+    "In {game}, waiting for items.": "In {game}, wartet auf Gegenstände.",
+    "Hinted items they wait for": "Gegenstände mit Hinweis, auf die gewartet wird",
+    "**{item}** at {location} in {finder}'s world": "**{item}** bei {location} in der Welt von {finder}",
     "Time": "Zeit",
     "{d} d {h} h": "{d} T. {h} Std.",
     "{h} h {m} min": "{h} Std. {m} Min.",

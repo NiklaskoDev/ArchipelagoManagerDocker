@@ -116,6 +116,7 @@ const EVENTS = [
   ["game_online", t("A game goes online"), t("When someone starts it; not when it comes back after a crash or a restart of the container.")],
   ["game_crashed", t("A game server crashes")],
   ["player_goal", t("A player reaches their goal, and when everyone has")],
+  ["player_stuck", t("A player says they are stuck"), t("With their note and where the items hinted for them are.")],
   ["hint_found", t("A hinted item is found"), t("Many at once, for example after a !release, come as one message.")],
   ["generation", t("A new game is generated, or generating fails")],
   ["signup", t("Sign-up rounds open, close soon and close")],

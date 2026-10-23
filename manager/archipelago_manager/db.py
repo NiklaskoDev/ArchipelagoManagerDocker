@@ -10,7 +10,7 @@ from collections.abc import Iterable, Iterator
 
 from .config import CONFIG
 
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 
 # Added in schema version 3
 _SIGNUPS = """
@@ -103,6 +103,19 @@ CREATE TABLE audit_log (
     details     TEXT
 );
 CREATE INDEX audit_log_user ON audit_log(user_id);
+"""
+
+# Added in schema version 13
+_VISITS = """
+-- When a player last looked at a game page, and where the summary of what happened while they were away starts
+-- (visits.py). Without a start there is nothing to sum up.
+CREATE TABLE game_visits (
+    game_id      INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+    user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    seen_at      REAL NOT NULL,
+    summary_from REAL,
+    PRIMARY KEY (game_id, user_id)
+);
 """
 
 SCHEMA = """
@@ -210,6 +223,9 @@ CREATE TABLE game_slots (
     user_id   INTEGER REFERENCES users(id) ON DELETE SET NULL,
     goal_at   REAL,
     goal_logged_at REAL,
+    player_status  TEXT,
+    status_note    TEXT,
+    status_at      REAL,
     PRIMARY KEY (game_id, slot)
 );
 
@@ -251,7 +267,7 @@ CREATE TABLE job_players (
 );
 CREATE INDEX job_players_job ON job_players(job_id);
 """ + _SIGNUPS + _SOURCES + "ALTER TABLE apworld_sources ADD COLUMN latest_asset TEXT; " + \
-    "ALTER TABLE signups ADD COLUMN test_job_id INTEGER;" + _PROGRESS + _AUDIT
+    "ALTER TABLE signups ADD COLUMN test_job_id INTEGER;" + _PROGRESS + _AUDIT + _VISITS
 
 
 # Upgrades for databases created by older versions: MIGRATIONS[n] turns schema n - 1 into schema n. New databases get
@@ -286,6 +302,9 @@ MIGRATIONS: dict[int, str] = {
     11: _AUDIT,
     # when the server last stopped, and whether it fell asleep (rooms.py): a player's visit wakes it up again
     12: "ALTER TABLE games ADD COLUMN stopped_at REAL; ALTER TABLE games ADD COLUMN asleep INTEGER NOT NULL DEFAULT 0;",
+    # the summary for players coming back to a game; what a player says about their slot (stuck, on a break, ...)
+    13: _VISITS + "ALTER TABLE game_slots ADD COLUMN player_status TEXT; ALTER TABLE game_slots ADD COLUMN status_note TEXT; "
+        "ALTER TABLE game_slots ADD COLUMN status_at REAL;",
 }
 
 

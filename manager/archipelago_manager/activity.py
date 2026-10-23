@@ -6,6 +6,7 @@ console commands, remote administration and the private answers to one client ar
 (rooms.mask_secrets) by the time a line gets here.
 
 Each entry is a line of JSON in the game's folder with the time it happened; the latest ones are also kept in memory.
+The manager adds entries of its own: what players say about their slot (kind "status", routes/games.py).
 """
 from __future__ import annotations
 
@@ -89,8 +90,11 @@ def _feed(game_id: int) -> _Feed:
 def note(game_id: int, line: str) -> dict | None:
     """Keeps a line of the server's log, if the feed shows its kind, and returns its entry."""
     entry = parse(line)
-    if entry is None:
-        return None
+    return None if entry is None else add(game_id, entry)
+
+
+def add(game_id: int, entry: dict) -> dict:
+    """Keeps an entry, numbered and with the time, and returns it as kept."""
     feed = _feed(game_id)
     feed.seq += 1
     entry = {"seq": feed.seq, "at": time.time(), **entry}

@@ -481,6 +481,39 @@ await user.locator(".section", { has: user.locator("h2", { hasText: "Activity" }
 await feedBox.locator(".msg", { hasText: "hello from the browser" }).first().waitFor();
 await shot(user, "activity");
 log("the activity feed shows what happened in the game, chat filtered out on its own");
+await user.locator(".section", { has: user.locator("h2", { hasText: "Slots" }) }).getByRole("button", { name: "Set status" }).first().click();
+const statusModal = user.locator(".modal");
+await statusModal.getByLabel(/^Stuck/).check();
+await statusModal.locator("input.input").fill("need the Hookshot");
+await statusModal.getByRole("button", { name: "Save" }).click();
+await expectText(user, "Status saved");
+await user.locator(".slot-said", { hasText: "need the Hookshot" }).waitFor();
+await user.locator(".section", { has: user.locator("h2", { hasText: "Activity" }) }).getByRole("tab", { name: "All" }).click();
+await feedBox.locator(".msg", { hasText: "is stuck" }).first().waitFor({ timeout: 15000 });
+await shot(user, "status");
+log("the player says they are stuck; the slot table and the activity show it");
+{
+  // what the page shows on coming back (the server's side of it is tested in test_away.py)
+  const now = Date.now() / 1000;
+  await user.route("**/api/games/*/visit", (route) => route.fulfill({ json: { summary: {
+    since: now - 3 * 3600, partial: false, hint_count: 1, goals: ["Rover"], released: [], chat: 2,
+    received: { count: 3, items: [{ item: "Hookshot", finder: "Rover", location: "Tile 4" }, { item: "Bow", finder: "Rover", location: "Tile 7" }] },
+    hints: [{ item: "Lamp", receiver: "Rover", finder: "garth", location: "Tile 9", entrance: null, in_my_world: true }],
+    stuck: [{ player: "Rover", note: "need a sword", at: now - 3600 }] } } }));
+  const playedUrl = user.url();
+  await nav(user, "#/games");
+  await nav(user, playedUrl.slice(BASE.length + 1));
+  await user.locator(".away", { hasText: "While you were away" }).waitFor();
+  await expectText(user, "You received 3 items");
+  await expectText(user, "waits for their Lamp");
+  await expectText(user, "need a sword");
+  await assertNoStrayText(user, "away summary");
+  await shot(user, "away");
+  await user.getByRole("button", { name: "Got it" }).click();
+  await user.locator(".away").waitFor({ state: "detached" });
+  await user.unroute("**/api/games/*/visit");
+  log("coming back, the player sees what happened while they were away, until they put it away");
+}
 
 // ---------------------------------------------------------------------------------------------------------------------
 console.log("settings persist");
@@ -498,6 +531,7 @@ await admin.reload();
 await admin.waitForSelector("#view .card");
 if (!(await admin.getByLabel("Users can generate games from their own configs").isChecked())) problems.push("setting did not persist");
 if (!(await admin.getByLabel("Let players be mentioned").isChecked())) problems.push("mentions are not allowed by default");
+if (!(await admin.getByLabel("A player says they are stuck").isChecked())) problems.push("stuck players are not announced by default");
 await shot(admin, "settings");
 log("settings survive a reload");
 await admin.getByRole("button", { name: "Send a test message" }).click();

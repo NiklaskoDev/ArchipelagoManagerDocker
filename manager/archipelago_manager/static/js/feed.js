@@ -11,7 +11,7 @@ const FILTERS = [
   ["chat", () => t("Chat"), (e) => e.kind === "chat" || e.kind === "server"],
   ["item", () => t("Items"), (e) => e.kind === "item"],
   ["hint", () => t("Hints"), (e) => e.kind === "hint"],
-  ["event", () => t("Joins and goals"), (e) => ["join", "part", "goal", "release", "collect"].includes(e.kind)],
+  ["event", () => t("Joins and goals"), (e) => ["join", "part", "goal", "release", "collect", "status"].includes(e.kind)],
 ];
 const HINT_STATUS = { found: () => t("found"), priority: () => t("priority"), avoid: () => t("avoid"),
   "no priority": () => t("no priority"), unspecified: () => t("unspecified") };
@@ -52,6 +52,10 @@ export function activitySection({ gameId, mySlots, cleanup, isCurrent }) {
       body = [player(e.player), ": ", e.text];
     } else if (e.kind === "server") {
       body = h("span", { class: "note" }, t("Server: {text}", { text: e.text }));
+    } else if (e.kind === "status") {  // what a player says about how they are doing
+      const text = { playing: t("{player} is playing"), stuck: t("{player} is stuck"), away: t("{player} is taking a break") }[e.status]
+        || t("{player} cleared their status");
+      body = [withNodes(text, { player: player(e.player) }), e.note ? h("span", { class: "note" }, ` ${e.note}`) : null];
     } else {
       const text = { join: t("{player} joined ({game})"), part: t("{player} left"), goal: t("{player} reached their goal"),
         release: t("{player} released the items still in their world"), collect: t("{player} collected their items from the other worlds") }[e.kind];

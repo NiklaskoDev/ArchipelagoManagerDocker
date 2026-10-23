@@ -80,7 +80,8 @@ ACTIONS: dict[tuple[str, str], str] = {
 # What a player also does for themselves, and what changes nothing: not worth a line, even for an administrator.
 # A wake gets its line from the route, when it really started the server.
 SKIP = {("POST", "/api/configs"), ("POST", "/api/configs/text"), ("POST", "/api/configs/{config_id}/copy"),
-        ("POST", "/api/games/{game_id}/wake"),
+        ("POST", "/api/games/{game_id}/wake"), ("POST", "/api/games/{game_id}/visit"),
+        ("PUT", "/api/games/{game_id}/slots/{slot}/status"),
         ("POST", "/api/configs/form/read"), ("POST", "/api/configs/form/write"),
         ("POST", "/api/signups/{signup_id}/entries"), ("POST", "/api/signups/{signup_id}/entries/{entry_id}/refresh")}
 # Recorded for everyone, not only administrators
