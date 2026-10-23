@@ -10,7 +10,7 @@ from collections.abc import Iterable, Iterator
 
 from .config import CONFIG
 
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 
 # Added in schema version 3
 _SIGNUPS = """
@@ -86,6 +86,23 @@ CREATE TABLE game_progress (
     checked INTEGER NOT NULL
 );
 CREATE INDEX game_progress_game ON game_progress(game_id, slot, at);
+"""
+
+# Added in schema version 11
+_AUDIT = """
+-- Who changed what (audit.py). The names of who and what are kept as they were, so the log outlives them.
+CREATE TABLE audit_log (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    at          REAL NOT NULL,
+    user_id     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    username    TEXT NOT NULL,
+    action      TEXT NOT NULL,
+    target_kind TEXT,
+    target_id   INTEGER,
+    target_name TEXT,
+    details     TEXT
+);
+CREATE INDEX audit_log_user ON audit_log(user_id);
 """
 
 SCHEMA = """
@@ -232,7 +249,7 @@ CREATE TABLE job_players (
 );
 CREATE INDEX job_players_job ON job_players(job_id);
 """ + _SIGNUPS + _SOURCES + "ALTER TABLE apworld_sources ADD COLUMN latest_asset TEXT; " + \
-    "ALTER TABLE signups ADD COLUMN test_job_id INTEGER;" + _PROGRESS
+    "ALTER TABLE signups ADD COLUMN test_job_id INTEGER;" + _PROGRESS + _AUDIT
 
 
 # Upgrades for databases created by older versions: MIGRATIONS[n] turns schema n - 1 into schema n. New databases get
@@ -264,6 +281,7 @@ MIGRATIONS: dict[int, str] = {
         "ALTER TABLE games ADD COLUMN start_countdown INTEGER NOT NULL DEFAULT 1; "
         "ALTER TABLE games ADD COLUMN start_stage TEXT; "
         "ALTER TABLE game_slots ADD COLUMN goal_logged_at REAL;",
+    11: _AUDIT,
 }
 
 

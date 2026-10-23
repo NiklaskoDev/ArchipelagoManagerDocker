@@ -17,6 +17,7 @@ const ROUTES = [
   [/^\/worlds$/, () => import("./views/worlds.js"), "worlds"],
   [/^\/admin\/users$/, () => import("./views/admin-users.js"), "admin"],
   [/^\/admin\/settings$/, () => import("./views/admin-settings.js"), "admin"],
+  [/^\/admin\/log$/, () => import("./views/admin-log.js"), "admin"],
 ];
 
 const app = document.getElementById("app");

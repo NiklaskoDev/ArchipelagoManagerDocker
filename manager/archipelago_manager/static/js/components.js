@@ -450,7 +450,7 @@ export function serverOptionsForm(opts) {
 
 export function adminTabs(current) {
   return h("div", { class: "tabs", role: "navigation" },
-    [["users", t("Users")], ["settings", t("Settings")]].map(([key, label]) =>
+    [["users", t("Users")], ["settings", t("Settings")], ["log", t("Log")]].map(([key, label]) =>
       h("a", { class: "tab", href: `#/admin/${key}`, "aria-current": key === current ? "page" : undefined }, label)));
 }
 

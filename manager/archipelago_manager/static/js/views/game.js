@@ -5,6 +5,7 @@ import { stateBadge, badge, chips, progressBar, copyField, copyButton, controlBu
          missingGamesPanel, isActive, serverOptionsForm, deliveryStatus } from "../components.js";
 import { t, tServer, plural } from "../i18n.js";
 import { textClientSection } from "../textclient.js";
+import { activitySection } from "../feed.js";
 import { progressSection, playedText } from "../progresschart.js";
 
 // what a backup was made for, and the kind of a game file, as the server names them
@@ -21,6 +22,7 @@ export default async function render({ root, params, cleanup, isCurrent, query }
   const infoHost = h("div");
   const trackerHost = h("div");
   const textClientHost = h("div");
+  const activityHost = h("div");
   const progressHost = h("div");
   const archiveHost = h("div");
   const slotsHost = h("div");
@@ -175,6 +177,7 @@ export default async function render({ root, params, cleanup, isCurrent, query }
     drawSlots();
     syncTracker();
     syncTextClient();
+    syncActivity();
     if (admin) drawArchive();
     loadHistory().catch(() => {});  // progress, a goal or the archive changed
   }
@@ -219,6 +222,19 @@ export default async function render({ root, params, cleanup, isCurrent, query }
   // The text client, for the player's own slots only: it speaks in their name
   let textClientKey = null, textClientCleanup = () => {};
   cleanup(() => textClientCleanup());
+  // the activity feed, rebuilt only when the viewer's own slots change (what "about me" means)
+  let activityKey = null;
+  const activityStops = [];
+  cleanup(() => activityStops.splice(0).forEach((fn) => fn()));
+  function syncActivity() {
+    const names = game.my_slots.map((s) => s.name);
+    const key = names.join("\n");
+    if (key === activityKey) return;
+    activityKey = key;
+    activityStops.splice(0).forEach((fn) => fn());
+    clear(activityHost).append(activitySection({ gameId: id, mySlots: names, cleanup: (fn) => activityStops.push(fn), isCurrent }));
+  }
+
   function syncTextClient() {
     const slots = game.slots.filter((s) => s.type === 1 && s.mine);
     const key = slots.map((s) => s.slot).join(",");
@@ -629,7 +645,7 @@ export default async function render({ root, params, cleanup, isCurrent, query }
   }
 
   // -------------------------------------------------------------------------------------------------------------------
-  root.append(headerHost, infoHost, trackerHost, textClientHost, progressHost, slotsHost, adminHost);
+  root.append(headerHost, infoHost, trackerHost, textClientHost, activityHost, progressHost, slotsHost, adminHost);
   drawLive();
   if (admin) {
     adminHost.append(settingsSection(), archiveHost, filesSection(), consoleSection(), backupsSection(), dangerSection());

@@ -13,10 +13,10 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPExcepti
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from .. import (apbridge, backups, db, gamepaths, gamestore, history, notify, schedule, settings as app_settings,
-               textclient)
+from .. import (activity, apbridge, audit, backups, db, gamepaths, gamestore, history, notify, schedule,
+               settings as app_settings, textclient)
 from ..config import CONFIG
-from ..rooms import ROOMS, STATUS_GOAL, RoomError, slot_rules, valid_password
+from ..rooms import ROOMS, STATUS_GOAL, RoomError, mask_secrets, slot_rules, valid_password
 from ..security import admin_user, current_user, is_admin
 from ..textclient import TEXT_CLIENTS
 
@@ -149,6 +149,7 @@ async def upload_game(request: Request, file: UploadFile = File(...), name: str 
             raise HTTPException(400, str(e)) from None
     finally:
         tmp.unlink(missing_ok=True)
+    audit.note(request, target=("game", game_id, db.query_one("SELECT name FROM games WHERE id = ?", (game_id,))[0]))
     start_error = None
     if start:
         try:
@@ -327,6 +328,12 @@ async def patch_game(game_id: int, body: GamePatch, request: Request, user: sqli
         history.finish(game_id, body.finished)
     if announce_start:
         schedule.announce(game_id)
+    # the log names what really changed: the settings form sends every field
+    differs = {key for key, value in changes.items() if key != "start_stage" and (
+        db.jloads(row[key], {}) != db.jloads(value, {}) if key == "options" else row[key] != value)}
+    if "finished" in given and body.finished is not None and body.finished != (row["finished_at"] is not None):
+        differs.add("finished")
+    audit.note(request, changed=sorted(differs))
     return {**await _detail(game_id, user, request), "restart_required": restart_required}
 
 
@@ -466,12 +473,14 @@ class Command(BaseModel):
 
 
 @router.post("/games/{game_id}/command")
-async def send_command(game_id: int, body: Command, user: sqlite3.Row = Depends(admin_user)) -> dict:
+async def send_command(game_id: int, body: Command, request: Request,
+                       user: sqlite3.Row = Depends(admin_user)) -> dict:
     get_game(game_id, user)
     try:
         await ROOMS.send_command(game_id, body.command)
     except RoomError as e:
         raise HTTPException(409, str(e)) from None
+    audit.note(request, command=mask_secrets(body.command.strip()))
     return {"ok": True}
 
 
@@ -500,6 +509,13 @@ def progress_history(game_id: int, user: sqlite3.Row = Depends(current_user)) ->
     """Every player's checked locations over time, when they reached their goal, and when the game was played."""
     get_game(game_id, user)
     return history.series(game_id)
+
+
+@router.get("/games/{game_id}/activity")
+def game_activity(game_id: int, after: int = 0, user: sqlite3.Row = Depends(current_user)) -> dict:
+    """What happens in the multiworld (activity.py): for everyone who sees the game."""
+    get_game(game_id, user)
+    return activity.entries(game_id, after)
 
 
 @router.get("/games/{game_id}/slots/{slot}/tracker")
@@ -566,7 +582,8 @@ _ACTIONS = {"release": ("!release", "Release"), "collect": ("!collect", "Collect
 
 
 @router.post("/games/{game_id}/slots/{slot}/action")
-async def slot_action(game_id: int, slot: int, body: SlotAction, user: sqlite3.Row = Depends(current_user)) -> dict:
+async def slot_action(game_id: int, slot: int, body: SlotAction, request: Request,
+                      user: sqlite3.Row = Depends(current_user)) -> dict:
     """!release or !collect for the player, through their text client connection. The server decides whether its
     rules allow it; its answer comes back."""
     _own_slot(game_id, slot, user)
@@ -580,6 +597,7 @@ async def slot_action(game_id: int, slot: int, body: SlotAction, user: sqlite3.R
     if answer is None:
         raise HTTPException(504, "The server did not answer in time. The tracker shows in a minute whether it happened.")
     done = answer["type"] == done_type
+    audit.note(request, action=body.action, done=done)
     if done:
         await ROOMS.save_soon(game_id)
     return {"done": done, "message": "".join(part["text"] for part in answer["parts"])}

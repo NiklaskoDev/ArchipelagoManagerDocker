@@ -3,15 +3,19 @@ from __future__ import annotations
 
 import asyncio
 import os
+import secrets
 import shutil
 import sqlite3
+import time
 from pathlib import Path
 
 import yaml
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import FileResponse
+from starlette.background import BackgroundTask
 from pydantic import BaseModel, Field
 
-from .. import __version__, apbridge, db, discord_auth, notify, settings as app_settings, updates
+from .. import __version__, apbridge, audit, backups, db, discord_auth, notify, settings as app_settings, updates
 from ..config import CONFIG
 from ..rooms import ROOMS
 from ..security import admin_user
@@ -52,11 +56,13 @@ class SettingsPatch(BaseModel):
 
 
 @router.patch("/settings")
-def write_settings(body: SettingsPatch, _admin: sqlite3.Row = Depends(admin_user)) -> dict:
+def write_settings(body: SettingsPatch, request: Request, _admin: sqlite3.Row = Depends(admin_user)) -> dict:
+    before = app_settings.get_settings()
     try:
         updated = app_settings.update_settings(body.model_dump(exclude_unset=True, exclude_none=True))
     except app_settings.SettingsError as e:
         raise HTTPException(400, str(e)) from None
+    audit.note(request, changed=sorted(key for key in updated if updated[key] != before.get(key)))
     return _settings_json(updated)
 
 
@@ -179,3 +185,48 @@ async def write_host_yaml(body: HostYaml, _admin: sqlite3.Row = Depends(admin_us
     tmp.write_text(body.content, encoding="utf-8")
     tmp.replace(path)
     return {"path": str(path)}
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+# audit log and the backup of everything
+# ----------------------------------------------------------------------------------------------------------------------
+@router.get("/audit")
+def audit_log(before: int | None = None, user_id: int | None = None, action: str | None = None,
+              _admin: sqlite3.Row = Depends(admin_user)) -> dict:
+    """Who changed what, newest first, 100 at a time (`before`: the oldest id seen so far)."""
+    entries = audit.entries(before=before, user_id=user_id, action=action, limit=101)
+    return {"entries": entries[:100], "more": len(entries) > 100}
+
+
+# Made archives wait here for their download: a POST makes one (a cross-site link cannot), the GET fetches it once
+_ARCHIVES: dict[str, tuple[Path, float]] = {}
+ARCHIVE_MINUTES = 15
+
+
+@router.post("/system/backup")
+async def make_backup(request: Request, _admin: sqlite3.Row = Depends(admin_user)) -> dict:
+    now = time.time()
+    for token, (path, expires) in list(_ARCHIVES.items()):
+        if expires < now:
+            path.unlink(missing_ok=True)
+            del _ARCHIVES[token]
+    token = secrets.token_urlsafe(24)
+    path = CONFIG.tmp_dir / f"backup-{token}.zip"
+    try:
+        size = await asyncio.to_thread(backups.data_archive, path)
+    except OSError as e:
+        path.unlink(missing_ok=True)
+        raise HTTPException(507, f"The backup could not be written: {e.strerror or e}") from None
+    _ARCHIVES[token] = (path, now + ARCHIVE_MINUTES * 60)
+    audit.note(request, size=size)
+    return {"url": f"/api/system/backup/{token}", "size": size}
+
+
+@router.get("/system/backup/{token}")
+def download_backup(token: str, _admin: sqlite3.Row = Depends(admin_user)) -> FileResponse:
+    path, _expires = _ARCHIVES.pop(token, (None, 0))
+    if path is None or not path.is_file():
+        raise HTTPException(404, "This backup is no longer there. Make a new one.")
+    name = f"archipelago-manager-{time.strftime('%Y-%m-%d-%H%M')}.zip"
+    return FileResponse(path, media_type="application/zip", filename=name,
+                        background=BackgroundTask(path.unlink, missing_ok=True))

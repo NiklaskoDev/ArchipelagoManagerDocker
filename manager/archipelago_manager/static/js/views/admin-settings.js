@@ -108,6 +108,7 @@ export default async function render({ root, cleanup }) {
       login.node,
       discord.node,
       romsCard(),
+      backupCard(),
       hostDetails, systemCard));
 }
 
@@ -154,6 +155,30 @@ function notificationsCard(settings) {
     notify_mentions: mentions.input.checked,
   });
   return { node, read, drawStatus };
+}
+
+// The whole data folder as one zip. The server makes it first (a POST, so another site cannot set it off), then the
+// browser downloads it once from the address it gets back.
+function backupCard() {
+  const make = h("button", { class: "btn", type: "button" }, icon("download", 14), t("Download a backup"));
+  const status = h("span", { class: "muted small" });
+  make.onclick = action(async () => {
+    status.textContent = t("Making the backup…");
+    try {
+      const made = await post("/api/system/backup");
+      status.textContent = t("Backup made ({size}). The download starts now.", { size: fmtBytes(made.size) });
+      const link = h("a", { href: made.url, download: "" });
+      document.body.append(link);
+      link.click();
+      link.remove();
+    } catch (err) {
+      status.textContent = "";
+      throw err;
+    }
+  });
+  return h("div", { class: "card stack" }, h("h2", {}, t("Backup of everything")),
+    h("p", { class: "muted small" }, t("One zip of the whole data folder: users, configs, games and their saves, custom games, sign-up rounds and the settings. It holds passwords (hashed) and the Discord secrets, so keep it safe. To restore it, stop the container, put the zip's contents into an empty data folder and start the container again.")),
+    h("div", { class: "row" }, make, status));
 }
 
 // Signing in with Discord (OAuth2). The client secret never comes back from the server: the field stays empty and is

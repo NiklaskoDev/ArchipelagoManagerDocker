@@ -4,11 +4,11 @@ from __future__ import annotations
 import sqlite3
 import time
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
-from .. import apbridge, db, signups
+from .. import apbridge, audit, db, signups
 from ..security import admin_user, current_user, is_admin
 
 router = APIRouter(prefix="/api")
@@ -114,7 +114,7 @@ def _clean(body: SignupBody, *, creating: bool) -> dict:
 
 
 @router.post("/signups")
-def create_signup(body: SignupBody, user: sqlite3.Row = Depends(admin_user)) -> dict:
+def create_signup(body: SignupBody, request: Request, user: sqlite3.Row = Depends(admin_user)) -> dict:
     values = _clean(body, creating=True)
     signup_id = db.execute(
         "INSERT INTO signups(name, description, created_by, created_at, deadline, configs_per_user, allowed_games, "
@@ -123,6 +123,7 @@ def create_signup(body: SignupBody, user: sqlite3.Row = Depends(admin_user)) -> 
          values.get("configs_per_user", 1), values.get("allowed_games", "[]"), values.get("auto_generate", 1),
          values["options"]))
     signups.announce_open(signup_id)
+    audit.note(request, target=("signup", signup_id, values["name"]))
     return signup_detail(signup_id, user)
 
 
