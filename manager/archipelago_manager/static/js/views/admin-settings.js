@@ -1,5 +1,5 @@
 import { h, clear, icon, toast, action, fmtBytes, fmtAgo } from "../util.js";
-import { get, patch, put, post } from "../api.js";
+import { get, patch, put, post, refreshStatus } from "../api.js";
 import { pageHeader, field, checkbox, banner, adminTabs, serverOptionsForm, updateBanner, updateStatus, copyField, select, romsCard } from "../components.js";
 import { t, tServer, plural } from "../i18n.js";
 
@@ -32,6 +32,7 @@ export default async function render({ root, cleanup }) {
     const saved = await patch("/api/settings", body);
     discord.drawStatus(saved.notify_status);
     login.saved(saved);
+    refreshStatus().catch(() => {});  // what players may ask to be mentioned for, in the user menu
     toast(t("Settings saved"), "success");
   });
 
@@ -128,6 +129,8 @@ function notificationsCard(settings) {
     placeholder: "https://discord.com/api/webhooks/…" });
   const language = select([["en", "English"], ["de", "Deutsch"]], settings.notify_language);
   const boxes = EVENTS.map(([key, label, hint]) => ({ key, box: checkbox(label, settings.notify_events.includes(key), hint) }));
+  const mentions = checkbox(t("Let players be mentioned"), settings.notify_mentions,
+    t("Players who linked their Discord account choose in their user menu what they want to be mentioned for, such as their game going online. Nobody else is ever mentioned, not @everyone and no role."));
   const statusHost = h("div");
   const drawStatus = (status) => {
     clear(statusHost);
@@ -150,11 +153,13 @@ function notificationsCard(settings) {
     field(t("Webhook address"), webhook),
     field(t("Language of the messages"), language),
     h("div", { class: "stack tight" }, h("span", { class: "field-label" }, t("Send a message when…")), boxes.map((b) => b.box)),
+    mentions,
     statusHost,
     h("div", { class: "row" }, test));
   const read = () => ({
     discord_webhook_url: webhook.value.trim(), notify_language: language.value,
     notify_events: boxes.filter((b) => b.box.input.checked).map((b) => b.key),
+    notify_mentions: mentions.input.checked,
   });
   return { node, read, drawStatus };
 }

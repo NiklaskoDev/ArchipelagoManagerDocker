@@ -163,6 +163,12 @@ itself. Both edit the same file, so switch whenever you like.
   German), and untick the kinds of messages you do not want. Goals and found
   hinted items are read from the server's save, so they are posted up to a minute after they happen. Many hinted items
   found at once (after a `!release` or `!collect`) come as one message.
+
+  Players who linked their Discord account (see below) can have these messages mention them, so Discord notifies them:
+  in the user menu, *Discord mentions…*, they tick what they want to hear about: a new game they play in is ready,
+  a game they play in is online, someone found an item hinted for them, sign-ups open, or sign-ups close soon and they
+  have not entered yet. Nobody is mentioned unless they asked for it, and only in messages you have switched on;
+  untick *Let players be mentioned* to keep every message silent.
 - **Sign in with Discord:** *Admin → Settings → Sign in with Discord*.
   1. Set *Address of this web UI* under *General* to the address players open, e.g. `https://archipelago.example.com`.
   2. In the [Discord Developer Portal](https://discord.com/developers/applications): *New Application*, then under
@@ -333,7 +339,8 @@ approve pull requests*. You can also run the workflow by hand (*Actions → Arch
   manager connects to the server inside the container, so the browser only talks to the web UI (through your HTTPS
   proxy, if you use one), never to the game's unencrypted port. Opening the connection is a state-changing request
   like any other, so another website cannot open it in a player's name.
-- Discord messages never contain passwords and cannot mention anyone (`@everyone` in a player name stays plain text).
+- Discord messages never contain passwords and mention nobody but the players who asked for it, by their Discord
+  account ID (`@everyone`, roles, and mentions in a player name stay plain text).
   Treat the webhook address like a password: anyone who has it can post to the channel.
 - Signing in with Discord uses OAuth2 with a single-use `state` bound to the browser that started it, a fixed redirect
   address, and Discord's account ID; Discord's tokens are revoked right after use. Disabled users cannot sign in this

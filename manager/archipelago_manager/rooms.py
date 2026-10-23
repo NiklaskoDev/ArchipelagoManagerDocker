@@ -156,6 +156,12 @@ def player_list(game_id: int) -> str:
                      + (f" · {notify.md(r['username'])}" if r["username"] else "") for r in rows)
 
 
+def slot_owners(game_id: int, slots: set[int] | None = None) -> set[int]:
+    """The users who own slots of a game (of these slots, if given), for mentioning them in a notification."""
+    rows = db.query("SELECT slot, user_id FROM game_slots WHERE game_id = ? AND user_id IS NOT NULL", (game_id,))
+    return {r["user_id"] for r in rows if slots is None or r["slot"] in slots}
+
+
 class RoomManager:
     def __init__(self) -> None:
         self.rooms: dict[int, Room] = {}
@@ -553,7 +559,8 @@ class RoomManager:
             fields.append((notify.tr("Password"), notify.tr("Shown on the game page"), True))
         fields.append((notify.tr("Players"), player_list(room.game_id)))
         notify.emit("game_online", notify.tr("{game} is online", game=game["name"]),
-                    url=notify.link(f"/games/{room.game_id}"), fields=fields, color="success")
+                    url=notify.link(f"/games/{room.game_id}"), fields=fields, color="success",
+                    ping="game_online", ping_users=slot_owners(room.game_id))
 
     def _announce_crash(self, room: Room, next_step: str) -> None:
         game = db.query_one("SELECT name FROM games WHERE id = ?", (room.game_id,))
@@ -651,10 +658,11 @@ class RoomManager:
                              location=notify.md(locations[finding, location]))
             lines.append(line + (f" ({notify.md(entrance)})" if entrance else ""))
         url = notify.link(f"/games/{game_id}")
+        receivers = slot_owners(game_id, {h[0] for h in found})  # whoever the items are for
         if len(found) == 1:
             notify.emit("hint_found", notify.tr("Hinted item found: {item}", item=item_names[0]),
                         notify.tr("{line} in {game}.", line=lines[0], game=notify.md(game_name)), url=url,
-                        color="success")
+                        color="success", ping="hint_found", ping_users=receivers)
             return
         # A !release or !collect can find many hinted items at once: one message instead of a flood
         text, shown = "", 0
@@ -665,7 +673,7 @@ class RoomManager:
         if shown < len(lines):
             text += notify.tr("…and {n} more", n=len(lines) - shown)
         notify.emit("hint_found", notify.tr("{n} hinted items found in {game}", n=len(found), game=game_name),
-                    text.strip(), url=url, color="success")
+                    text.strip(), url=url, color="success", ping="hint_found", ping_users=receivers)
 
     def _announce_goals(self, game_id: int, game_name: str, done: set[int], known: set[int]) -> None:
         new = done - known

@@ -302,10 +302,14 @@ class FakeWebhook:
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
 
     @property
-    def embeds(self) -> list[dict]:
-        """The messages that were accepted (answered 204), oldest first."""
+    def messages(self) -> list[dict]:
+        """The messages that were accepted (answered 204), oldest first, as posted."""
         with self.lock:
-            return [p["body"]["embeds"][0] for p in self.posts if p["status"] < 300]
+            return [p["body"] for p in self.posts if p["status"] < 300]
+
+    @property
+    def embeds(self) -> list[dict]:
+        return [m["embeds"][0] for m in self.messages]
 
     def titles(self) -> list[str]:
         return [e["title"] for e in self.embeds]
@@ -313,6 +317,11 @@ class FakeWebhook:
     def wait_for(self, title_part: str, timeout: float = 60) -> dict:
         return wait_for(lambda: next((e for e in self.embeds if title_part in e["title"]), None), timeout=timeout,
                         message=f"a notification titled like {title_part!r} (got {self.titles()})")
+
+    def wait_for_message(self, title_part: str, timeout: float = 60) -> dict:
+        """Like wait_for, but the whole message: who it mentions is in "content" and "allowed_mentions"."""
+        return wait_for(lambda: next((m for m in self.messages if title_part in m["embeds"][0]["title"]), None),
+                        timeout=timeout, message=f"a notification titled like {title_part!r} (got {self.titles()})")
 
     def clear(self) -> None:
         with self.lock:

@@ -421,7 +421,7 @@ def announce_open(signup_id: int, *, reopened: bool = False) -> None:
               (notify.tr("Configs per player"), str(limit), True)]
     notify.emit("signup", notify.tr("Sign-ups reopened: {name}" if reopened else "Sign-ups open: {name}",
                                     name=signup["name"]), text,
-                url=notify.link(f"/signups/{signup_id}"), fields=fields, color="info")
+                url=notify.link(f"/signups/{signup_id}"), fields=fields, color="info", ping="signup_open")
 
 
 def _remind(signup: sqlite3.Row) -> None:
@@ -430,9 +430,13 @@ def _remind(signup: sqlite3.Row) -> None:
     text = notify.tr("Sign-ups close {when} ({date}).", when=notify.timestamp(deadline, "R"),
                      date=notify.timestamp(deadline, "F"))
     text += " " + notify.tr("{n} entry so far." if len(rows) == 1 else "{n} entries so far.", n=len(rows))
+    # a reminder for those who have not entered yet
+    missing = {r["id"] for r in db.query("SELECT id FROM users WHERE id NOT IN "
+                                         "(SELECT user_id FROM signup_entries WHERE signup_id = ?)", (signup["id"],))}
     notify.emit("signup", notify.tr("Sign-ups for {name} close soon", name=signup["name"]), text,
                 url=notify.link(f"/signups/{signup['id']}"),
-                fields=[(notify.tr("Players"), _player_lines(rows))] if rows else None, color="warning")
+                fields=[(notify.tr("Players"), _player_lines(rows))] if rows else None, color="warning",
+                ping="signup_closing", ping_users=missing)
 
 
 def tick(now: float | None = None) -> None:
