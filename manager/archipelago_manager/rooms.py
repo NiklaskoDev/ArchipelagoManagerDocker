@@ -162,6 +162,33 @@ def slot_owners(game_id: int, slots: set[int] | None = None) -> set[int]:
     return {r["user_id"] for r in rows if slots is None or r["slot"] in slots}
 
 
+def slot_rules(tracker: dict, options: dict) -> dict:
+    """What the server's rules give a slot now (MultiServer: get_client_points, get_hint_cost, _cmd_release and
+    _cmd_collect): its hint points, what a hint costs, and whether !release and !collect would work. Each of those is
+    available, after_goal, automatic (happens by itself at the goal), disabled, or done (nothing left to do)."""
+    cost_percent = int(options.get("hint_cost") or 0)
+    per_check = int(options.get("location_check_points") or 0)
+    total = len(tracker["locations"])
+    checked = sum(1 for location in tracker["locations"] if location["checked"])
+    cost = max(1, int(cost_percent * 0.01 * total)) if cost_percent else 0
+
+    def rule(mode: str, left: int) -> str:
+        if not left:
+            return "done"
+        if "enabled" in mode:  # enabled and auto-enabled: any time
+            return "available"
+        if mode == "disabled":
+            return "disabled"
+        if tracker["goal"]:
+            return "available"
+        return "automatic" if mode == "auto" else "after_goal"
+
+    return {"hint_points": per_check * checked - cost * int(tracker.get("hints_used") or 0), "hint_cost": cost,
+            "points_per_check": per_check,
+            "release": rule(str(options.get("release_mode") or "auto"), total - checked),
+            "collect": rule(str(options.get("collect_mode") or "auto"), int(tracker.get("items_left") or 0))}
+
+
 class RoomManager:
     def __init__(self) -> None:
         self.rooms: dict[int, Room] = {}
@@ -309,6 +336,14 @@ class RoomManager:
         if echo:
             self._append_log(room, f"> {text}")
         proc.stdin.write((text + "\n").encode())
+
+    async def save_soon(self, game_id: int) -> None:
+        """Asks a running server to write its save now, so what changed shows up without the minute's wait."""
+        room = self.room(game_id)
+        if room.state == "running":
+            with contextlib.suppress(RoomError, ConnectionError):
+                self._write_stdin(room, "/save", echo=False)
+                await room.proc.stdin.drain()
 
     async def send_command(self, game_id: int, text: str) -> None:
         room = self.room(game_id)

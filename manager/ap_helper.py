@@ -362,8 +362,18 @@ def cmd_tracker(args) -> dict:
                       "status": int(getattr(h, "status", 0))})
     hints.sort(key=lambda h: (h["found"], h["item"].lower()))
     status = save.get("client_game_state", {}).get((0, slot), 0)
+    # This slot's items still waiting in some world, its own included: what !collect would bring
+    checks = save.get("location_checks", {})
+    items_left = sum(1 for finder, placed in md.get("locations", {}).items() for location, entry in placed.items()
+                     if entry[1] == slot and location not in checks.get((0, finder), set()))
+    # The rules the server ran with when it last saved (the save also holds the passwords, which stay here)
+    options = save.get("game_options") or {}
+    rules = {key: options[key] for key in ("hint_cost", "location_check_points", "release_mode", "collect_mode")
+             if key in options} or None
     return {"slot": slot, "name": info.name, "game": info.game, "goal": int(status) == 30,
-            "items": items, "locations": locations, "hints": hints}
+            "items": items, "locations": locations, "hints": hints,
+            "hints_used": int(save.get("hints_used", {}).get((0, slot), 0)), "items_left": items_left,
+            "server_rules": rules}
 
 
 # --------------------------------------------------------------------------------------------------------------------

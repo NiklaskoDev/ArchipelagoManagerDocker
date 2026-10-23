@@ -32,6 +32,7 @@ KEEP_MESSAGES = 500
 MAX_MESSAGE_LENGTH = 1000
 RECONNECT_DELAYS = (2, 5, 10, 30)
 MAX_PACKET = 64 * 1024 * 1024  # the data package of a big multiworld is large
+COMMAND_TIMEOUT = 20         # to connect and hear back, for the buttons that send a command
 
 # Item flags (NetUtils.ItemClassification): what Archipelago's clients color items by
 FLAG_PROGRESSION, FLAG_USEFUL, FLAG_TRAP = 0b001, 0b010, 0b100
@@ -204,6 +205,27 @@ class TextClients:
             await session.ws.send(json.dumps([{"cmd": "Say", "text": text}]))
         except WebSocketException:
             raise TextClientError("Not connected to the game's server", 409) from None
+
+    async def command(self, game_id: int, slot: int, user_id: int, text: str, answers: tuple[str, ...]) -> dict | None:
+        """Says a command as the player, connecting first if needed. Returns the server's answer: the first message
+        about this player of one of the `answers` types (or a CommandResult, which is how the server refuses), or None
+        if none came in time."""
+        session = self.session(game_id, slot, user_id)
+        deadline = time.monotonic() + COMMAND_TIMEOUT
+        while session.state == "connecting" and time.monotonic() < deadline:
+            await asyncio.sleep(0.2)
+        if session.state == "offline":
+            raise TextClientError("The game's server is not running", 409)
+        if session.state == "refused":
+            raise TextClientError(f"The server refused the connection: {session.error}", 409)
+        before = session.seq
+        await self.say(session, text)
+        while time.monotonic() < deadline:
+            for message in list(session.messages):
+                if message["seq"] > before and message["mine"] and message["type"] in (*answers, "CommandResult"):
+                    return message
+            await asyncio.sleep(0.2)
+        return None
 
     async def close(self, key: tuple[int, int, int]) -> None:
         session = self.sessions.pop(key, None)
