@@ -350,3 +350,8 @@ input.switch:disabled { opacity: .5; cursor: not-allowed; }
   .table td, .table th { padding: 9px 10px; }
   .opt-row { grid-template-columns: 1fr; }
 }
+
+/* what happened while the player was away (away.js), and what players say about their slot */
+.away-list { margin: 0; padding-left: 1.2em; display: flex; flex-direction: column; gap: 6px; }
+.away-items { margin: 4px 0 0; padding-left: 1.2em; }
+.slot-said { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px; max-width: 260px; }

@@ -25,9 +25,9 @@ players log in to keep their YAML configs, see their games and download their pa
 - **Runs sign-up rounds.** An admin opens a round with a deadline; players enter their YAMLs, which are checked on the
   spot. A test generation before the deadline shows whether the entries generate together. When the deadline passes the
   game is generated from all entries and everyone is added to it.
-- **Posts to Discord.** A webhook message when a game goes online or crashes, a player reaches their goal, a hinted
-  item is found, a game is generated, sign-ups open or close, a custom game waits for approval, or a new Archipelago
-  version is out. A game can post to a channel of its own, and players can ask to be mentioned.
+- **Posts to Discord.** A webhook message when a game goes online or crashes, a player reaches their goal or says they
+  are stuck, a hinted item is found, a game is generated, sign-ups open or close, a custom game waits for approval, or a
+  new Archipelago version is out. A game can post to a channel of its own, and players can ask to be mentioned.
 - **Keeps custom games.** `.apworld` files are stored. If a config or a seed needs a game the server does not have, the
   UI says so and offers to add it. Regular users can *submit* an APWorld; an admin approves it.
 - **One UI for admins and players.** Players see only their games, can start and stop them (if allowed) and download
@@ -123,7 +123,17 @@ by your players:
    server's log as it runs and kept with the game, so it is there for players who were not connected, with the time
    of each line. Filter it by chat, items, hints, or joins and goals, or show only what concerns your own slots. The
    server's own output, the console and remote administration (`!admin`) are not shown.
-7. **Progress over time** on the game page charts every player's share of their locations checked, from the first
+7. **While you were away:** come back to a game page after more than ten minutes and a card at the top sums up what
+   happened since your last visit: the items others sent you (and from whom), open hints between you and the others
+   (your items in their worlds, their items waiting in yours), who got stuck, who reached their goal or released their
+   items, and how many chat messages came in. It stays, also after a reload, until you press *Got it*. The page counts
+   as visited while it is open and in view; a tab in the background counts as away.
+8. **Your status:** *Set status* under your slot in the slot table tells the others how you are doing: *Playing*,
+   *Stuck* (waiting for items, "BK"), or *On a break*, with a short note such as "need the Hookshot". Everyone in the
+   game sees it in the slot table and in the activity, and the Discord channel hears when someone is stuck, with where
+   the items hinted for them are, so whoever holds one knows (one message per player in ten minutes). Once you reach
+   your goal it is no longer shown; giving up the slot clears it.
+9. **Progress over time** on the game page charts every player's share of their locations checked, from the first
    check on, with a dot where someone reached their goal. Point at the chart (or focus it and use the arrow keys) for
    everyone's numbers at that moment; pressing a name in the legend brings that player to the front. With more than
    eight players, your own slots are in color and the others gray. The table below lists the standings: who reached
@@ -191,14 +201,14 @@ itself. Both edit the same file, so switch whenever you like.
 
   Players who linked their Discord account (see below) can have these messages mention them, so Discord notifies them:
   in the user menu, *Discord mentions…*, they tick what they want to hear about: a new game they play in is ready,
-  a game they play in is online, someone found an item hinted for them, sign-ups open, or sign-ups close soon and they
-  have not entered yet. Nobody is mentioned unless they asked for it, and only in messages you have switched on;
-  untick *Let players be mentioned* to keep every message silent.
+  a game they play in is online, someone found an item hinted for them, someone in a game they play in is stuck,
+  sign-ups open, or sign-ups close soon and they have not entered yet. Nobody is mentioned unless they asked for it,
+  and only in messages you have switched on; untick *Let players be mentioned* to keep every message silent.
 
   A game can post to a channel of its own: paste another webhook under *Settings → Discord* on the game page (and
-  *Send a test message*). Its messages (online, crashes, goals, found hinted items) then go there instead of the main
-  channel, which is not needed for them; the kinds of messages are still the ones ticked here. A webhook that fails is
-  reported on the game page.
+  *Send a test message*). Its messages (online, crashes, goals, stuck players, found hinted items) then go there
+  instead of the main channel, which is not needed for them; the kinds of messages are still the ones ticked here. A
+  webhook that fails is reported on the game page.
 - **Sign in with Discord:** *Admin → Settings → Sign in with Discord*.
   1. Set *Address of this web UI* under *General* to the address players open, e.g. `https://archipelago.example.com`.
   2. In the [Discord Developer Portal](https://discord.com/developers/applications): *New Application*, then under

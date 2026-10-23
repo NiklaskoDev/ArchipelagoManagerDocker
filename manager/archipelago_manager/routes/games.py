@@ -13,7 +13,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPExcepti
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from .. import (activity, apbridge, audit, backups, db, gamepaths, gamestore, history, notify, schedule,
+from .. import (activity, apbridge, audit, backups, db, gamepaths, gamestore, history, notify, schedule, visits,
                settings as app_settings, textclient)
 from ..config import CONFIG
 from ..rooms import ROOMS, STATUS_GOAL, RoomError, mask_secrets, sleep_minutes, slot_rules, valid_password
@@ -193,6 +193,8 @@ async def _detail(game_id: int, user: sqlite3.Row, request: Request) -> dict:
             "checked": p.get("checked", 0), "hints_used": p.get("hints_used", 0), "goal_at": s["goal_at"],
             "last_activity": p.get("last_activity"),
             "status": status_label(p.get("status", 0), running) if s["type"] == 1 else None,
+            # what the player says about how they are doing (set_slot_status)
+            "player_status": s["player_status"], "status_note": s["status_note"], "status_at": s["status_at"],
             "files": files_by_slot.get(s["slot"], []),
         })
     shared = [_file_json(f) for f in visible_files if not (f["slot"] is not None and f["kind"] == "patch")]
@@ -530,10 +532,91 @@ def progress_history(game_id: int, user: sqlite3.Row = Depends(current_user)) ->
 
 
 @router.get("/games/{game_id}/activity")
-def game_activity(game_id: int, after: int = 0, user: sqlite3.Row = Depends(current_user)) -> dict:
-    """What happens in the multiworld (activity.py): for everyone who sees the game."""
+async def game_activity(game_id: int, after: int = 0, user: sqlite3.Row = Depends(current_user)) -> dict:
+    """What happens in the multiworld (activity.py): for everyone who sees the game. On the event loop, where the feed
+    grows: a thread could find it changing while it is read."""
     get_game(game_id, user)
     return activity.entries(game_id, after)
+
+
+class Visit(BaseModel):
+    dismiss: bool = False
+
+
+@router.post("/games/{game_id}/visit")
+async def game_visit(game_id: int, body: Visit, user: sqlite3.Row = Depends(current_user)) -> dict:
+    """The game page is open: notes the visit, and returns for a player of the game what happened while they were away
+    (visits.py). `dismiss` puts that summary away."""
+    get_game(game_id, user)
+    slots = {r["name"] for r in db.query("SELECT name FROM game_slots WHERE game_id = ? AND user_id = ?",
+                                          (game_id, user["id"]))}
+    if not slots:
+        return {"summary": None}
+    since = visits.visit(game_id, user["id"], dismiss=body.dismiss)
+    return {"summary": visits.summary(game_id, slots, since) if since else None}
+
+
+SLOT_STATUSES = ("playing", "stuck", "away")
+STATUS_NOTE_LENGTH = 140
+STUCK_ANNOUNCE_PAUSE = 10 * 60  # one message per slot in this time, however often someone gets stuck again
+_stuck_announced: dict[tuple[int, int], float] = {}
+
+
+class SlotStatus(BaseModel):
+    status: str | None = None  # SLOT_STATUSES, or None for no status
+    note: str = Field(default="", max_length=1000)
+
+
+@router.put("/games/{game_id}/slots/{slot}/status")
+async def set_slot_status(game_id: int, slot: int, body: SlotStatus, request: Request,
+                          user: sqlite3.Row = Depends(current_user)) -> dict:
+    """What the player of a slot says about how they are doing: playing, stuck (waiting for items), or away, with a
+    short note. Everyone who sees the game sees it, and the activity feed has it."""
+    game = get_game(game_id, user)
+    target = _get_slot(game_id, slot)
+    if not (is_admin(user) or (target["user_id"] is not None and target["user_id"] == user["id"])):
+        raise HTTPException(403, "Only the player of this slot can say how they are doing")
+    if target["type"] != 1:
+        raise HTTPException(400, "Only player slots have a status")
+    if body.status is not None and body.status not in SLOT_STATUSES:
+        raise HTTPException(400, "The status must be playing, stuck or away")
+    note = "".join(ch for ch in " ".join(body.note.split()) if ch.isprintable()) if body.status else ""
+    if len(note) > STATUS_NOTE_LENGTH:
+        raise HTTPException(400, f"Keep the note to {STATUS_NOTE_LENGTH} characters")
+    if (body.status, note or None) != (target["player_status"], target["status_note"]):
+        db.execute("UPDATE game_slots SET player_status = ?, status_note = ?, status_at = ? WHERE game_id = ? AND slot = ?",
+                   (body.status, note or None, time.time(), game_id, slot))
+        activity.add(game_id, {"kind": "status", "player": target["name"], "status": body.status,
+                               **({"note": note} if note else {})})
+        if body.status == "stuck" and target["player_status"] != "stuck":
+            await _announce_stuck(game, target, note)
+    return await _detail(game_id, user, request)
+
+
+async def _announce_stuck(game: sqlite3.Row, slot: sqlite3.Row, note: str) -> None:
+    """Tells Discord that a player is stuck, with where the items hinted for them are, so whoever has one knows."""
+    key = (game["id"], slot["slot"])
+    if not notify.wanted("player_stuck", game["id"]) or time.time() - _stuck_announced.get(key, 0) < STUCK_ANNOUNCE_PAUSE:
+        return
+    _stuck_announced[key] = time.time()
+    fields = []
+    try:
+        hints = [h for h in (await ROOMS.tracker(game["id"], slot["slot"]))["hints"] if h["for_me"] and not h["found"]]
+    except apbridge.APBridgeError:
+        hints = []
+    if hints:
+        lines = [notify.tr("**{item}** at {location} in {finder}'s world", item=notify.md(h["item"]),
+                           location=notify.md(h["location"]), finder=notify.md(h["finder"])) for h in hints[:8]]
+        if len(hints) > 8:
+            lines.append(notify.tr("…and {n} more", n=len(hints) - 8))
+        fields.append((notify.tr("Hinted items they wait for"), "\n".join(lines)))
+    owners = {r["user_id"] for r in db.query("SELECT user_id FROM game_slots WHERE game_id = ? AND user_id IS NOT NULL",
+                                             (game["id"],))} - {slot["user_id"]}
+    notify.emit("player_stuck", notify.tr("{player} is stuck", player=slot["name"]),
+                notify.tr("In {game}: {note}", game=notify.md(game["name"]), note=notify.md(note)) if note
+                else notify.tr("In {game}, waiting for items.", game=notify.md(game["name"])),
+                url=notify.link(f"/games/{game['id']}"), fields=fields, color="warning",
+                ping="player_stuck", ping_users=owners, game_id=game["id"])
 
 
 @router.get("/games/{game_id}/slots/{slot}/tracker")
@@ -645,7 +728,9 @@ async def assign_slot(game_id: int, slot: int, body: SlotAssign, request: Reques
         raise HTTPException(400, "Only player slots can be assigned")
     if body.user_id is not None and not db.query_one("SELECT 1 FROM users WHERE id = ?", (body.user_id,)):
         raise HTTPException(404, "No such user")
-    db.execute("UPDATE game_slots SET user_id = ? WHERE game_id = ? AND slot = ?", (body.user_id, game_id, slot))
+    if body.user_id != target["user_id"]:  # what the last player said about the slot is not the new one's
+        db.execute("UPDATE game_slots SET user_id = ?, player_status = NULL, status_note = NULL, status_at = NULL "
+                   "WHERE game_id = ? AND slot = ?", (body.user_id, game_id, slot))
     added = 0
     if body.user_id is not None:
         added = await asyncio.to_thread(gamestore.sync_game_yamls, game_id, slot)
@@ -676,7 +761,8 @@ async def unclaim_slot(game_id: int, slot: int, request: Request, user: sqlite3.
     target = _get_slot(game_id, slot)
     if target["user_id"] != user["id"]:
         raise HTTPException(403, "That slot is not yours")
-    db.execute("UPDATE game_slots SET user_id = NULL WHERE game_id = ? AND slot = ?", (game_id, slot))
+    db.execute("UPDATE game_slots SET user_id = NULL, player_status = NULL, status_note = NULL, status_at = NULL "
+               "WHERE game_id = ? AND slot = ?", (game_id, slot))
     return await _detail(game_id, user, request)
 
 

@@ -1,4 +1,4 @@
-import { h, clear, icon, toast, action, confirmDialog, fmtBytes, fmtAgo, fmtDate, fmtUntil, shortName, toLocalInput,
+import { h, clear, icon, toast, action, confirmDialog, openModal, fmtBytes, fmtAgo, fmtDate, fmtUntil, shortName, toLocalInput,
          fromLocalInput } from "../util.js";
 import { api, get, post, patch, del, isAdmin, state } from "../api.js";
 import { stateBadge, badge, chips, progressBar, copyField, copyButton, controlButtons, banner, field, checkbox, select,
@@ -6,11 +6,15 @@ import { stateBadge, badge, chips, progressBar, copyField, copyButton, controlBu
 import { t, tServer, plural } from "../i18n.js";
 import { textClientSection } from "../textclient.js";
 import { activitySection } from "../feed.js";
+import { awaySummary } from "../away.js";
 import { progressSection, playedText } from "../progresschart.js";
 
 // what a backup was made for, and the kind of a game file, as the server names them
 const BACKUP_REASONS = { auto: t("automatic"), manual: t("made by hand"), "before-reset": t("before a reset"), "before-restore": t("before a restore") };
 const FILE_KINDS = { patch: t("patch"), spoiler: t("spoiler"), yaml: t("yaml"), other: t("other") };
+// what a player says about how they are doing (PUT /api/games/{id}/slots/{slot}/status)
+const SLOT_STATUSES = { playing: ["ok", () => t("Playing")], stuck: ["warn", () => t("Stuck")], away: ["muted", () => t("On a break")] };
+const STATUS_NOTE_LENGTH = 140;
 
 export default async function render({ root, params, cleanup, isCurrent, query }) {
   const id = Number(params[0]);
@@ -19,6 +23,8 @@ export default async function render({ root, params, cleanup, isCurrent, query }
   const users = admin ? await get("/api/users") : [];
 
   const headerHost = h("div");
+  // what happened while the player was away, for players of the game
+  const awayHost = game.my_slots.length ? awaySummary({ gameId: id, cleanup, isCurrent }) : h("div");
   const infoHost = h("div");
   const trackerHost = h("div");
   const textClientHost = h("div");
@@ -127,7 +133,42 @@ export default async function render({ root, params, cleanup, isCurrent, query }
     if (slot.type !== 1) return h("span", { class: "muted" }, t("Spectator"));
     const kind = { online: "ok", goal: "ok", offline: "muted" }[slot.status];
     const label = { online: t("Online"), goal: t("Goal complete"), offline: slot.last_activity ? t("Seen {ago}", { ago: fmtAgo(slot.last_activity) }) : t("Offline") }[slot.status];
-    return h("span", { class: "status-line" }, h("span", { class: `dot ${kind}` }), label);
+    const said = slot.player_status && slot.status !== "goal" ? SLOT_STATUSES[slot.player_status] : null;
+    return h("div", { class: "stack tight" },
+      h("span", { class: "status-line" }, h("span", { class: `dot ${kind}` }), label),
+      said ? h("div", { class: "slot-said", title: fmtDate(slot.status_at) }, h("span", { class: `badge ${said[0]}` }, said[1]()),
+        slot.status_note ? h("span", { class: "small" }, ` ${slot.status_note}`) : null) : null,
+      slot.mine && slot.status !== "goal" ? h("button", { class: "btn sm ghost", type: "button", style: { alignSelf: "flex-start" },
+        onclick: () => statusDialog(slot) },
+        slot.player_status ? t("Change status") : t("Set status")) : null);
+  }
+
+  // The player says how they are doing: everyone in the game sees it, and Discord hears when someone is stuck
+  function statusDialog(slot) {
+    let chosen = slot.player_status || "";
+    const options = [["playing", t("Playing"), t("Busy with the game right now.")],
+      ["stuck", t("Stuck"), t("Waiting for items from the others (BK). Say what you need.")],
+      ["away", t("On a break"), t("Back later; nobody needs to wait for you.")],
+      ["", t("No status"), null]];
+    const name = `status-${slot.slot}`;
+    const radios = options.map(([value, label, hint]) => {
+      const input = h("input", { type: "radio", name, value, checked: value === chosen });
+      input.onchange = () => { chosen = value; note.disabled = !chosen; };
+      return h("label", { class: "check" }, input, h("span", {}, label, hint ? h("span", { class: "hint" }, hint) : null));
+    });
+    const note = h("input", { class: "input", maxlength: STATUS_NOTE_LENGTH, value: slot.status_note || "", disabled: !chosen,
+      placeholder: t("For example: need the Hookshot") });
+    const save = h("button", { class: "btn primary", type: "button" }, t("Save"));
+    const modal = openModal({
+      title: t("Your status in {slot}", { slot: slot.name }),
+      body: h("div", { class: "stack" }, h("div", { class: "stack tight" }, radios), field(t("Note"), note)),
+      actions: [h("button", { class: "btn", type: "button", onclick: () => modal.close() }, t("Cancel")), save],
+    });
+    save.onclick = action(async () => {
+      applyGame(await api("PUT", `/api/games/${id}/slots/${slot.slot}/status`, { status: chosen || null, note: chosen ? note.value : "" }));
+      modal.close();
+      toast(t("Status saved"), "success");
+    });
   }
 
   function ownerCell(slot) {
@@ -667,7 +708,7 @@ export default async function render({ root, params, cleanup, isCurrent, query }
   }
 
   // -------------------------------------------------------------------------------------------------------------------
-  root.append(headerHost, infoHost, trackerHost, textClientHost, activityHost, progressHost, slotsHost, adminHost);
+  root.append(headerHost, awayHost, infoHost, trackerHost, textClientHost, activityHost, progressHost, slotsHost, adminHost);
   drawLive();
   if (admin) {
     adminHost.append(settingsSection(), archiveHost, filesSection(), consoleSection(), backupsSection(), dangerSection());
