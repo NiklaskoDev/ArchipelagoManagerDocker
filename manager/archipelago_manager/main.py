@@ -15,7 +15,7 @@ from .config import CONFIG
 from .generation import GENERATION
 from .rooms import ROOMS
 from .textclient import TEXT_CLIENTS
-from .routes import admin, apworlds, auth, configs, games, jobs
+from .routes import admin, apworlds, auth, configs, games, jobs, roms
 from .routes import signups as signup_routes
 from .routes import sources as source_routes
 from .security import CSRF_HEADER, CSRF_VALUE, user_for_request
@@ -91,8 +91,8 @@ class BodyLimit:
         admin = user["role"] == "admin"
         if path == "/api/apworlds":
             return upload if admin else min(upload, self.PLAYER_APWORLD_LIMIT)
-        if admin and (path == "/api/games" or (path.startswith("/api/games/") and path.endswith("/files"))):
-            return upload  # multiworld zips and extra files of a game
+        if admin and (path in ("/api/games", "/api/roms") or (path.startswith("/api/games/") and path.endswith("/files"))):
+            return upload  # multiworld zips, extra files of a game, base ROMs
         return self.SMALL_LIMIT
 
     async def __call__(self, scope, receive, send) -> None:
@@ -194,7 +194,7 @@ def health() -> dict:
             "ready": apbridge.STATE.info is not None, "archipelago_error": apbridge.STATE.error}
 
 
-for module in (auth, configs, apworlds, source_routes, games, jobs, signup_routes, admin):
+for module in (auth, configs, apworlds, source_routes, games, jobs, signup_routes, admin, roms):
     app.include_router(module.router)
 
 app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")

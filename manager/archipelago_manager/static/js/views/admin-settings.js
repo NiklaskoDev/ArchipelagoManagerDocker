@@ -1,6 +1,6 @@
 import { h, clear, icon, toast, action, fmtBytes, fmtAgo } from "../util.js";
 import { get, patch, put, post } from "../api.js";
-import { pageHeader, field, checkbox, banner, adminTabs, serverOptionsForm, updateBanner, updateStatus, copyField, select } from "../components.js";
+import { pageHeader, field, checkbox, banner, adminTabs, serverOptionsForm, updateBanner, updateStatus, copyField, select, romsCard } from "../components.js";
 import { t, tServer, plural } from "../i18n.js";
 
 const CALLBACK_PATH = "/api/auth/discord/callback";
@@ -106,6 +106,7 @@ export default async function render({ root, cleanup }) {
         h("p", { class: "muted small" }, t("Applied when a game is added. Each game can override them.")), rules.node),
       login.node,
       discord.node,
+      romsCard(),
       hostDetails, systemCard));
 }
 

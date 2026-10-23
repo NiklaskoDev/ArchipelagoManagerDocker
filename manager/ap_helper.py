@@ -102,6 +102,55 @@ def generation_file_problem(world, probe) -> dict | None:
     return None
 
 
+def rom_files(world, probe) -> list[dict]:
+    """The base ROMs a world asks for in host.yaml: its file settings with known checksums. For each, where it goes,
+    whether it is there and the right one, and whether generating needs it.
+
+    Whether generating needs it is found by running the world's own check with the file missing. That happens in
+    memory only and the setting is put back right after: host.yaml is not changed. Run this before the world's real
+    check, which may load and keep the ROM.
+    """
+    import settings
+    from worlds.AutoWorld import World
+    key = getattr(world, "settings_key", None)
+    if not key:
+        return []
+    try:
+        group = getattr(settings.get_settings(), key)
+    except Exception:  # noqa: BLE001 - a world without settings of its own
+        return []
+    own_check = getattr(world.stage_assert_generate, "__func__", None) is not World.stage_assert_generate.__func__
+    found = []
+    for field in getattr(type(group), "__annotations__", {}):
+        try:
+            value = object.__getattribute__(group, field)  # not through Group's, which would ask for missing files
+        except AttributeError:
+            continue
+        if not isinstance(value, settings.FilePath) or value.is_exe or not type(value).md5s:
+            continue
+        path = os.path.abspath(value.resolve())
+        entry = {"setting": f"{key}.{field}", "path": path, "description": value.description or "",
+                 "valid": None, "needed": False}
+        if os.path.exists(path):
+            try:
+                type(value).validate(path)
+                entry["valid"] = True
+            except Exception:  # noqa: BLE001 - the file is there, but not the right one
+                entry["valid"] = False
+        if own_check:
+            object.__setattr__(group, field, type(value)(path + ".missing-for-a-check"))
+            try:
+                world.stage_assert_generate(probe)
+            except FileNotFoundError:
+                entry["needed"] = True
+            except Exception:  # noqa: BLE001 - checks that need players: not ours to judge
+                pass
+            finally:
+                object.__setattr__(group, field, value)
+        found.append(entry)
+    return found
+
+
 def cmd_games(args) -> dict:
     where = cmd_where(args)
     import settings
@@ -128,6 +177,7 @@ def cmd_games(args) -> dict:
             "hidden": bool(getattr(world, "hidden", False)),
             "items": len(getattr(world, "item_name_to_id", {})),
             "locations": len(getattr(world, "location_name_to_id", {})),
+            "roms": rom_files(world, probe),  # first: the world's own check below may load and keep its ROM
             "needs_file": generation_file_problem(world, probe),
         })
     return {
@@ -523,7 +573,25 @@ def cmd_validate_host_yaml(args) -> dict:
     return {"valid": True}
 
 
+def cmd_check_rom(args) -> dict:
+    """Whether a file is the base ROM a setting asks for, by the setting's own check: its checksums, and for SNES ROMs
+    a header that may or may not be there."""
+    cmd_where(args)
+    import settings
+    import worlds  # noqa: F401 - registers the worlds, whose settings name the files
+    settings.no_gui = True
+    settings.skip_autosave = True
+    key, field = args.setting.split(".", 1)
+    value = object.__getattribute__(getattr(settings.get_settings(), key), field)
+    try:
+        type(value).validate(args.path)
+    except Exception as e:  # noqa: BLE001 - every way a file can be wrong
+        return {"valid": False, "error": str(e).replace(args.path, "the file")}
+    return {"valid": True, "error": None}
+
+
 COMMANDS = {
+    "check-rom": cmd_check_rom,
     "host-yaml": cmd_host_yaml,
     "validate-host-yaml": cmd_validate_host_yaml,
     "where": cmd_where,
@@ -556,6 +624,9 @@ def main() -> None:
     p = sub.add_parser("templates")
     p.add_argument("out")
     sub.add_parser("host-yaml")
+    p = sub.add_parser("check-rom")
+    p.add_argument("setting", help="the setting in host.yaml, such as lttp_options.rom_file")
+    p.add_argument("path")
     p = sub.add_parser("validate-host-yaml")
     p.add_argument("path")
     args = parser.parse_args()

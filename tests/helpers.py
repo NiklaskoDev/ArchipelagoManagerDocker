@@ -1,6 +1,7 @@
 """Builders and clients shared by the integration tests."""
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import subprocess
@@ -132,10 +133,37 @@ class CustomOptions(PerGameCommonOptions):
 '''
 
 
+# A base ROM for build_apworld(rom=...): a setting with the file's checksum, as real ROM games have, and the check
+# before generating that needs it. {module}, {game} and {md5} are filled in.
+CUSTOM_ROM = '''
+import typing
+import settings as ap_settings
+
+
+class CustomRomSettings(ap_settings.Group):
+    class RomFile(ap_settings.UserFilePath):
+        """The base ROM of {game}"""
+        description = "{game} ROM"
+        copy_to = "{game} (Test).rom"
+        md5s = ["{md5}"]
+
+    rom_file: RomFile = RomFile(RomFile.copy_to)
+'''
+
+CUSTOM_ROM_WORLD = '''
+    settings: typing.ClassVar[CustomRomSettings]
+
+    @classmethod
+    def stage_assert_generate(cls, multiworld) -> None:
+        ap_settings.get_settings().{module}_options.rom_file  # raises FileNotFoundError while it is missing
+'''
+
+
 def build_apworld(path: Path, *, game="Custom Checks", module="customchecks", version="1.2.0", minimum="0.6.0",
-                  slow_seconds: int = 0, with_options: bool = False) -> Path:
+                  slow_seconds: int = 0, with_options: bool = False, rom: bytes | None = None) -> Path:
     """Repackages the built-in ChecksFinder world under another name: a real, loadable custom world. `with_options`
-    gives it options of its own (CUSTOM_OPTIONS) besides the ones every game has."""
+    gives it options of its own (CUSTOM_OPTIONS) besides the ones every game has; `rom` makes it need a base ROM to
+    generate, the file with these contents."""
     src = Path(AP_DIR) / "worlds" / "checksfinder"
     manifest = {"version": 7, "compatible_version": 7, "game": game, "world_version": version, "minimum_ap_version": minimum}
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -148,6 +176,12 @@ def build_apworld(path: Path, *, game="Custom Checks", module="customchecks", ve
             if slow_seconds and f.name == "__init__.py":  # make generation take a while, for cancellation tests
                 data = data.replace(b"    def create_regions(self):",
                                     f"    def create_regions(self):\n        import time; time.sleep({slow_seconds})".encode())
+            if rom is not None and f.name == "__init__.py" and f.parent == src:
+                fill = {"game": game, "module": module, "md5": hashlib.md5(rom).hexdigest()}
+                data = data.replace(b"from worlds.AutoWorld import World, WebWorld\n",
+                                    b"from worlds.AutoWorld import World, WebWorld\n" + CUSTOM_ROM.format(**fill).encode())
+                data = data.replace(b"    web = ChecksFinderWeb()\n",
+                                    b"    web = ChecksFinderWeb()\n" + CUSTOM_ROM_WORLD.format(**fill).encode())
             if with_options and f.name == "__init__.py" and f.parent == src:
                 data = data.replace(b"from Options import PerGameCommonOptions\n",
                                     b"from Options import PerGameCommonOptions\n" + CUSTOM_OPTIONS)
