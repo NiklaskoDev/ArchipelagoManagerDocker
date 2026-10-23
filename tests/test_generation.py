@@ -152,8 +152,8 @@ def test_games_that_need_a_base_rom_are_caught_before_generating(admin, make_use
 
     config_id = cfg(admin, "Linky", content=f"name: Linky\ngame: {zelda}\n{zelda}: {{}}\n")
     config = admin.get(f"/api/configs/{config_id}").json()
-    assert config["missing_roms"] == [{"game": zelda, "file": rom.name, "folder": rom.parent.as_posix(),
-                                       "in_data_dir": False}]
+    assert config["missing_roms"] == [{"game": zelda, "setting": "tloz_options.rom_file", "file": rom.name,
+                                       "folder": rom.parent.as_posix(), "in_data_dir": False}]
     r = admin.post("/api/jobs", json={"config_ids": [config_id], "host_after": False})
     assert r.status_code == 409
     assert r.json()["detail"] == f'{zelda} needs its base ROM on the server to generate: put "{rom.name}" into {rom.parent.as_posix()}/.'
