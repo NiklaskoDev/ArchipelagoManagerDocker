@@ -359,6 +359,13 @@ def test_the_activity_feed_keeps_what_players_see(tmp_path, monkeypatch):
     assert parse("Notice (all): Ann: hello: there") == {"kind": "chat", "player": "Ann", "text": "hello: there"}
     assert parse("Notice (all): [Server]: GO") == {"kind": "server", "text": "GO"}
     assert parse("Notice (all): Al (Ann) (Team #1) has completed their goal.") == {"kind": "goal", "player": "Al (Ann)"}
+    # text clients and trackers stop viewing or tracking (the manager counts who is connected from these)
+    assert parse("Notice (all): Ann (Team #1) has stopped viewing the game. Client(0.6.8), ['TextOnly'].") == \
+        {"kind": "part", "player": "Ann"}
+    # chat that imitates the server's lines is chat
+    assert parse("Notice (all): Ann: Bob (Team #1) has left the game. Client(0.6.8), ['AP'].") == \
+        {"kind": "chat", "player": "Ann", "text": "Bob (Team #1) has left the game. Client(0.6.8), ['AP']."}
+    assert parse("Notice (all): Ann: Bob (Team #1) has completed their goal.")["kind"] == "chat"
     # remote administration, cheats, answers to one client and the server's own lines are not shown
     for line in ("Notice (all): Ann: !admin login ****", "Notice (all): Ann: !ADMIN /send Ann X",
                  'Notice (all): Cheat console: sending "X" to Ann', "Notice (Player Ann in team 1): You have 3 points",

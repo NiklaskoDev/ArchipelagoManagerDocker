@@ -7,7 +7,7 @@ import { t } from "../i18n.js";
 const ACTIONS = {
   "game.add": () => t("Added a game"), "game.settings": () => t("Changed a game's settings"), "game.delete": () => t("Deleted a game"),
   "game.test_notification": () => t("Sent a Discord test message"), "game.start": () => t("Started the server"),
-  "game.stop": () => t("Stopped the server"), "game.restart": () => t("Restarted the server"), "game.reset": () => t("Reset the progress"),
+  "game.stop": () => t("Stopped the server"), "game.wake": () => t("Woke the server up"), "game.restart": () => t("Restarted the server"), "game.reset": () => t("Reset the progress"),
   "game.backup": () => t("Backed up the progress"), "game.restore": () => t("Restored a backup"), "game.backup_delete": () => t("Deleted a backup"),
   "game.command": () => t("Sent a console command"), "game.file_add": () => t("Added a file"), "game.file_change": () => t("Changed a file"),
   "game.file_delete": () => t("Deleted a file"), "slot.action": () => t("Released or collected items"), "slot.assign": () => t("Assigned a slot"),

@@ -1,4 +1,11 @@
-"""Runs one Archipelago MultiServer process per hosted game."""
+"""Runs one Archipelago MultiServer process per hosted game.
+
+A game can fall asleep: when nobody was connected to its server for the time set in its options (auto_shutdown_minutes,
+0 = never), the manager stops the server and marks the game asleep. A player opening the game page wakes it up again
+(POST /api/games/{id}/wake). While asleep, a game keeps its port, unless another game needs one and none is free: then
+the port of a game whose server is not running goes to that game, and the first one gets a new port when it starts.
+That way there can be more games than ports.
+"""
 from __future__ import annotations
 
 import asyncio
@@ -25,6 +32,7 @@ READY_TIMEOUT = 90
 CRASH_RESTART_WINDOW = 10 * 60
 CRASH_RESTART_LIMIT = 3
 PROGRESS_CHECK_INTERVAL = 20
+IDLE_CHECK_INTERVAL = 10
 
 # A password is handed to the server as a console argument, so it must survive being split on whitespace.
 _PASSWORD_OK = re.compile(r"[^\s\x00-\x1f\x7f]{1,64}")
@@ -73,6 +81,8 @@ class Room:
     restart_handle: asyncio.TimerHandle | None = None
     log_loaded: bool = False
     announce: bool = False  # tell Discord once the server accepts connections
+    clients: int = 0  # connected now, counted from the joins and leaves in the log
+    idle_since: float | None = None  # since when nobody is connected, once the server accepts connections
 
     @property
     def active(self) -> bool:
@@ -97,6 +107,11 @@ def allocate_port(exclude_game_id: int | None = None) -> int | None:
         if port not in claimed and port_is_free(port):
             return port
     return None
+
+
+def sleep_minutes(game: Any) -> int:
+    """After how many minutes with nobody connected the server of a game falls asleep; 0 = never."""
+    return app_settings.clean_server_options(db.jloads(game["options"], {}))["auto_shutdown_minutes"]
 
 
 def _option_commands(game: Any) -> list[str]:
@@ -139,7 +154,7 @@ def build_command(game: Any) -> list[str]:
         "--collect_mode", opts["collect_mode"],
         "--remaining_mode", opts["remaining_mode"],
         "--countdown_mode", opts["countdown_mode"],
-        "--auto_shutdown", str(opts["auto_shutdown_minutes"] * 60),
+        "--auto_shutdown", "0",  # the manager puts the server to sleep itself (watch_idle), also over host.yaml
         "--compatibility", str(opts["compatibility"]),
         "--loglevel", opts["loglevel"],
     )
@@ -239,6 +254,7 @@ class RoomManager:
 
     def _append_log(self, room: Room, line: str) -> str:
         """Keeps a line of the server's output, with secrets masked, and returns it as kept."""
+        self._load_log_tail(room)  # what came before, from the file, goes first
         line = mask_secrets(line)
         room.seq += 1
         room.lines.append((room.seq, line))
@@ -301,10 +317,10 @@ class RoomManager:
         if not gamepaths.multidata_path(room.game_id).is_file():
             raise RoomError("The multiworld data file is missing from disk")
         if game["port"] is None:
-            port = allocate_port(room.game_id)
+            port = allocate_port(room.game_id) or self._take_port(room.game_id)
             if port is None:
-                raise RoomError(f"No free port left in {CONFIG.port_start}-{CONFIG.port_end}. "
-                                f"Stop or delete another game, or widen PORT_RANGE.")
+                raise RoomError(f"No free port left in {CONFIG.port_start}-{CONFIG.port_end}: the servers of all "
+                                f"the other games are running. Stop one of them, or widen PORT_RANGE.")
             db.execute("UPDATE games SET port = ? WHERE id = ?", (port, room.game_id))
             game = db.query_one("SELECT * FROM games WHERE id = ?", (room.game_id,))
         if not port_is_free(game["port"]):
@@ -313,6 +329,7 @@ class RoomManager:
         room.want_stop = False
         room.state, room.error, room.exit_code, room.port = "starting", None, None, game["port"]
         room.started_at = time.time()
+        room.clients, room.idle_since = 0, None
         self._load_log_tail(room)
         self._append_log(room, f"--- starting server on port {game['port']} ---")
         try:
@@ -325,7 +342,7 @@ class RoomManager:
             self._append_log(room, room.error)
             raise RoomError(room.error) from e
 
-        db.execute("UPDATE games SET desired_state = 'running' WHERE id = ?", (room.game_id,))
+        db.execute("UPDATE games SET desired_state = 'running', asleep = 0 WHERE id = ?", (room.game_id,))
         for command in _option_commands(game):
             self._write_stdin(room, command, echo=False)
         for coro in (self._pump(room, room.proc), self._watch(room, room.proc), self._wait_ready(room, room.proc)):
@@ -369,7 +386,10 @@ class RoomManager:
             line = self._append_log(room, raw.decode(errors="replace").rstrip("\r\n"))
             if goal := _GOAL_LINE.search(line):
                 history.note_goal(room.game_id, goal.group(1), time.time())
-            activity.note(room.game_id, line)
+            entry = activity.note(room.game_id, line)
+            if entry and entry["kind"] in ("join", "part") and room.proc is proc:
+                room.clients = max(0, room.clients + (1 if entry["kind"] == "join" else -1))
+                room.idle_since = time.time()
 
     async def _wait_ready(self, room: Room, proc: asyncio.subprocess.Process) -> None:
         deadline = time.monotonic() + READY_TIMEOUT
@@ -382,6 +402,7 @@ class RoomManager:
             writer.close()
             if room.proc is proc and room.state == "starting":
                 room.state = "running"
+                room.idle_since = time.time()  # players can connect from now on
                 self._append_log(room, f"--- server is accepting connections on port {room.port} ---")
                 if room.announce:
                     room.announce = False
@@ -398,12 +419,14 @@ class RoomManager:
         if room.proc is not proc:
             return
         room.exit_code = code
+        room.clients = 0
+        db.execute("UPDATE games SET stopped_at = ? WHERE id = ?", (time.time(), room.game_id))
         self._append_log(room, f"--- server exited with code {code} ---")
         if room.want_stop or self.closing:
             room.state = "stopped"
             return
         if code == 0:
-            # The server decided to stop on its own: idle auto-shutdown or the /exit console command.
+            # The server stopped itself: the /exit console command
             room.state = "stopped"
             db.execute("UPDATE games SET desired_state = 'stopped' WHERE id = ?", (room.game_id,))
             return
@@ -456,12 +479,14 @@ class RoomManager:
             await proc.wait()
 
     async def stop(self, game_id: int, *, persist: bool = True) -> None:
+        """Stops the server of a game. `persist` remembers that it should stay stopped: not running after a restart of
+        the manager, and not woken up by a player (an asleep game is just stopped then)."""
         room = self.room(game_id)
         if room.restart_handle:
             room.restart_handle.cancel()
             room.restart_handle = None
         if persist:
-            db.execute("UPDATE games SET desired_state = 'stopped' WHERE id = ?", (game_id,))
+            db.execute("UPDATE games SET desired_state = 'stopped', asleep = 0 WHERE id = ?", (game_id,))
         if not room.active:
             if room.state == "crashed":
                 room.state = "stopped"
@@ -490,6 +515,77 @@ class RoomManager:
     async def restart(self, game_id: int) -> None:
         await self.stop(game_id)
         await self.start(game_id)
+
+    # ------------------------------------------------------------------------------------------------------------
+    # sleeping
+    # ------------------------------------------------------------------------------------------------------------
+    @staticmethod
+    def is_asleep(game: Any) -> bool:
+        return bool(game["asleep"]) and game["desired_state"] == "stopped"
+
+    async def wake(self, game_id: int) -> bool:
+        """A player opened the game page: an asleep game starts, and a running one stays awake for a while longer.
+        Returns whether the server was started."""
+        room = self.room(game_id)
+        if room.active:
+            room.idle_since = time.time()
+            return False
+        game = db.query_one("SELECT * FROM games WHERE id = ?", (game_id,))
+        # a planned start opens the game at its time, not before
+        if not game or not self.is_asleep(game) or (game["start_at"] and game["start_stage"] is None):
+            return False
+        self._append_log(room, "--- a player opened the game page: waking up ---")
+        await self.start(game_id)
+        return True
+
+    async def watch_idle(self) -> None:
+        """Puts a server to sleep after the time set for its game with nobody connected."""
+        minute = CONFIG.sleep_minute_seconds
+        while True:
+            await asyncio.sleep(min(IDLE_CHECK_INTERVAL, max(1, minute // 4)))
+            for game_id, room in list(self.rooms.items()):
+                if room.state != "running" or room.clients or room.idle_since is None:
+                    continue
+                try:
+                    game = db.query_one("SELECT options, start_stage FROM games WHERE id = ?", (game_id,))
+                    # a game opened ahead of its planned start waits for the players and the countdown
+                    if not game or game["start_stage"] == "opened":
+                        continue
+                    minutes = sleep_minutes(game)
+                    if minutes and time.time() - room.idle_since >= minutes * minute:
+                        await self._fall_asleep(room, minutes)
+                except Exception:  # noqa: BLE001 - one broken game must not keep the others awake
+                    log.exception("Putting game %s to sleep failed", game_id)
+
+    async def _fall_asleep(self, room: Room, minutes: int) -> None:
+        self._append_log(room, f"--- nobody was connected for {minutes} min: the server goes to sleep until a player "
+                               f"opens the game page ---")
+        await self.stop(room.game_id, persist=False)
+        # unless someone stopped or started it meanwhile
+        if room.state == "stopped":
+            db.execute("UPDATE games SET desired_state = 'stopped', asleep = 1 WHERE id = ? AND desired_state = 'running'",
+                       (room.game_id,))
+
+    def _take_port(self, game_id: int) -> int | None:
+        """When no port is free: the port of another game whose server is not running, and is not about to start.
+        Finished games give theirs first, then stopped ones, then asleep ones, each the one that stopped longest ago.
+        That game gets a new port when it starts again."""
+        for row in db.query("SELECT id, port FROM games WHERE id != ? AND port BETWEEN ? AND ? "
+                            "AND desired_state = 'stopped' ORDER BY finished_at IS NULL, asleep, "
+                            "COALESCE(stopped_at, 0), id", (game_id, CONFIG.port_start, CONFIG.port_end)):
+            other = self.rooms.get(row["id"])
+            if other and (other.active or other.restart_handle):
+                continue
+            if not port_is_free(row["port"]):
+                continue
+            db.execute("UPDATE games SET port = NULL WHERE id = ?", (row["id"],))
+            if other:
+                other.port = None
+            self._append_log(self.room(row["id"]), f"--- port {row['port']} went to another game, as no other port "
+                                                   f"was free; this game gets a new one when it starts ---")
+            log.info("Game %s took port %s from game %s", game_id, row["port"], row["id"])
+            return row["port"]
+        return None
 
     # ------------------------------------------------------------------------------------------------------------
     # manager lifecycle

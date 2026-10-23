@@ -5,7 +5,7 @@ import { t, tServer, plural } from "./i18n.js";
 
 const STATE_LABELS = {
   running: ["ok", t("Running")], starting: ["warn", t("Starting…")], stopping: ["warn", t("Stopping…")],
-  stopped: ["muted", t("Stopped")], crashed: ["bad", t("Crashed")],
+  stopped: ["muted", t("Stopped")], crashed: ["bad", t("Crashed")], sleeping: ["muted", t("Asleep")],
 };
 
 const JOB_LABELS = {
@@ -419,12 +419,20 @@ export function serverOptionsForm(opts) {
   const number = (key, min, max) => h("input", { class: "input", type: "number", min, max, value: opts[key] });
   const o = {
     hint_cost: number("hint_cost", 0, 100), location_check_points: number("location_check_points", 0, 1000),
-    auto_shutdown_minutes: number("auto_shutdown_minutes", 0, 43200),
+    auto_shutdown_minutes: number("auto_shutdown_minutes", 1, 43200),
     release_mode: select(RELEASE_CHOICES, opts.release_mode), collect_mode: select(RELEASE_CHOICES, opts.collect_mode),
     remaining_mode: select(REMAINING_CHOICES, opts.remaining_mode), countdown_mode: select(COUNTDOWN_CHOICES, opts.countdown_mode),
     compatibility: select([[2, t("Casual: any client version")], [0, t("Strict: exact version only")]], opts.compatibility),
     loglevel: select(["info", "debug", "warning", "error"].map((v) => [v, v]), opts.loglevel),
   };
+  // asleep, a game's server is stopped until a player opens the game page; 0 minutes = never
+  const awake = checkbox(t("Never falls asleep"), !opts.auto_shutdown_minutes, t("The server keeps running until it is stopped."));
+  const syncSleep = () => {
+    o.auto_shutdown_minutes.disabled = awake.input.checked;
+    if (!awake.input.checked && !Number(o.auto_shutdown_minutes.value)) o.auto_shutdown_minutes.value = 120;
+  };
+  awake.input.onchange = syncSleep;
+  syncSleep();
   const noCheat = checkbox(t("Disable !getitem (item cheat)"), opts.disable_item_cheat);
   const embedded = checkbox(t("Use the hint/release options stored in the seed"), opts.use_embedded_options,
     t("Seeds created on archipelago.gg carry the options chosen there."));
@@ -435,12 +443,13 @@ export function serverOptionsForm(opts) {
       field("!release", o.release_mode), field("!collect", o.collect_mode),
       field("!remaining", o.remaining_mode), field("!countdown", o.countdown_mode),
       field(t("Client compatibility"), o.compatibility),
-      field(t("Idle shutdown (minutes)"), o.auto_shutdown_minutes, t("Stops the server after this long without a new check. 0 = never. Takes effect on restart.")),
+      field(t("Falls asleep after (minutes)"), o.auto_shutdown_minutes,
+        t("With nobody connected. A player wakes it up again by opening the game page.")),
       field(t("Log level"), o.loglevel)),
-    noCheat, embedded);
+    awake, noCheat, embedded);
   const read = () => ({
     hint_cost: Number(o.hint_cost.value), location_check_points: Number(o.location_check_points.value),
-    auto_shutdown_minutes: Number(o.auto_shutdown_minutes.value),
+    auto_shutdown_minutes: awake.input.checked ? 0 : Number(o.auto_shutdown_minutes.value),
     release_mode: o.release_mode.value, collect_mode: o.collect_mode.value, remaining_mode: o.remaining_mode.value,
     countdown_mode: o.countdown_mode.value, compatibility: Number(o.compatibility.value), loglevel: o.loglevel.value,
     disable_item_cheat: noCheat.input.checked, use_embedded_options: embedded.input.checked,

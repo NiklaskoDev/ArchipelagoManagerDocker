@@ -55,6 +55,8 @@ class Config:
     # Discord's OAuth2 endpoints, for signing in with Discord (replaced by a fake in tests)
     discord_api: str
     discord_authorize: str
+    # How long a minute of the sleep timer lasts (rooms.py): seconds in tests
+    sleep_minute_seconds: int
 
     # --- derived paths -------------------------------------------------------------------------------------------
     @property
@@ -114,6 +116,7 @@ def load_config() -> Config:
         github_api=os.environ.get("GITHUB_API_URL", "https://api.github.com").rstrip("/"),
         discord_api=os.environ.get("DISCORD_API_URL", "https://discord.com/api/v10").rstrip("/"),
         discord_authorize=os.environ.get("DISCORD_AUTHORIZE_URL", "https://discord.com/oauth2/authorize"),
+        sleep_minute_seconds=max(1, _int("SLEEP_MINUTE_SECONDS", 60)),
     )
 
 

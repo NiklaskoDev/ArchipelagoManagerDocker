@@ -1,4 +1,5 @@
-// Browser walkthrough of the web UI against a running manager that has Archipelago and NO users yet.
+// Browser walkthrough of the web UI against a running manager that has Archipelago and NO users yet, started with
+// SLEEP_MINUTE_SECONDS=2 (so a game that falls asleep after a minute does so after two seconds).
 //
 //   BASE=http://127.0.0.1:8080 FIXTURES=/path/to/fixtures SHOTS=/tmp/shots node tests/ui/flows.mjs
 //
@@ -300,9 +301,18 @@ await admin.locator("details", { hasText: "Settings" }).first().locator("summary
 await admin.getByLabel("Let users claim unowned slots themselves").check();
 await admin.getByLabel("Players may claim only one slot each").check();
 await admin.locator("select").filter({ hasText: "Only players in the game" }).selectOption("all");
+if (!(await admin.getByLabel("Falls asleep after (minutes)").isDisabled())) problems.push("a new game falls asleep by default");
+await admin.getByLabel("Never falls asleep").uncheck();
+await admin.getByLabel("Falls asleep after (minutes)").fill("5");
 await admin.getByRole("button", { name: "Save settings" }).click();
 await expectText(admin, "Settings saved");
-log("claiming (one slot each) enabled and game made visible to everyone");
+log("claiming (one slot each) enabled, game made visible to everyone and set to fall asleep");
+await admin.locator(".page-actions").getByRole("button", { name: "Start" }).click();
+await admin.locator(".page-head .badge", { hasText: "Asleep" }).waitFor({ timeout: 60000 });
+await expectText(admin, "It wakes up when one of its players opens this page.");
+if (await admin.getByText("Gets a port when it wakes up").count()) problems.push("the asleep game lost its port");
+await shot(admin, "asleep");
+log("with nobody connected, the game falls asleep, and the admin's visit does not wake it");
 
 await admin.locator("details", { hasText: "Backups" }).first().locator("summary").click();
 await expectText(admin, "No backups yet");
@@ -336,6 +346,12 @@ log("user claims a slot and gets their files");
 await expectText(user, "Each player can claim one slot");
 if (await user.getByRole("button", { name: "This is mine" }).count()) problems.push("a second slot is still offered for claiming");
 log("with one slot each, no further slot is offered");
+await nav(user, "#/games");
+await user.locator("td .badge", { hasText: "Asleep" }).first().waitFor();
+await nav(user, claimGameUrl.slice(BASE.length + 1));
+await user.locator(".page-head .badge", { hasText: /Starting|Running/ }).waitFor({ timeout: 20000 });
+await user.locator(".page-head .badge", { hasText: "Running" }).waitFor({ timeout: 60000 });
+log("the player's visit wakes the game up");
 await expectText(user, "Your tracker");
 const trackerCard = user.locator(".section", { has: user.locator("h2", { hasText: "Your tracker" }) });
 await trackerCard.getByRole("tab", { name: /Locations/ }).click();

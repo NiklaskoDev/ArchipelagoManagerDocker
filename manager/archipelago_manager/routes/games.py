@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 from .. import (activity, apbridge, audit, backups, db, gamepaths, gamestore, history, notify, schedule,
                settings as app_settings, textclient)
 from ..config import CONFIG
-from ..rooms import ROOMS, STATUS_GOAL, RoomError, mask_secrets, slot_rules, valid_password
+from ..rooms import ROOMS, STATUS_GOAL, RoomError, mask_secrets, sleep_minutes, slot_rules, valid_password
 from ..security import admin_user, current_user, is_admin
 from ..textclient import TEXT_CLIENTS
 
@@ -25,7 +25,7 @@ router = APIRouter(prefix="/api")
 # ClientStatus values from NetUtils (besides STATUS_GOAL)
 STATUS_ONLINE = (5, 10, 20)
 # Server options that cannot be changed on a running server (everything else is applied with /option)
-RESTART_OPTIONS = {"loglevel", "auto_shutdown_minutes", "use_embedded_options"}
+RESTART_OPTIONS = {"loglevel", "use_embedded_options"}
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -81,6 +81,8 @@ def _slots_for(game_ids: list[int]) -> dict[int, list[sqlite3.Row]]:
 
 def game_summary(row: sqlite3.Row, slots: list[sqlite3.Row], user: sqlite3.Row, host: str) -> dict:
     runtime = ROOMS.status(row["id"])
+    if runtime["state"] == "stopped" and ROOMS.is_asleep(row):
+        runtime["state"] = "sleeping"
     mine = [s for s in slots if s["user_id"] == user["id"]]
     games = db.jloads(row["games"], [])
     players = [s for s in slots if s["type"] == 1]
@@ -89,6 +91,7 @@ def game_summary(row: sqlite3.Row, slots: list[sqlite3.Row], user: sqlite3.Row, 
         "created_at": row["created_at"], "race_mode": bool(row["race_mode"]),
         "state": runtime["state"], "error": runtime["error"], "started_at": runtime["started_at"],
         "desired_state": row["desired_state"],
+        "sleep_minutes": sleep_minutes(row),  # 0: never falls asleep
         "port": row["port"], "address": f"{host}:{row['port']}" if row["port"] else None,
         "has_password": bool(row["password"]),
         "games": games, "missing_games": apbridge.missing_games(games),
@@ -384,6 +387,21 @@ async def start_game(game_id: int, request: Request, user: sqlite3.Row = Depends
         await ROOMS.start(game_id, announce=True)
     except RoomError as e:
         raise HTTPException(409, str(e)) from None
+    return await _detail(game_id, user, request)
+
+
+@router.post("/games/{game_id}/wake")
+async def wake_game(game_id: int, request: Request, user: sqlite3.Row = Depends(current_user)) -> dict:
+    """A player opened the game page: wakes the game up if it is asleep, and keeps it awake a while longer if not."""
+    row = get_game(game_id, user)
+    if not (is_admin(user) or is_participant(game_id, user["id"])):
+        raise HTTPException(403, "Only the players of this game can wake it up")
+    try:
+        woken = await ROOMS.wake(game_id)
+    except RoomError as e:
+        raise HTTPException(409, str(e)) from None
+    if woken:  # the log has every start, but not every look at a game that is awake anyway
+        audit.record(user, "game.wake", ("game", game_id, row["name"]))
     return await _detail(game_id, user, request)
 
 
