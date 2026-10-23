@@ -187,6 +187,18 @@ class TestPlayerFileErrors:
         assert _player_file_errors(["Exception: Game appears as unbeatable. Aborting."]) == {}
 
 
+class TestRomPlaces:
+    def test_roms_are_only_written_inside_the_data_folder(self):
+        from fastapi import HTTPException
+        from archipelago_manager.routes.roms import _writable
+        inside = CONFIG.data_dir / "ap-data" / "Archipelago" / "Game (USA).sfc"
+        assert _writable({"game": "G", "path": str(inside)}) == inside.resolve()
+        for outside in ("/etc/game.sfc", str(CONFIG.data_dir / ".." / "elsewhere" / "game.sfc")):
+            with pytest.raises(HTTPException) as e:
+                _writable({"game": "G", "path": outside})
+            assert e.value.status_code == 409 and "outside the data folder" in e.value.detail
+
+
 class TestTextClientMessages:
     def test_messages_are_shown_as_archipelago_shows_them(self):
         session = Session(game_id=1, slot=1, user_id=1)

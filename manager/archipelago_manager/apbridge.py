@@ -155,18 +155,45 @@ def file_location_text(item: dict[str, Any]) -> str:
     return f'"{item["file"]}" into {item["folder"]}/ in the data folder'
 
 
-def missing_files(games: list[str] | set[str]) -> list[dict[str, Any]]:
-    """Games among these that cannot be generated yet because a file they need, their base ROM, is not on the server.
+def roms() -> list[dict[str, Any]]:
+    """Every base ROM the installed games ask for, whether it is there and whether generating needs it.
 
-    Archipelago told us where each game looks for its file when the games were loaded. Whether the file is there is
-    checked now, so a ROM put into place counts at once.
+    These are the games' file settings in host.yaml with known checksums (an upload is checked against them), plus
+    files a custom game looked for without such a setting. Whether a file is there is checked now, so a ROM put into
+    place counts at once; whether it is the right one was checked when the games were loaded or it was uploaded.
     """
-    installed = installed_games(include_hidden=True)
     result = []
-    for game in sorted(set(games)):
-        need = (installed.get(game) or {}).get("needs_file")
-        if need and need.get("path") and not os.path.exists(need["path"]):
-            result.append({"game": game, **describe_file(need["path"])})
+    for name, game in sorted(installed_games(include_hidden=True).items(), key=lambda kv: kv[0].lower()):
+        paths = set()
+        for rom in game.get("roms") or []:
+            exists = os.path.exists(rom["path"])
+            paths.add(rom["path"])
+            result.append({"game": name, "setting": rom["setting"], "path": rom["path"], **describe_file(rom["path"]),
+                           "description": rom["description"], "checked": True, "needed": rom["needed"],
+                           "exists": exists, "valid": rom["valid"] if exists else None})
+        need = game.get("needs_file")
+        if need and need.get("path") and os.path.abspath(need["path"]) not in paths:
+            exists = os.path.exists(need["path"])
+            result.append({"game": name, "setting": None, "path": need["path"], **describe_file(need["path"]),
+                           "description": "", "checked": False, "needed": True, "exists": exists, "valid": None})
+    return result
+
+
+def rom_checked(game: str, setting: str | None, valid: bool | None) -> None:
+    """Notes the outcome of checking a ROM that was just put into place (or removed: None)."""
+    for rom in (installed_games(include_hidden=True).get(game) or {}).get("roms") or []:
+        if rom["setting"] == setting:
+            rom["valid"] = valid
+
+
+def missing_files(games: list[str] | set[str]) -> list[dict[str, Any]]:
+    """Games among these that cannot be generated yet because a file they need, their base ROM, is not on the server."""
+    wanted = set(games)
+    result, seen = [], set()
+    for rom in roms():
+        if rom["game"] in wanted and rom["needed"] and not rom["exists"] and rom["game"] not in seen:
+            seen.add(rom["game"])
+            result.append({key: rom[key] for key in ("game", "setting", "file", "folder", "in_data_dir")})
     return result
 
 

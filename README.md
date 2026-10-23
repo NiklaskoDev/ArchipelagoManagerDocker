@@ -231,17 +231,30 @@ Games that are not part of Archipelago itself come as `.apworld` files.
 
 ### Games that need a base ROM
 
-Some games need their original ROM on the server to *generate* (for example A Link to the Past, Ocarina of Time,
-Super Mario World, Secret of Evermore, The Legend of Zelda); others only make a patch file and do not. Hosting a
-pregenerated seed never needs a ROM, and players always need their own to patch.
+Some games need their original ROM on the server to *generate*. With Archipelago 0.6.8 these are A Link to the Past,
+Lufia II Ancient Cave, MegaMan Battle Network 3, Ocarina of Time, Secret of Evermore, Super Mario World, The Legend of
+Zelda and Yoshi's Island, plus custom games that ask for one. Other ROM games only need the ROM on the players'
+computers to patch. Hosting a pregenerated seed never needs a ROM, and players always need their own to patch.
 
-The manager asks each game whether its ROM is in place, using the same check Archipelago runs before generating. When
-one is missing, the generate page, the config and the sign-up round say which file is needed and where it goes, and
-generating is refused right away instead of failing in the queue (or at a round's deadline). Put the ROM into
-`ap-data/Archipelago/` in the data folder (on Unraid `/mnt/user/appdata/archipelago-manager/ap-data/Archipelago/`) under
-exactly the name shown, or point the game's entry in `host.yaml` (Admin → Settings) at it. The warnings disappear as
-soon as the file is there. Some games also check that it is the right dump (region and revision); a wrong one fails
-with a message that says so.
+**Admin → Settings → Base ROMs** lists every ROM the installed games ask for. The ones generating needs come first; the
+ones only players need to patch are folded away below.
+
+- *Upload* checks the file against the checksums the game knows (its region and revision). This is the same check
+  Archipelago runs when you pick the file in its own settings. The file is then stored where the game looks for it,
+  under the name it expects; the name of the uploaded file does not matter.
+- A wrong dump, another region or revision, or a different game is refused and not kept.
+- *Replace* swaps a ROM, and the bin icon removes one.
+- When a ROM is missing, the generate page, the config and the sign-up round say so, and administrators get an
+  *Upload the ROM* button right there. Generating is refused right away instead of failing in the queue, or at a
+  round's deadline.
+
+Copying a ROM yourself works too: put it into `ap-data/Archipelago/` in the data folder (on Unraid
+`/mnt/user/appdata/archipelago-manager/ap-data/Archipelago/`) under exactly the name shown. Or point the game's entry in
+`host.yaml` (Admin → Settings) at it. The warnings disappear as soon as the file is there. The manager only writes
+inside the data folder, so if `host.yaml` points a game somewhere else, put the file there yourself.
+
+Whether generating needs a game's ROM is worked out by running the game's own check before generating with the file
+missing. That runs in memory only; `host.yaml` is not changed.
 
 ## Configuration
 
@@ -314,6 +327,8 @@ approve pull requests*. You can also run the workflow by hand (*Actions → Arch
 - The web UI speaks plain HTTP. Do not expose it to the internet without an HTTPS reverse proxy.
 - Spoiler logs, bundled YAMLs and other players' files are visible to admins only, unless an admin shares them.
 - The console is admin-only and runs real server commands. Remote admin (`!admin`) is off unless you set a password.
+- Only admins upload base ROMs. A ROM is checked against the game's own checksums before it is kept, and is written only
+  inside the data folder (or Archipelago's folder for user files), never where `host.yaml` might point elsewhere.
 - The text client speaks in a slot's name, so only the player who owns the slot can use it, admins included. The
   manager connects to the server inside the container, so the browser only talks to the web UI (through your HTTPS
   proxy, if you use one), never to the game's unencrypted port. Opening the connection is a state-changing request
@@ -376,5 +391,3 @@ DATA_DIR=../data AP_DIR=$PWD/../Archipelago AP_PYTHON=$PWD/../ap-venv/bin/python
 
 - One Archipelago version at a time; images are published for `linux/amd64`.
 - Game ports are served by Archipelago's own server and are not behind TLS.
-- Base ROMs are not uploaded through the web UI: copy them into the data folder (see
-  [Games that need a base ROM](#games-that-need-a-base-rom)).

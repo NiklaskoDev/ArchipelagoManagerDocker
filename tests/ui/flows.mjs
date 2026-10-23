@@ -421,6 +421,11 @@ log("the player disconnects");
 // ---------------------------------------------------------------------------------------------------------------------
 console.log("settings persist");
 await nav(admin, "#/admin/settings");
+const romCard = admin.locator(".card", { has: admin.locator("h2", { hasText: "Base ROMs" }) });
+await romCard.locator("tbody tr", { hasText: "A Link to the Past" }).waitFor();
+await romCard.locator("tbody tr", { hasText: "A Link to the Past" }).getByRole("button", { name: "Upload" }).click();
+await admin.locator(".modal", { hasText: "Base ROM for A Link to the Past" }).getByRole("button", { name: "Cancel" }).click();
+log("the base ROMs the games need are listed, with an upload for each");
 await admin.getByLabel("Anyone who can open this page may create an account").check();
 await admin.getByLabel("Users can generate games from their own configs").check();
 await admin.getByRole("button", { name: "Save settings" }).first().click();

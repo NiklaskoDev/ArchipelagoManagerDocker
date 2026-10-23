@@ -1,6 +1,6 @@
 // Reusable pieces shared by several views.
-import { h, clear, icon, copyText, openModal, toast, action, fmtBytes, fmtAgo, withNodes } from "./util.js";
-import { api, get, post, state, isAdmin } from "./api.js";
+import { h, clear, icon, copyText, openModal, toast, action, confirmDialog, fmtBytes, fmtAgo, withNodes } from "./util.js";
+import { api, get, post, del, state, isAdmin } from "./api.js";
 import { t, tServer, plural } from "./i18n.js";
 
 const STATE_LABELS = {
@@ -236,13 +236,100 @@ export function missingRomsPanel(...lists) {
   const items = [...new Map(lists.flat(Infinity).map((item) => [item.game, item])).values()];
   if (!items.length) return null;
   const admin = isAdmin();
-  return h("div", { class: "stack missing-panel" }, items.map((item) => banner("warn", icon("alert", 18), h("div", { class: "grow" },
-    withNodes(t("{game} needs its base ROM on the server before it can be generated."), { game: h("strong", {}, item.game) }),
-    admin
-      ? h("div", { class: "small" }, withNodes(romPlace(item), {
-        file: h("code", {}, item.file), folder: h("code", {}, item.folder === "." ? t("the data folder") : `${item.folder}/`) }),
-        " ", t("Use exactly this name; the game checks that the file is the right version."))
-      : h("div", { class: "small muted" }, t("An administrator has to add it to the server."))))));
+  return h("div", { class: "stack missing-panel" }, items.map((item) => {
+    const note = banner("warn", icon("alert", 18), h("div", { class: "grow" },
+      withNodes(t("{game} needs its base ROM on the server before it can be generated."), { game: h("strong", {}, item.game) }),
+      admin
+        ? h("div", { class: "small" }, t("Upload it here, or copy it to the server yourself:"), " ", withNodes(romPlace(item), {
+          file: h("code", {}, item.file), folder: h("code", {}, item.folder === "." ? t("the data folder") : `${item.folder}/`) }))
+        : h("div", { class: "small muted" }, t("An administrator has to add it to the server."))),
+      admin ? h("button", { class: "btn sm", type: "button", onclick: () => romUploadModal(item, () => note.remove()) }, icon("upload", 14), t("Upload the ROM")) : null);
+    return note;
+  }));
+}
+
+// Uploading a base ROM. `rom` is an entry of /api/roms (or of a missing ROM): {game, setting, file, checked}.
+// `onDone` receives the new list of ROMs.
+export function romUploadModal(rom, onDone) {
+  const input = h("input", { type: "file", hidden: true });
+  const drop = h("div", { class: "dropzone", tabIndex: 0 }, t("Drop the ROM here, or click to choose it"));
+  const setFile = (file) => {
+    if (!file) return;
+    const transfer = new DataTransfer();
+    transfer.items.add(file);
+    input.files = transfer.files;
+    drop.textContent = file.name;
+  };
+  drop.onclick = () => input.click();
+  drop.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); input.click(); } };
+  drop.ondragover = (e) => { e.preventDefault(); drop.classList.add("over"); };
+  drop.ondragleave = () => drop.classList.remove("over");
+  drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove("over"); setFile(e.dataTransfer.files[0]); };
+  input.onchange = () => setFile(input.files[0]);
+  const note = h("div", { class: "muted small" });
+  const submit = h("button", { class: "btn primary", type: "button" }, icon("upload", 14), t("Upload"));
+  submit.onclick = action(async () => {
+    if (!input.files[0]) throw new Error(t("Choose a file first"));
+    const form = new FormData();
+    form.append("game", rom.game);
+    form.append("setting", rom.setting || "");
+    form.append("file", input.files[0]);
+    note.textContent = rom.checked === false ? t("Uploading…") : t("Uploading and checking the file…");
+    try {
+      const list = await api("POST", "/api/roms", form);
+      modal.close();
+      toast(t("The ROM for {game} is in place", { game: rom.game }), "success");
+      onDone?.(list);
+    } finally {
+      note.textContent = "";
+    }
+  });
+  const modal = openModal({
+    title: t("Base ROM for {game}", { game: rom.game }),
+    body: h("div", { class: "stack" },
+      h("p", { class: "muted small", style: { margin: 0 } }, rom.checked === false
+        ? t("{game} does not say which file it accepts. The file is stored as {file}, where the game looks for it.", { game: rom.game, file: rom.file })
+        : t("The file is checked against the checksums {game} knows, so it has to be the region and revision its setup guide names. Its name does not matter: it is stored as {file}, where the game looks for it.", { game: rom.game, file: rom.file })),
+      drop, input, note),
+    actions: [h("button", { class: "btn", type: "button", onclick: () => modal.close() }, t("Cancel")), submit],
+  });
+}
+
+// Every base ROM the installed games ask for, for administrators: the ones generating needs first.
+export function romsCard() {
+  const host = h("div", { class: "stack" });
+  const status = (rom) => {
+    if (rom.exists && rom.valid === false) return badge(t("Wrong file"), "bad");
+    if (rom.exists) return badge(t("In place"), "ok");
+    return rom.needed ? badge(t("Missing"), "warn") : h("span", { class: "muted small" }, t("not on the server"));
+  };
+  const table = (list, draw) => h("div", { class: "table-wrap" }, h("table", { class: "table" },
+    h("thead", {}, h("tr", {}, [t("Game"), t("File"), t("Status"), ""].map((text) => h("th", {}, text)))),
+    h("tbody", {}, list.map((rom) => h("tr", {},
+      h("td", {}, h("span", { class: "slot-name" }, rom.game), rom.description ? h("div", { class: "muted small" }, rom.description) : null),
+      h("td", {}, h("span", { class: "mono small" }, rom.file), h("div", { class: "muted small" },
+        rom.in_data_dir ? (rom.folder === "." ? t("in the data folder") : t("in {folder}/ in the data folder", { folder: rom.folder })) : `${rom.folder}/`)),
+      h("td", {}, status(rom)),
+      h("td", { class: "actions" }, h("div", { class: "row", style: { justifyContent: "flex-end", flexWrap: "nowrap" } },
+        h("button", { class: "btn sm", type: "button", onclick: () => romUploadModal(rom, draw) }, icon("upload", 14), rom.exists ? t("Replace") : t("Upload")),
+        rom.exists ? h("button", { class: "btn sm ghost icon-only", type: "button", title: t("Remove"), "aria-label": t("Remove the ROM of {game}", { game: rom.game }),
+          onclick: action(async () => {
+            if (!(await confirmDialog(t("The ROM of {game} is deleted from the server.", { game: rom.game }), { title: t("Remove this ROM?"), danger: true, confirmText: t("Remove") }))) return;
+            draw(await del(`/api/roms?game=${encodeURIComponent(rom.game)}&setting=${encodeURIComponent(rom.setting || "")}`));
+          }) }, icon("trash", 14)) : null)))))));
+  const draw = (list) => {
+    const needed = list.filter((r) => r.needed), others = list.filter((r) => !r.needed);
+    clear(host).append(
+      needed.length ? table(needed, draw) : h("p", { class: "muted" }, t("None of the installed games needs a ROM to generate.")),
+      others.length ? h("details", {}, h("summary", { class: "muted" }, t("Only needed by players to patch ({n})", { n: others.length })),
+        h("p", { class: "muted small" }, t("Generating these games works without the ROM; each player patches with their own. Upload one only if the server should have it anyway.")),
+        table(others, draw)) : null);
+  };
+  const load = () => get("/api/roms").then(draw).catch((err) => clear(host).append(banner("error", icon("alert", 16), err.message)));
+  load();
+  return h("div", { class: "card stack" }, h("h2", {}, t("Base ROMs")),
+    h("p", { class: "muted small" }, t("Some games need their original ROM on the server to generate a multiworld. Upload it here: it is checked against the checksums the game knows and stored under the name the game looks for.")),
+    host);
 }
 
 // Where the base ROM goes, with {file} and {folder} still in the text
