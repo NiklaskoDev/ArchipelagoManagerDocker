@@ -10,7 +10,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import __version__, apbridge, db, notify, schedule, signups, sources, updates
+from . import __version__, apbridge, audit, db, notify, schedule, signups, sources, updates
 from .config import CONFIG
 from .generation import GENERATION
 from .rooms import ROOMS
@@ -49,6 +49,7 @@ async def init_archipelago() -> None:
 async def lifespan(_app: FastAPI):
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     db.init_db()
+    audit.prune()
     auth.bootstrap_admin()
     ROOMS.reset()
     notify.start()
@@ -177,6 +178,22 @@ async def guard(request: Request, call_next):
         response.headers["Cache-Control"] = "no-store"
     elif "cache-control" not in response.headers:
         response.headers["Cache-Control"] = "no-cache"
+    return response
+
+
+@app.middleware("http")
+async def audit_trail(request: Request, call_next):
+    """Records administrators' changes and game starts and stops (audit.py), once they succeeded."""
+    if not audit.watched(request):
+        return await call_next(request)
+    user = user_for_request(request)
+    before = audit.target(request.url.path) if user else None  # its name, before a delete takes it away
+    response = await call_next(request)
+    if user is not None and response.status_code < 400:
+        try:
+            audit.finish(request, user, before)
+        except Exception:  # noqa: BLE001 - the change happened; a missing line must not turn it into an error
+            log.exception("Writing the audit log failed")
     return response
 
 

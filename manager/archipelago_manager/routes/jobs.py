@@ -3,11 +3,11 @@ from __future__ import annotations
 
 import sqlite3
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from .. import db, settings as app_settings
+from .. import audit, db, settings as app_settings
 from ..generation import GENERATION, JobRequestError, create_job, job_dir, prepare_players
 from ..security import current_user, is_admin
 
@@ -61,7 +61,7 @@ class JobCreate(BaseModel):
 
 
 @router.post("/jobs")
-def start_job(body: JobCreate, user: sqlite3.Row = Depends(current_user)):
+def start_job(body: JobCreate, request: Request, user: sqlite3.Row = Depends(current_user)):
     admin = is_admin(user)
     if not admin and not app_settings.get_setting("users_can_generate"):
         raise HTTPException(403, "Only administrators can generate games on this server")
@@ -73,6 +73,7 @@ def start_job(body: JobCreate, user: sqlite3.Row = Depends(current_user)):
     except JobRequestError as e:
         return JSONResponse(status_code=e.status, content={"detail": e.message, "missing_games": e.missing_games})
     GENERATION.enqueue(job_id)
+    audit.note(request, target=("job", job_id, body.name or None), configs=len(body.config_ids))
     return job_json(_get_job(job_id, user))
 
 

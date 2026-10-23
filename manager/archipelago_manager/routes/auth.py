@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
-from .. import __version__, db, discord_auth, notify, settings as app_settings
+from .. import __version__, audit, db, discord_auth, notify, settings as app_settings
 from ..config import CONFIG
 from ..security import (SESSION_COOKIE, LoginThrottle, admin_user, check_password_policy, check_username, create_session,
                         current_user, destroy_session, destroy_user_sessions, hash_password, https_in_use,
@@ -300,11 +300,13 @@ class NewUser(BaseModel):
 
 
 @router.post("/users")
-def add_user(body: NewUser, _admin: sqlite3.Row = Depends(admin_user)) -> dict:
+def add_user(body: NewUser, request: Request, _admin: sqlite3.Row = Depends(admin_user)) -> dict:
     if body.role not in ("admin", "user"):
         raise HTTPException(400, "Role must be 'admin' or 'user'")
     user_id = create_user(body.username, body.password, body.role)
-    return user_json(db.query_one("SELECT * FROM users WHERE id = ?", (user_id,)))
+    row = db.query_one("SELECT * FROM users WHERE id = ?", (user_id,))
+    audit.note(request, target=("user", user_id, row["username"]), role=body.role)
+    return user_json(row)
 
 
 class UserPatch(BaseModel):
@@ -320,7 +322,7 @@ def _active_admin_count(excluding: int) -> int:
 
 
 @router.patch("/users/{user_id}")
-def patch_user(user_id: int, body: UserPatch, admin: sqlite3.Row = Depends(admin_user)) -> dict:
+def patch_user(user_id: int, body: UserPatch, request: Request, admin: sqlite3.Row = Depends(admin_user)) -> dict:
     target = db.query_one("SELECT * FROM users WHERE id = ?", (user_id,))
     if not target:
         raise HTTPException(404, "No such user")
@@ -342,6 +344,9 @@ def patch_user(user_id: int, body: UserPatch, admin: sqlite3.Row = Depends(admin
     if body.unlink_discord:
         db.execute("UPDATE users SET discord_id = NULL, discord_name = NULL WHERE id = ?", (user_id,))
         destroy_user_sessions(user_id)  # sessions that came from that Discord account end with it
+    audit.note(request, **{key: value for key, value in (
+        ("role", body.role), ("disabled", body.disabled), ("password", "changed" if body.password else None),
+        ("discord", "unlinked" if body.unlink_discord else None)) if value is not None})
     return user_json(db.query_one("SELECT * FROM users WHERE id = ?", (user_id,)))
 
 

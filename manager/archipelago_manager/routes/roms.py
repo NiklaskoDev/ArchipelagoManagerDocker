@@ -14,9 +14,9 @@ import shutil
 import sqlite3
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 
-from .. import apbridge, db
+from .. import apbridge, audit, db
 from ..config import CONFIG
 from ..security import admin_user
 
@@ -52,9 +52,10 @@ def list_roms(_admin: sqlite3.Row = Depends(admin_user)) -> list[dict]:
 
 
 @router.post("/roms")
-async def upload_rom(game: str = Form(...), setting: str = Form(""), file: UploadFile = File(...),
+async def upload_rom(request: Request, game: str = Form(...), setting: str = Form(""), file: UploadFile = File(...),
                      user: sqlite3.Row = Depends(admin_user)) -> list[dict]:
     rom = _rom(game, setting)
+    audit.note(request, game=game)
     target = _writable(rom)
     tmp = CONFIG.tmp_dir / f"rom-{db.now():.6f}-{user['id']}.bin"
     size = 0
@@ -85,8 +86,9 @@ async def upload_rom(game: str = Form(...), setting: str = Form(""), file: Uploa
 
 
 @router.delete("/roms")
-def remove_rom(game: str, setting: str = "", _admin: sqlite3.Row = Depends(admin_user)) -> list[dict]:
+def remove_rom(request: Request, game: str, setting: str = "", _admin: sqlite3.Row = Depends(admin_user)) -> list[dict]:
     rom = _rom(game, setting)
+    audit.note(request, game=game)
     target = _writable(rom)
     with contextlib.suppress(FileNotFoundError):
         os.unlink(target)

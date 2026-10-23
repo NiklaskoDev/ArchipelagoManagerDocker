@@ -344,3 +344,37 @@ def test_race_times_read_like_a_stopwatch():
     from archipelago_manager.notify import race_time
     assert [race_time(s) for s in (0, 9.9, 75, 3600, 3600 * 26 + 61, -5)] == ["0:00", "0:09", "1:15", "1:00:00",
                                                                               "26:01:01", "0:00"]
+
+
+def test_the_activity_feed_keeps_what_players_see(tmp_path, monkeypatch):
+    from archipelago_manager import activity
+    parse = activity.parse
+    assert parse("Notice (all): Old (Team #1) playing ChecksFinder has joined. Client(0.6.8), ['AP'].") == \
+        {"kind": "join", "player": "Old", "game": "ChecksFinder"}
+    assert parse("(Team #1) Old sent Key to the Castle to Bob (Room (2))") == \
+        {"kind": "item", "finder": "Old", "item": "Key to the Castle", "receiver": "Bob", "location": "Room (2)"}
+    assert parse("Notice (Team #1): [Hint]: Trax's Map Width is at Tile 10 in Quill's World at Cave. (found)") == \
+        {"kind": "hint", "receiver": "Trax", "item": "Map Width", "location": "Tile 10", "finder": "Quill",
+         "entrance": "Cave", "status": "found"}
+    assert parse("Notice (all): Ann: hello: there") == {"kind": "chat", "player": "Ann", "text": "hello: there"}
+    assert parse("Notice (all): [Server]: GO") == {"kind": "server", "text": "GO"}
+    assert parse("Notice (all): Al (Ann) (Team #1) has completed their goal.") == {"kind": "goal", "player": "Al (Ann)"}
+    # remote administration, cheats, answers to one client and the server's own lines are not shown
+    for line in ("Notice (all): Ann: !admin login ****", "Notice (all): Ann: !ADMIN /send Ann X",
+                 'Notice (all): Cheat console: sending "X" to Ann', "Notice (Player Ann in team 1): You have 3 points",
+                 "Set option password to ********", "> /send Ann X", "Hosting game at 0.0.0.0:38281"):
+        assert parse(line) is None, line
+
+    # kept with the game, and read back after a restart
+    game_id = 987654321
+    monkeypatch.setattr(activity, "_path", lambda _game_id: tmp_path / "activity.jsonl")  # not in the data folder
+    try:
+        activity.note(game_id, "Notice (all): Ann: first")
+        activity.note(game_id, "Set option password to ********")
+        activity.note(game_id, "Notice (all): Ann: second")
+        activity.forget(game_id)
+        kept = activity.entries(game_id)
+        assert [(e["seq"], e["text"]) for e in kept["entries"]] == [(1, "first"), (2, "second")] and kept["last"] == 2
+        assert [e["text"] for e in activity.entries(game_id, after=1)["entries"]] == ["second"]
+    finally:
+        activity.forget(game_id)

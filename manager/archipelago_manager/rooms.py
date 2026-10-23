@@ -12,7 +12,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from . import apbridge, backups, db, gamepaths, history, notify, settings as app_settings
+from . import activity, apbridge, backups, db, gamepaths, history, notify, settings as app_settings
 from .config import CONFIG
 from .history import STATUS_GOAL
 
@@ -237,7 +237,8 @@ class RoomManager:
             room.seq += 1
             room.lines.append((room.seq, line))
 
-    def _append_log(self, room: Room, line: str) -> None:
+    def _append_log(self, room: Room, line: str) -> str:
+        """Keeps a line of the server's output, with secrets masked, and returns it as kept."""
         line = mask_secrets(line)
         room.seq += 1
         room.lines.append((room.seq, line))
@@ -249,6 +250,7 @@ class RoomManager:
                 f.write(line + "\n")
         except OSError:
             pass
+        return line
 
     def log_since(self, game_id: int, after: int = 0, limit: int = 500) -> dict:
         room = self.room(game_id)
@@ -364,10 +366,10 @@ class RoomManager:
             raw = await proc.stdout.readline()
             if not raw:
                 return
-            line = raw.decode(errors="replace").rstrip("\r\n")
-            self._append_log(room, line)
+            line = self._append_log(room, raw.decode(errors="replace").rstrip("\r\n"))
             if goal := _GOAL_LINE.search(line):
                 history.note_goal(room.game_id, goal.group(1), time.time())
+            activity.note(room.game_id, line)
 
     async def _wait_ready(self, room: Room, proc: asyncio.subprocess.Process) -> None:
         deadline = time.monotonic() + READY_TIMEOUT
@@ -578,6 +580,7 @@ class RoomManager:
 
     def forget(self, game_id: int) -> None:
         self.rooms.pop(game_id, None)
+        activity.forget(game_id)
         for key in [k for k in self._reading if k[1] == game_id]:
             del self._reading[key]
         self._progress.pop(game_id, None)

@@ -14,10 +14,10 @@ import sqlite3
 import zipfile
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 
-from .. import apbridge, db, notify, settings as app_settings
+from .. import apbridge, audit, db, notify, settings as app_settings
 from ..config import CONFIG
 from ..security import admin_user, current_user, is_admin
 
@@ -224,7 +224,7 @@ async def add_to_library(path: Path, filename: str, *, uploaded_by: int | None, 
 
 
 @router.post("/apworlds")
-async def upload_apworld(file: UploadFile = File(...), user: sqlite3.Row = Depends(current_user)) -> dict:
+async def upload_apworld(request: Request, file: UploadFile = File(...), user: sqlite3.Row = Depends(current_user)) -> dict:
     if not is_admin(user) and not app_settings.get_setting("users_can_upload_apworlds"):
         raise HTTPException(403, "Only administrators can add games on this server")
     filename = Path(file.filename or "world.apworld").name
@@ -258,6 +258,7 @@ async def upload_apworld(file: UploadFile = File(...), user: sqlite3.Row = Depen
                               "before it can be used.", user=notify.md(user["username"]), game=notify.md(entry["game"]),
                               version=notify.md(version), file=notify.md(filename)),
                     url=notify.link("/worlds"), color="warning")
+    audit.note(request, target=("apworld", entry["id"], entry["game"]), status=entry["status"])
     return entry
 
 

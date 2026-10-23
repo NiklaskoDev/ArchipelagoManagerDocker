@@ -113,7 +113,12 @@ by your players:
      about a minute and a half after you leave the page, or right away with *Disconnect*.
    - Commands that start with `/` belong to Archipelago's own clients and are not available here; the tracker above
      shows what `/received` and `/missing` would.
-6. **Progress over time** on the game page charts every player's share of their locations checked, from the first
+6. **Activity** on the game page follows what happens in the multiworld, for every player in the game: chat, items
+   sent and found, hints, who joins and leaves, goals, releases and collects, and the countdown. It is read from the
+   server's log as it runs and kept with the game, so it is there for players who were not connected, with the time
+   of each line. Filter it by chat, items, hints, or joins and goals, or show only what concerns your own slots. The
+   server's own output, the console and remote administration (`!admin`) are not shown.
+7. **Progress over time** on the game page charts every player's share of their locations checked, from the first
    check on, with a dot where someone reached their goal. Point at the chart (or focus it and use the arrow keys) for
    everyone's numbers at that moment; pressing a name in the legend brings that player to the front. With more than
    eight players, your own slots are in color and the others gray. The table below lists the standings: who reached
@@ -236,6 +241,13 @@ itself. Both edit the same file, so switch whenever you like.
   the current progress as a copy, so a reset or a restore can always be undone.
 - **Users and settings:** *Admin* has users, registration, what players may do, defaults for new games, Archipelago's
   `host.yaml`, and system information.
+- **Log:** *Admin → Log* lists who changed what: every change an administrator makes (games, slots, users, settings,
+  custom games, generation, sign-up rounds, configs, ROMs) and every start, stop and restart of a game, players'
+  included, with what it was done to and what changed. Names are kept as they were, so a deleted game or user is
+  still named. Filter by person or area; the latest 50,000 entries are kept. Values of passwords and secrets are never
+  written: the log says *which* settings changed, and console commands are masked like the console.
+- **Backup of everything:** *Admin → Settings → Backup of everything → Download a backup* makes one zip of the whole
+  data folder (see [Data and backups](#data-and-backups)) and downloads it.
 
 ### Language
 
@@ -327,7 +339,11 @@ Everything lives in the `/config` volume:
 | `ap-data/Archipelago/` | Archipelago's `host.yaml`, logs and the custom worlds folder |
 
 Back up the whole folder. Game saves are written every minute and when a server stops, so stopping the container
-(`docker stop`, allow 30 s) saves everything. The copies under `games/<id>/backups/` protect against mistakes inside
+(`docker stop`, allow 30 s) saves everything. Without stopping anything, *Admin → Settings → Backup of everything*
+downloads the folder as one zip, with a consistent copy of the database (`tmp/` and the generated templates are left
+out). To restore it, stop the container, put the zip's contents into an empty data folder, and start the container.
+The zip holds the password hashes, the Discord client secret and the webhook addresses: keep it as safe as the folder
+itself. The copies under `games/<id>/backups/` protect against mistakes inside
 the manager (a reset, a restore); they live in the same folder, so they are no replacement for backing it up.
 
 ## Updating

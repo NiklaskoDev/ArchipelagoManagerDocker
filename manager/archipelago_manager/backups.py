@@ -9,11 +9,14 @@ from __future__ import annotations
 import calendar
 import os
 import re
+import sqlite3
 import time
+import zipfile
 import zlib
 from pathlib import Path
 
 from . import gamepaths
+from .config import CONFIG
 
 AUTO_INTERVAL = 30 * 60
 KEEP_AUTO = 48
@@ -121,3 +124,42 @@ def restore(game_id: int, name: str) -> None:
 
 def delete(game_id: int, name: str) -> None:
     path_of(game_id, name).unlink()
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+# the backup of everything: the whole data folder as one zip, for an administrator to download
+# ----------------------------------------------------------------------------------------------------------------------
+_NOT_KEPT = {"tmp", "templates"}  # passing files, and the templates, which are made again at startup
+_DATABASE = {"manager.sqlite3", "manager.sqlite3-wal", "manager.sqlite3-shm", "manager.sqlite3-journal"}
+
+
+def data_archive(target: Path) -> int:
+    """Writes the data folder into a zip at `target` and returns its size. The database goes in as a consistent copy
+    (SQLite's backup), not as the file that may be changing; a file that disappears while it is read is left out."""
+    data = CONFIG.data_dir
+    copy = target.with_suffix(".sqlite3")
+    source, dest = sqlite3.connect(CONFIG.db_path), sqlite3.connect(copy)
+    try:
+        source.backup(dest)
+    finally:
+        source.close()
+        dest.close()
+    try:
+        with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED, compresslevel=6, strict_timestamps=False) as zf:
+            zf.write(copy, "manager.sqlite3")
+            for root, dirs, files in os.walk(data):
+                here = Path(root).relative_to(data)
+                if here == Path("."):
+                    dirs[:] = [d for d in dirs if d not in _NOT_KEPT]
+                dirs.sort()
+                for name in sorted(files):
+                    path = Path(root) / name
+                    if (here == Path(".") and name in _DATABASE) or path.is_symlink():
+                        continue
+                    try:
+                        zf.write(path, (here / name).as_posix())
+                    except FileNotFoundError:
+                        pass
+    finally:
+        copy.unlink(missing_ok=True)
+    return target.stat().st_size

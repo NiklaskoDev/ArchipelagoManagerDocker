@@ -251,9 +251,9 @@ table.table { width: 100%; border-collapse: collapse; }
 
 /* text client: Archipelago's own colors on the console's dark background */
 .textclient { height: 380px; }
-.textclient .msg { padding: 1px 0; }
-.textclient .time { color: #5f7186; margin-right: .7em; font-size: .9em; }
-.textclient .note { color: #7f93a8; font-style: italic; }
+.textclient .msg, .feed .msg { padding: 1px 0; }
+.textclient .time, .feed .time { color: #5f7186; margin-right: .7em; font-size: .9em; }
+.textclient .note, .feed .note { color: #7f93a8; font-style: italic; }
 .tc-player { color: #fafad2; }
 .tc-me { color: #ee00ee; }
 .tc-location { color: #00ff7f; }
@@ -262,6 +262,9 @@ table.table { width: 100%; border-collapse: collapse; }
 .tc-item.useful { color: #6d8be8; }
 .tc-item.trap { color: #fa8072; }
 .tc-item.filler { color: #00eeee; }
+.feed { height: 320px; }
+.feed .tc-item { font-weight: 600; }
+.feed .goal { color: #7ee2a8; }
 
 /* auth --------------------------------------------------------------------------------------------------------- */
 .auth-wrap { min-height: 100vh; display: grid; place-items: center; padding: 16px; }

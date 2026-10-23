@@ -5,10 +5,10 @@ import asyncio
 import sqlite3
 import time
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
-from .. import db, notify, settings as app_settings, sources
+from .. import audit, db, notify, settings as app_settings, sources
 from ..security import admin_user, current_user, is_admin
 from . import apworlds as library
 
@@ -72,7 +72,7 @@ class NewSource(BaseModel):
 
 
 @router.post("/apworld-sources")
-async def add_source(body: NewSource, user: sqlite3.Row = Depends(current_user)) -> dict:
+async def add_source(body: NewSource, request: Request, user: sqlite3.Row = Depends(current_user)) -> dict:
     _can_submit(user)
     admin = is_admin(user)
     if not admin and db.query_one("SELECT COUNT(*) AS n FROM apworld_sources WHERE status = 'pending' AND added_by = ?",
@@ -107,6 +107,7 @@ async def add_source(body: NewSource, user: sqlite3.Row = Depends(current_user))
                               user=notify.md(user["username"]), repo=notify.md(release["repo"]), path=release["repo"],
                               tag=notify.md(release["tag"]), file=notify.md(asset["name"])) + note,
                     url=notify.link("/worlds"), color="warning")
+    audit.note(request, target=("source", source_id, release["repo"]))
     return source_json(_row(source_id))
 
 

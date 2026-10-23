@@ -337,9 +337,10 @@ await expectText(user, "Each player can claim one slot");
 if (await user.getByRole("button", { name: "This is mine" }).count()) problems.push("a second slot is still offered for claiming");
 log("with one slot each, no further slot is offered");
 await expectText(user, "Your tracker");
-await user.getByRole("tab", { name: /Locations/ }).click();
+const trackerCard = user.locator(".section", { has: user.locator("h2", { hasText: "Your tracker" }) });
+await trackerCard.getByRole("tab", { name: /Locations/ }).click();
 await expectText(user, "Still to check");
-await user.getByRole("tab", { name: /Hints/ }).click();
+await trackerCard.getByRole("tab", { name: /Hints/ }).click();
 await expectText(user, "No hints yet");
 log("the player's tracker shows their locations and hints");
 await expectText(user, "hint points");
@@ -458,6 +459,12 @@ log("the text client opens again after a reload, with the messages so far");
 await user.getByRole("button", { name: "Disconnect" }).click();
 await user.getByRole("button", { name: "Connect", exact: true }).waitFor();
 log("the player disconnects");
+const feedBox = user.locator(".feed");
+await feedBox.locator(".msg", { hasText: "hello from the browser" }).first().waitFor({ timeout: 15000 });
+await user.locator(".section", { has: user.locator("h2", { hasText: "Activity" }) }).getByRole("tab", { name: "Chat" }).click();
+await feedBox.locator(".msg", { hasText: "hello from the browser" }).first().waitFor();
+await shot(user, "activity");
+log("the activity feed shows what happened in the game, chat filtered out on its own");
 
 // ---------------------------------------------------------------------------------------------------------------------
 console.log("settings persist");
@@ -484,6 +491,16 @@ await admin.locator("details", { hasText: "host.yaml" }).first().locator("summar
 await admin.locator("textarea").first().waitFor();
 await admin.waitForFunction(() => document.querySelector("details[open] textarea")?.value.includes("server_options"));
 log("host.yaml editor loads Archipelago's file");
+await nav(admin, "#/admin/log");
+await admin.locator("tbody tr", { hasText: "Changed the settings" }).first().waitFor();
+await admin.locator("tbody tr", { hasText: "Started the server" }).first().waitFor();
+await shot(admin, "audit-log");
+log("the log lists who changed what, and who started servers");
+await nav(admin, "#/admin/settings");
+const [backupFile] = await Promise.all([admin.waitForEvent("download", { timeout: 60000 }),
+  admin.getByRole("button", { name: "Download a backup" }).click()]);
+if (!backupFile.suggestedFilename().endsWith(".zip")) problems.push(`backup download is ${backupFile.suggestedFilename()}`);
+log("a backup of everything downloads as a zip");
 
 } catch (error) {
   problems.push(`aborted: ${error.message.split("\n")[0]}`);
