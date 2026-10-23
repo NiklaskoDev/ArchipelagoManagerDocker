@@ -8,6 +8,7 @@ MESSAGES = {
     "Test message": "Testnachricht",
     "Notifications from this Archipelago Manager arrive in this channel.":
         "Benachrichtigungen von diesem Archipelago Manager kommen in diesem Kanal an.",
+    "Messages about {game} arrive in this channel.": "Nachrichten zu {game} kommen in diesem Kanal an.",
 
     # game servers
     "{game} is online": "{game} ist online",

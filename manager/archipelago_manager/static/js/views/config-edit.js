@@ -1,6 +1,6 @@
 import { h, clear, icon, toast, action, confirmDialog, fmtAgo } from "../util.js";
-import { get, post, put, del, isAdmin, state } from "../api.js";
-import { pageHeader, chips, banner, field, loading, missingGamesPanel, missingRomsPanel, badge } from "../components.js";
+import { get, post, put, del, isAdmin } from "../api.js";
+import { pageHeader, chips, banner, field, loading, missingGamesPanel, missingRomsPanel, badge, defaultPlayerName } from "../components.js";
 import { t, tServer } from "../i18n.js";
 import { loadSchema, optionsForm } from "../options-form.js";
 
@@ -224,10 +224,6 @@ export default async function render({ root, params, query, cleanup, setDirtyChe
   else setMode("yaml");
 }
 
-function defaultPlayerName() {
-  return state.user.username.replace(/[^A-Za-z0-9_.-]/g, "").slice(0, 16) || "Player";
-}
-
 async function renderPicker(root) {
   const templates = await get("/api/templates");
   const search = h("input", { class: "input", placeholder: t("Search games…"), type: "search", "aria-label": t("Search games") });
@@ -244,6 +240,7 @@ async function renderPicker(root) {
   root.append(h("div", { class: "muted small" }, h("a", { href: "#/configs" }, t("← All configs"))),
     pageHeader(t("New config"), t("Pick the game you want to play. You then choose its options in a form, custom games included.")),
     h("div", { class: "stack" }, search, list,
-      h("div", {}, h("a", { class: "btn", href: "#/configs/new?game=__blank__" }, t("Start with an empty file")))));
+      h("div", { class: "row" }, h("a", { class: "btn", href: "#/configs/new?game=__blank__" }, t("Start with an empty file")),
+        h("a", { class: "btn", href: "#/configs?shared=1" }, icon("users", 14), t("Copy a config another player shares")))));
   search.focus();
 }

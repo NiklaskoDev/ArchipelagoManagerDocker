@@ -1,7 +1,7 @@
 import { h, clear, icon, toast, action, confirmDialog, fmtBytes, fmtAgo, fmtDate, shortName } from "../util.js";
 import { api, get, post, patch, del, isAdmin, state } from "../api.js";
 import { stateBadge, badge, chips, progressBar, copyField, copyButton, controlButtons, banner, field, checkbox, select,
-         missingGamesPanel, isActive, serverOptionsForm } from "../components.js";
+         missingGamesPanel, isActive, serverOptionsForm, deliveryStatus } from "../components.js";
 import { t, tServer, plural } from "../i18n.js";
 import { textClientSection } from "../textclient.js";
 import { progressSection, playedText } from "../progresschart.js";
@@ -351,12 +351,24 @@ export default async function render({ root, params, cleanup, isCurrent, query }
     const shareSpoiler = checkbox(t("Share the spoiler log with the players when everyone has finished"), game.share_spoiler_when_done,
       t("When every player has reached their goal (or you move the game to the archive), the spoiler log becomes visible to every player in the game."));
     const rules = serverOptionsForm(opts);
+    // the game's own Discord channel
+    const webhook = h("input", { class: "input", type: "url", value: game.discord_webhook_url ?? "", autocomplete: "off",
+      placeholder: t("Empty: the main channel") });
+    const webhookStatus = h("div");
+    const drawWebhookStatus = (status) => clear(webhookStatus).append(deliveryStatus(status) || "");
+    drawWebhookStatus(game.notify_status);
+    const testWebhook = h("button", { class: "btn", type: "button" }, icon("bell", 14), t("Send a test message"));
+    testWebhook.onclick = action(async () => {
+      const result = await post(`/api/games/${id}/test-notification`, { discord_webhook_url: webhook.value.trim() || null });
+      drawWebhookStatus(result.notify_status);
+      toast(t("Test message sent. Check your Discord channel."), "success");
+    });
     const save = h("button", { class: "btn primary", type: "button" }, t("Save settings"));
     save.onclick = action(async () => {
       const options = rules.read();
       const body = { name: name.value, password: password.value, server_password: adminPassword.value, options,
         visibility: visibility.value, claimable: claimable.input.checked, single_claim: singleClaim.input.checked,
-        notes: notes.value, share_spoiler_when_done: shareSpoiler.input.checked };
+        notes: notes.value, share_spoiler_when_done: shareSpoiler.input.checked, discord_webhook_url: webhook.value.trim() };
       if (port.value) body.port = Number(port.value);
       const result = await patch(`/api/games/${id}`, body);
       game = result;
@@ -371,6 +383,10 @@ export default async function render({ root, params, cleanup, isCurrent, query }
           field(t("Remote admin password"), adminPassword, t("Lets clients use !admin; leave empty to disable")),
           field(t("Who can see this game"), visibility)),
         claimable, singleClaim, shareSpoiler, field(t("Notes"), notes),
+        h("h3", {}, t("Discord")),
+        field(t("Webhook for this game"), webhook,
+          t("Messages about this game (online, crashes, goals, hinted items found) go to this channel instead of the main one. Which kinds are sent is set under Admin → Settings.")),
+        webhookStatus, h("div", { class: "row" }, testWebhook),
         h("h3", {}, t("Server rules")), rules.node,
         h("div", { class: "row" }, save)));
   }

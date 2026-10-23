@@ -560,7 +560,7 @@ class RoomManager:
         fields.append((notify.tr("Players"), player_list(room.game_id)))
         notify.emit("game_online", notify.tr("{game} is online", game=game["name"]),
                     url=notify.link(f"/games/{room.game_id}"), fields=fields, color="success",
-                    ping="game_online", ping_users=slot_owners(room.game_id))
+                    ping="game_online", ping_users=slot_owners(room.game_id), game_id=room.game_id)
 
     def _announce_crash(self, room: Room, next_step: str) -> None:
         game = db.query_one("SELECT name FROM games WHERE id = ?", (room.game_id,))
@@ -568,7 +568,7 @@ class RoomManager:
             notify.emit("game_crashed", notify.tr("{game} crashed", game=game["name"]),
                         notify.tr("The server stopped unexpectedly (exit code {code}).\n```\n{error}\n```\n{next_step}",
                                   code=room.exit_code, error=room.error, next_step=next_step),
-                        url=notify.link(f"/games/{room.game_id}"), color="error")
+                        url=notify.link(f"/games/{room.game_id}"), color="error", game_id=room.game_id)
 
     async def watch_progress(self) -> None:
         """Announces goals and found hinted items. The server writes both to its save, at the latest a minute later."""
@@ -634,7 +634,7 @@ class RoomManager:
         # location was checked since the last look; hints given for locations checked before are not news.
         found = sorted((h for h in state["hints"] if h[2] in state["checks"].get(h[1], ())
                         and h[2] not in checked_before.get(h[1], ())), key=lambda h: (h[1], h[2]))
-        if not found or not notify.wanted("hint_found"):
+        if not found or not notify.wanted("hint_found", game_id):
             return
         request = {"items": [[h[0], h[3]] for h in found], "locations": [[h[1], h[2]] for h in found]}
         try:
@@ -662,7 +662,7 @@ class RoomManager:
         if len(found) == 1:
             notify.emit("hint_found", notify.tr("Hinted item found: {item}", item=item_names[0]),
                         notify.tr("{line} in {game}.", line=lines[0], game=notify.md(game_name)), url=url,
-                        color="success", ping="hint_found", ping_users=receivers)
+                        color="success", ping="hint_found", ping_users=receivers, game_id=game_id)
             return
         # A !release or !collect can find many hinted items at once: one message instead of a flood
         text, shown = "", 0
@@ -673,7 +673,8 @@ class RoomManager:
         if shown < len(lines):
             text += notify.tr("…and {n} more", n=len(lines) - shown)
         notify.emit("hint_found", notify.tr("{n} hinted items found in {game}", n=len(found), game=game_name),
-                    text.strip(), url=url, color="success", ping="hint_found", ping_users=receivers)
+                    text.strip(), url=url, color="success", ping="hint_found", ping_users=receivers,
+                    game_id=game_id)
 
     def _announce_goals(self, game_id: int, game_name: str, done: set[int], known: set[int]) -> None:
         new = done - known
@@ -694,7 +695,7 @@ class RoomManager:
                                   name=notify.md(game_name)),
                         url=url, fields=[(notify.tr("Done"), notify.tr("{finished} of {total} players",
                                                                         finished=finished, total=len(players)), True)],
-                        color="success")
+                        color="success", game_id=game_id)
         if players.keys() <= done and not players.keys() <= known:
             game = db.query_one("SELECT play_started_at, finished_at FROM games WHERE id = ?", (game_id,))
             fields = None
@@ -702,6 +703,6 @@ class RoomManager:
                 fields = [(notify.tr("Time"), notify.duration(game["finished_at"] - game["play_started_at"]), True)]
             notify.emit("player_goal", notify.tr("Everyone finished {game}!", game=game_name),
                         notify.tr("All {n} players reached their goal. Congratulations!", n=len(players)), url=url,
-                        fields=fields, color="success")
+                        fields=fields, color="success", game_id=game_id)
 
 ROOMS = RoomManager()

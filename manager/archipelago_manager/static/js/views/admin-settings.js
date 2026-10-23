@@ -1,6 +1,6 @@
-import { h, clear, icon, toast, action, fmtBytes, fmtAgo } from "../util.js";
+import { h, clear, icon, toast, action, fmtBytes } from "../util.js";
 import { get, patch, put, post, refreshStatus } from "../api.js";
-import { pageHeader, field, checkbox, banner, adminTabs, serverOptionsForm, updateBanner, updateStatus, copyField, select, romsCard } from "../components.js";
+import { pageHeader, field, checkbox, banner, adminTabs, serverOptionsForm, updateBanner, updateStatus, copyField, select, romsCard, deliveryStatus } from "../components.js";
 import { t, tServer, plural } from "../i18n.js";
 
 const CALLBACK_PATH = "/api/auth/discord/callback";
@@ -132,15 +132,7 @@ function notificationsCard(settings) {
   const mentions = checkbox(t("Let players be mentioned"), settings.notify_mentions,
     t("Players who linked their Discord account choose in their user menu what they want to be mentioned for, such as their game going online. Nobody else is ever mentioned, not @everyone and no role."));
   const statusHost = h("div");
-  const drawStatus = (status) => {
-    clear(statusHost);
-    if (status.last_error && (!status.last_ok_at || status.last_error_at > status.last_ok_at)) {
-      statusHost.append(banner("error", icon("alert", 16), h("div", { class: "grow" },
-        h("strong", {}, t("A message could not be sent ({ago}):", { ago: fmtAgo(status.last_error_at) })), " ", tServer(status.last_error))));
-    } else if (status.last_ok_at) {
-      statusHost.append(h("p", { class: "muted small" }, t("Last message delivered {ago}.", { ago: fmtAgo(status.last_ok_at) })));
-    }
-  };
+  const drawStatus = (status) => clear(statusHost).append(deliveryStatus(status) || "");
   drawStatus(settings.notify_status);
   const test = h("button", { class: "btn", type: "button" }, icon("bell", 14), t("Send a test message"));
   test.onclick = action(async () => {

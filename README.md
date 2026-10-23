@@ -13,7 +13,8 @@ players log in to keep their YAML configs, see their games and download their pa
   into the library of the user who owns the slot.
 - **Stores configs per user.** Everyone has a private library of player YAMLs: upload one, or create it in a form with
   every option of the game (custom games included), like the player options page on archipelago.gg. The YAML can be
-  edited directly too, or started from the documented template.
+  edited directly too, or started from the documented template. Players can share a config, and the others copy it
+  into their own library with their own player name.
 - **Generates games.** Pick configs, choose spoiler level, seed, race mode, plando and an optional `meta.yaml`, and
   generate with the real `Generate.py`. The result is imported as a game, with slots linked to the configs' owners, and
   can be hosted straight away. Jobs queue, show a live log and can be cancelled. *Generate again* repeats a game or a
@@ -23,7 +24,7 @@ players log in to keep their YAML configs, see their games and download their pa
   game is generated from all entries and everyone is added to it.
 - **Posts to Discord.** A webhook message when a game goes online or crashes, a player reaches their goal, a hinted
   item is found, a game is generated, sign-ups open or close, a custom game waits for approval, or a new Archipelago
-  version is out.
+  version is out. A game can post to a channel of its own, and players can ask to be mentioned.
 - **Keeps custom games.** `.apworld` files are stored. If a config or a seed needs a game the server does not have, the
   UI says so and offers to add it. Regular users can *submit* an APWorld; an admin approves it.
 - **One UI for admins and players.** Players see only their games, can start and stop them (if allowed) and download
@@ -111,6 +112,13 @@ by your players:
    eight players, your own slots are in color and the others gray. The table below lists the standings: who reached
    their goal first, and after how long, then who got furthest.
 
+**Sharing configs:** *Share* next to one of your configs offers it to everyone on the server; *Stop sharing* takes it
+back. Configs others share are listed under **Shared by players** on **My configs** (also reachable from *New config*):
+look at one, download it, or *Copy* it into your own configs. The copy asks for your player name and puts it into the
+file in place of the original one (everything else, comments included, stays as it is); a file with several players is
+copied as it is, so change the names in the editor. The copy is yours: neither the copy nor the original changes when
+the other does. Administrators can stop sharing any config.
+
 **Sign-ups:** open rounds are on the dashboard and under **Sign-ups**. *Join* → pick one of your configs or upload a
 YAML. It is checked against the round's rules right away (allowed games, unique player names, how many configs each
 player may enter). Your entry is a copy: if you edit the config afterwards, the round page offers to use the new version.
@@ -169,6 +177,11 @@ itself. Both edit the same file, so switch whenever you like.
   a game they play in is online, someone found an item hinted for them, sign-ups open, or sign-ups close soon and they
   have not entered yet. Nobody is mentioned unless they asked for it, and only in messages you have switched on;
   untick *Let players be mentioned* to keep every message silent.
+
+  A game can post to a channel of its own: paste another webhook under *Settings → Discord* on the game page (and
+  *Send a test message*). Its messages (online, crashes, goals, found hinted items) then go there instead of the main
+  channel, which is not needed for them; the kinds of messages are still the ones ticked here. A webhook that fails is
+  reported on the game page.
 - **Sign in with Discord:** *Admin → Settings → Sign in with Discord*.
   1. Set *Address of this web UI* under *General* to the address players open, e.g. `https://archipelago.example.com`.
   2. In the [Discord Developer Portal](https://discord.com/developers/applications): *New Application*, then under
@@ -341,7 +354,10 @@ approve pull requests*. You can also run the workflow by hand (*Actions → Arch
   like any other, so another website cannot open it in a player's name.
 - Discord messages never contain passwords and mention nobody but the players who asked for it, by their Discord
   account ID (`@everyone`, roles, and mentions in a player name stay plain text).
-  Treat the webhook address like a password: anyone who has it can post to the channel.
+  Treat the webhook address like a password: anyone who has it can post to the channel. Only admins see and set the
+  webhooks, the games' own included.
+- Configs are private to their owner (and admins) until the owner shares one. Others can then read and copy it, never
+  change or delete it; a disabled user's configs are no longer offered.
 - Signing in with Discord uses OAuth2 with a single-use `state` bound to the browser that started it, a fixed redirect
   address, and Discord's account ID; Discord's tokens are revoked right after use. Disabled users cannot sign in this
   way either.

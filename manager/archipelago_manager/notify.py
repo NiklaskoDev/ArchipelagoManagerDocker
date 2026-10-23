@@ -52,6 +52,8 @@ class _State:
         self.last_ok_at: float | None = None
         self.last_error: str | None = None
         self.last_error_at: float | None = None
+        # how messages to games' own webhooks went, per game (the fields above are about the main one)
+        self.games: dict[int, dict] = {}
 
 
 STATE = _State()
@@ -179,29 +181,45 @@ def _post(url: str, payload: dict) -> None:
         raise DeliveryError(f"Could not reach the webhook: {getattr(e, 'reason', e)}") from None
 
 
-async def _deliver(url: str, payload: dict) -> None:
+def _note(game_id: int | None, error: str | None = None) -> None:
+    """Remembers how the last message to the main webhook (game_id None) or to a game's own one went."""
+    now = time.time()
+    if game_id is None:
+        if error:
+            STATE.last_error, STATE.last_error_at = error, now
+        else:
+            STATE.last_ok_at = now
+        return
+    entry = STATE.games.setdefault(game_id, {"last_ok_at": None, "last_error": None, "last_error_at": None})
+    if error:
+        entry["last_error"], entry["last_error_at"] = error, now
+    else:
+        entry["last_ok_at"] = now
+
+
+async def _deliver(url: str, payload: dict, game_id: int | None) -> None:
     for attempt in range(1, MAX_ATTEMPTS + 1):
         try:
             await asyncio.to_thread(_post, url, payload)
         except DeliveryError as e:
             if e.permanent or attempt == MAX_ATTEMPTS:
-                STATE.last_error, STATE.last_error_at = str(e), time.time()
-                log.warning("Notification not sent: %s", e)
+                _note(game_id, str(e))
+                log.warning("Notification not sent%s: %s", f" to the webhook of game {game_id}" if game_id else "", e)
                 return
             await asyncio.sleep(min(e.retry_after or 2 ** attempt, 60))
             continue
         STATE.sent += 1
-        STATE.last_ok_at = time.time()
+        _note(game_id)
         return
 
 
 async def _work() -> None:
     assert STATE.queue is not None
     while True:
-        url, payload = await STATE.queue.get()
+        url, payload, game_id = await STATE.queue.get()
         STATE.sending = True
         try:
-            await _deliver(url, payload)
+            await _deliver(url, payload, game_id)
         except Exception:  # noqa: BLE001 - a broken message must not stop the ones after it
             log.exception("Sending a notification failed")
         finally:
@@ -221,36 +239,66 @@ def stop() -> None:
     STATE.loop = STATE.queue = STATE.worker = None
 
 
-def wanted(event: str) -> bool:
+def game_webhook(game_id: int | None) -> str | None:
+    """The game's own webhook, if an admin gave it one."""
+    if game_id is None:
+        return None
+    row = db.query_one("SELECT discord_webhook_url FROM games WHERE id = ?", (game_id,))
+    return row["discord_webhook_url"] if row and row["discord_webhook_url"] else None
+
+
+def wanted(event: str, game_id: int | None = None) -> bool:
     """Whether a message of this kind would be sent, to skip work for messages nobody gets."""
     cfg = app_settings.get_settings()
-    return bool(STATE.queue is not None and cfg["discord_webhook_url"] and event in cfg["notify_events"])
+    return bool(STATE.queue is not None and event in cfg["notify_events"]
+                and (game_webhook(game_id) or cfg["discord_webhook_url"]))
 
 
 def emit(event: str, title: str, description: str = "", *, url: str | None = None,
          fields: list[tuple] | None = None, color: str = "info", ping: str | tuple[str, ...] | None = None,
-         ping_users: Collection[int] | None = None) -> bool:
+         ping_users: Collection[int] | None = None, game_id: int | None = None) -> bool:
     """Queues a message if a webhook is set and the admin wants this kind of event. Safe to call from any thread.
 
     `ping` mentions the users who asked to be mentioned for that kind of message (PING_KINDS), of `ping_users` if given.
+    A message about a game (`game_id`) goes to the game's own webhook instead of the main one, if it has one.
     Returns whether the message was queued.
     """
-    if STATE.loop is None or not wanted(event):
+    if STATE.loop is None or not wanted(event, game_id):
         return False
-    webhook = app_settings.get_setting("discord_webhook_url")
+    own = game_webhook(game_id)
+    webhook = own or app_settings.get_setting("discord_webhook_url")
     payload = build_payload(title, description, url=url, fields=fields, color=color,
                             mentions=mentions(ping, ping_users) if ping else None)
-    STATE.loop.call_soon_threadsafe(STATE.queue.put_nowait, (webhook, payload))
+    STATE.loop.call_soon_threadsafe(STATE.queue.put_nowait, (webhook, payload, game_id if own else None))
     return True
 
 
-async def send_test(webhook: str) -> None:
-    """Sends one message right away. Raises DeliveryError with a reason fit for the admin."""
-    payload = build_payload(tr("Test message"),
-                            tr("Notifications from this Archipelago Manager arrive in this channel."),
-                            url=link("/admin/settings"), color="success")
+async def send_test(webhook: str, *, game_id: int | None = None, game_name: str | None = None) -> None:
+    """Sends one message right away, to the main webhook or to a game's own. Raises DeliveryError with a reason fit for
+    the admin."""
+    if game_id is None:
+        payload = build_payload(tr("Test message"),
+                                tr("Notifications from this Archipelago Manager arrive in this channel."),
+                                url=link("/admin/settings"), color="success")
+    else:
+        payload = build_payload(tr("Test message"), tr("Messages about {game} arrive in this channel.",
+                                                       game=md(game_name)),
+                                url=link(f"/games/{game_id}"), color="success")
     await asyncio.to_thread(_post, webhook, payload)
-    STATE.last_ok_at, STATE.last_error, STATE.last_error_at = time.time(), None, None
+    if game_id is None:
+        STATE.last_ok_at, STATE.last_error, STATE.last_error_at = time.time(), None, None
+    else:
+        STATE.games[game_id] = {"last_ok_at": time.time(), "last_error": None, "last_error_at": None}
+
+
+def game_status(game_id: int) -> dict | None:
+    """How the last message to the game's own webhook went, if one was sent since the manager started."""
+    return STATE.games.get(game_id)
+
+
+def forget_game(game_id: int) -> None:
+    """After the game's webhook changed, or the game was deleted."""
+    STATE.games.pop(game_id, None)
 
 
 def ping_kinds_offered(values: dict[str, Any] | None = None) -> list[str]:

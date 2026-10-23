@@ -12,7 +12,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPExcepti
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from .. import apbridge, backups, db, gamepaths, gamestore, history, settings as app_settings, textclient
+from .. import apbridge, backups, db, gamepaths, gamestore, history, notify, settings as app_settings, textclient
 from ..config import CONFIG
 from ..rooms import ROOMS, STATUS_GOAL, RoomError, valid_password
 from ..security import admin_user, current_user, is_admin
@@ -206,6 +206,9 @@ async def _detail(game_id: int, user: sqlite3.Row, request: Request) -> dict:
     if admin:
         detail["server_password"] = row["server_password"]
         detail["has_save"] = gamepaths.save_path(game_id).is_file()
+        # like a password: whoever has it can post to the channel
+        detail["discord_webhook_url"] = row["discord_webhook_url"] or ""
+        detail["notify_status"] = notify.game_status(game_id)
     return detail
 
 
@@ -234,6 +237,7 @@ class GamePatch(BaseModel):
     notes: str | None = Field(default=None, max_length=2000)
     share_spoiler_when_done: bool | None = None
     finished: bool | None = None
+    discord_webhook_url: str | None = Field(default=None, max_length=512)
 
 
 @router.patch("/games/{game_id}")
@@ -283,6 +287,13 @@ async def patch_game(game_id: int, body: GamePatch, request: Request, user: sqli
         changes["notes"] = (body.notes or "").strip() or None
     if "share_spoiler_when_done" in given and body.share_spoiler_when_done is not None:
         changes["share_spoiler_when_done"] = int(body.share_spoiler_when_done)
+    if "discord_webhook_url" in given and body.discord_webhook_url is not None:
+        webhook = body.discord_webhook_url.strip()
+        if webhook and not app_settings.valid_url(webhook):
+            raise HTTPException(400, "The webhook address must start with http:// or https://")
+        if (webhook or None) != row["discord_webhook_url"]:
+            changes["discord_webhook_url"] = webhook or None
+            notify.forget_game(game_id)
 
     if changes:
         assignments = ", ".join(f"{k} = ?" for k in changes)
@@ -297,7 +308,28 @@ async def patch_game(game_id: int, body: GamePatch, request: Request, user: sqli
 async def remove_game(game_id: int, user: sqlite3.Row = Depends(admin_user)) -> dict:
     get_game(game_id, user)
     await gamestore.delete_game(game_id)
+    notify.forget_game(game_id)
     return {"ok": True}
+
+
+class NotificationTest(BaseModel):
+    # The address from the form, so it can be tried before saving. Without one, the saved address is used.
+    discord_webhook_url: str | None = Field(default=None, max_length=512)
+
+
+@router.post("/games/{game_id}/test-notification")
+async def test_game_notification(game_id: int, body: NotificationTest, user: sqlite3.Row = Depends(admin_user)) -> dict:
+    row = get_game(game_id, user)
+    url = (body.discord_webhook_url or "").strip() or row["discord_webhook_url"]
+    if not url:
+        raise HTTPException(400, "Enter a Discord webhook address first")
+    if not app_settings.valid_url(url):
+        raise HTTPException(400, "The webhook address must start with http:// or https://")
+    try:
+        await notify.send_test(url, game_id=game_id, game_name=row["name"])
+    except notify.DeliveryError as e:
+        raise HTTPException(400, str(e)) from None
+    return {"ok": True, "notify_status": notify.game_status(game_id)}
 
 
 # ----------------------------------------------------------------------------------------------------------------------

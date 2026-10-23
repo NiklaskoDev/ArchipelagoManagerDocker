@@ -85,6 +85,21 @@ export function checkbox(label, checked, hint) {
   return el;
 }
 
+// How the last Discord message to a webhook went: an error after the last success, or when one was last delivered
+export function deliveryStatus(status) {
+  if (!status) return null;
+  if (status.last_error && (!status.last_ok_at || status.last_error_at > status.last_ok_at)) {
+    return banner("error", icon("alert", 16), h("div", { class: "grow" },
+      h("strong", {}, t("A message could not be sent ({ago}):", { ago: fmtAgo(status.last_error_at) })), " ", tServer(status.last_error)));
+  }
+  return status.last_ok_at ? h("p", { class: "muted small" }, t("Last message delivered {ago}.", { ago: fmtAgo(status.last_ok_at) })) : null;
+}
+
+// A player name to start a new config with: the user's name, as far as Archipelago allows it
+export function defaultPlayerName() {
+  return state.user.username.replace(/[^A-Za-z0-9_.-]/g, "").slice(0, 16) || "Player";
+}
+
 export function select(options, value) {
   const el = h("select", { class: "input" }, options.map(([val, text]) =>
     h("option", { value: String(val), selected: String(val) === String(value) }, text)));

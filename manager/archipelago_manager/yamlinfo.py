@@ -1,6 +1,7 @@
 """Reads player yaml files the way Archipelago's generator does, to learn which games and slot names they define."""
 from __future__ import annotations
 
+import json
 import os
 import re
 from dataclasses import dataclass, field
@@ -156,6 +157,36 @@ def analyze(text: str, fallback_name: str) -> YamlInfo:
         raise YamlError("The file contains no player settings")
     info.warnings.extend(info.problems)
     return info
+
+
+_NAME_LINE = re.compile(r"^name[ \t]*:.*$", re.MULTILINE)  # only at the start of a line: a top-level key
+_DOCUMENT_START = re.compile(r"\A(?:[ \t]*(?:#.*)?\n)*---[^\n]*\n")
+
+
+def with_player_name(text: str, name: str) -> str:
+    """The yaml of one player with the player name set to `name`. The rest of the file stays as it is, comments
+    included. Raises YamlError if the name is not usable or cannot be set in this file."""
+    name = name.strip()
+    if static_name(name) != name or not name.isprintable():
+        raise YamlError(f"A player name has 1 to {MAX_NAME_LENGTH} characters and no placeholders")
+    if len([doc for doc in load_documents(text) if doc is not None]) != 1:
+        raise YamlError("This file holds several players. Copy it without a new name and change the names in the "
+                        "editor.")
+    line = f"name: {json.dumps(name, ensure_ascii=False)}"
+    if _NAME_LINE.search(text):
+        result = _NAME_LINE.sub(lambda _m: line, text, count=1)
+    elif start := _DOCUMENT_START.match(text):
+        result = text[:start.end()] + line + "\n" + text[start.end():]
+    else:
+        result = line + "\n" + text
+    try:
+        documents = [doc for doc in load_documents(result) if doc is not None]
+    except YamlError:
+        documents = []
+    if len(documents) != 1 or not isinstance(documents[0], dict) or documents[0].get("name") != name:
+        raise YamlError("The player name could not be set in this file. Copy it without a new name and change it in "
+                        "the editor.")
+    return result
 
 
 _UNSAFE = re.compile(r"[^A-Za-z0-9._ -]+")
