@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 
 from .. import apbridge, backups, db, gamepaths, gamestore, history, notify, settings as app_settings, textclient
 from ..config import CONFIG
-from ..rooms import ROOMS, STATUS_GOAL, RoomError, valid_password
+from ..rooms import ROOMS, STATUS_GOAL, RoomError, slot_rules, valid_password
 from ..security import admin_user, current_user, is_admin
 from ..textclient import TEXT_CLIENTS
 
@@ -477,11 +477,14 @@ def progress_history(game_id: int, user: sqlite3.Row = Depends(current_user)) ->
 @router.get("/games/{game_id}/slots/{slot}/tracker")
 async def slot_tracker(game_id: int, slot: int, user: sqlite3.Row = Depends(current_user)) -> dict:
     """What a slot has received, which of its locations are checked, and its hints. For its owner and admins."""
-    get_game(game_id, user)
+    game = get_game(game_id, user)
     row = db.query_one("SELECT user_id, type FROM game_slots WHERE game_id = ? AND slot = ?", (game_id, slot))
     if not row or row["type"] != 1 or (row["user_id"] != user["id"] and not is_admin(user)):
         raise HTTPException(404, "No such slot")
-    return await ROOMS.tracker(game_id, slot)
+    data = dict(await ROOMS.tracker(game_id, slot))
+    # the rules the server ran with as of its save; before the first save, the ones it will be started with
+    rules = data.pop("server_rules", None) or app_settings.clean_server_options(db.jloads(game["options"], {}))
+    return {**data, **slot_rules(data, rules)}
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -524,6 +527,34 @@ async def text_client_say(game_id: int, slot: int, body: ClientSay, user: sqlite
     except textclient.TextClientError as e:
         raise HTTPException(e.status, e.message) from None
     return {"ok": True}
+
+
+class SlotAction(BaseModel):
+    action: str = Field(max_length=20)
+
+
+# what the player's command is, and the type of the server's message that says it was done
+_ACTIONS = {"release": ("!release", "Release"), "collect": ("!collect", "Collect")}
+
+
+@router.post("/games/{game_id}/slots/{slot}/action")
+async def slot_action(game_id: int, slot: int, body: SlotAction, user: sqlite3.Row = Depends(current_user)) -> dict:
+    """!release or !collect for the player, through their text client connection. The server decides whether its
+    rules allow it; its answer comes back."""
+    _own_slot(game_id, slot, user)
+    if body.action not in _ACTIONS:
+        raise HTTPException(400, "Unknown action")
+    command, done_type = _ACTIONS[body.action]
+    try:
+        answer = await TEXT_CLIENTS.command(game_id, slot, user["id"], command, (done_type,))
+    except textclient.TextClientError as e:
+        raise HTTPException(e.status, e.message) from None
+    if answer is None:
+        raise HTTPException(504, "The server did not answer in time. The tracker shows in a minute whether it happened.")
+    done = answer["type"] == done_type
+    if done:
+        await ROOMS.save_soon(game_id)
+    return {"done": done, "message": "".join(part["text"] for part in answer["parts"])}
 
 
 @router.get("/games/{game_id}/slots/{slot}/client/names")

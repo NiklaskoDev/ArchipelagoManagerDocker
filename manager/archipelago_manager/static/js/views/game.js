@@ -229,6 +229,7 @@ export default async function render({ root, params, cleanup, isCurrent, query }
     if (picker) picker.style.maxWidth = "320px";
     const search = h("input", { class: "input", type: "search", placeholder: t("Filter…"), "aria-label": t("Filter the tracker") });
     const summary = h("div", { class: "muted small" });
+    const rulesHost = h("div", { class: "row", style: { gap: "8px 16px" } });
     const tabs = h("div", { class: "tabs", role: "tablist" });
     const content = h("div");
     const byName = (a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
@@ -284,8 +285,56 @@ export default async function render({ root, params, cleanup, isCurrent, query }
         h("div", { class: "stack tight" }, h("strong", {}, t("Other players' items in your world")), inMine.length ? table(inMine, false) : h("span", { class: "muted" }, t("None."))));
     }
 
+    // Hint points, and !release and !collect as the server's rules allow them now (the server has the last word)
+    const ACTIONS = {
+      release: { label: t("Release my items"), title: t("Release your items?"),
+        hint: t("Sends the items still in your world to their players (!release)"),
+        confirm: t("Every item still in your world goes to the player it belongs to, as if you had checked all your locations. This cannot be undone."),
+        done: t("Released: your remaining items are on their way to their players."),
+        after_goal: t("Release: once you reach your goal"), automatic: t("Release: happens by itself when you reach your goal"),
+        disabled: t("Release: turned off on this server") },
+      collect: { label: t("Collect my items"), title: t("Collect your items?"),
+        hint: t("Gets your items that are still in other worlds (!collect)"),
+        confirm: t("Every item of yours still in another world comes to you, and the places they were in count as checked for their players. This cannot be undone."),
+        done: t("Collected: your remaining items are on their way to you."),
+        after_goal: t("Collect: once you reach your goal"), automatic: t("Collect: happens by itself when you reach your goal"),
+        disabled: t("Collect: turned off on this server") },
+    };
+    function drawRules() {
+      const points = data.hint_cost
+        ? t("{points} hint points · a hint costs {cost}", { points: data.hint_points, cost: data.hint_cost })
+        : t("{points} hint points · hints are free", { points: data.hint_points });
+      let next = null;
+      const affordable = data.hint_cost ? Math.floor(data.hint_points / data.hint_cost) : 0;
+      const checksToGo = data.points_per_check ? Math.ceil((data.hint_cost - data.hint_points) / data.points_per_check) : 0;
+      if (affordable > 0) {
+        next = plural(affordable, "enough for {n} hint", "enough for {n} hints");
+      } else if (data.hint_cost && checksToGo > 0) {
+        next = plural(checksToGo, "next hint after {n} more check", "next hint after {n} more checks");
+      } else if (data.hint_cost) {
+        next = t("checks earn no hint points on this server");
+      }
+      const mine = slots.find((s) => s.slot === current)?.mine;
+      const running = game.state === "running";
+      const controls = mine ? Object.entries(ACTIONS).map(([key, a]) => {
+        const rule = data[key];
+        if (rule === "done") return null;
+        if (rule !== "available") return h("span", { class: "muted small" }, a[rule]);
+        const button = h("button", { class: "btn sm", type: "button", disabled: !running, title: running ? a.hint : t("Start the server first") }, a.label);
+        button.onclick = action(async () => {
+          if (!(await confirmDialog(a.confirm, { title: a.title, confirmText: a.label, danger: true }))) return;
+          const result = await post(`/api/games/${id}/slots/${current}/action`, { action: key });
+          toast(result.done ? a.done : tServer(result.message), result.done ? "success" : "error", result.done ? 4500 : 8000);
+          if (result.done) setTimeout(load, 2500);  // the server saves right away; the tracker reads the save
+        });
+        return button;
+      }) : [];
+      clear(rulesHost).append(h("span", { class: "small" }, points, next ? h("span", { class: "muted" }, ` · ${next}`) : null), ...controls.filter(Boolean));
+    }
+
     function draw() {
       if (!data) return;
+      drawRules();
       const checked = data.locations.filter((l) => l.checked).length;
       const openHints = data.hints.filter((x) => !x.found && x.for_me).length;
       clear(summary).append([
@@ -304,7 +353,7 @@ export default async function render({ root, params, cleanup, isCurrent, query }
     async function load() {
       try {
         const fresh = await get(`/api/games/${id}/slots/${current}/tracker`);
-        const sig = JSON.stringify(fresh);
+        const sig = JSON.stringify(fresh) + game.state;  // the buttons need a running server
         if (!isCurrent() || sig === loaded) return;
         loaded = sig;
         data = fresh;
@@ -321,7 +370,7 @@ export default async function render({ root, params, cleanup, isCurrent, query }
     trackerTimer = setInterval(() => { if (!document.hidden) load(); }, 10000);
     return h("div", { class: "section" }, h("div", { class: "card stack" },
       h("div", { class: "card-head" }, h("h2", {}, admin && !slots.some((s) => s.mine) ? t("Tracker") : t("Your tracker")), picker),
-      summary, h("div", { class: "row spread" }, tabs, h("div", { style: { minWidth: "200px" } }, search)), content,
+      summary, rulesHost, h("div", { class: "row spread" }, tabs, h("div", { style: { minWidth: "200px" } }, search)), content,
       h("p", { class: "muted small" }, t("Read from the server's save, so it can be up to a minute behind the game."))));
   }
   function applyGame(next) {

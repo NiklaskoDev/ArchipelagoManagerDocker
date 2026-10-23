@@ -6,6 +6,7 @@ import pytest
 from archipelago_manager import apbridge, settings, yamlform, yamlinfo
 from archipelago_manager.config import CONFIG
 from archipelago_manager.generation import _player_file_errors, _summarize_failure
+from archipelago_manager.rooms import slot_rules
 from archipelago_manager.gamestore import classify
 from archipelago_manager.security import hash_password, verify_password, LoginThrottle
 from archipelago_manager.textclient import Session, concerns_me, render
@@ -316,3 +317,24 @@ def test_a_copied_config_gets_the_new_player_name_and_keeps_the_rest():
     # what a name looks like in the file does not change what it is
     assert name(original.replace("Alice", '"Al: ice"')) == "Ann"
     assert yamlinfo.load_documents(yamlinfo.with_player_name(original, "Ä ö: \"x\""))[0]["name"] == 'Ä ö: "x"'
+
+
+def test_what_the_rules_give_a_slot():
+    def tracker(checked=0, total=25, goal=False, hints_used=0, items_left=5):
+        return {"locations": [{"checked": i < checked} for i in range(total)], "goal": goal, "hints_used": hints_used,
+                "items_left": items_left}
+    options = {"hint_cost": 10, "location_check_points": 1, "release_mode": "goal", "collect_mode": "auto"}
+    rules = slot_rules(tracker(checked=4, hints_used=1), options)
+    # a hint costs 10% of 25 locations (rounded down, at least 1); every check earns one point
+    assert (rules["hint_points"], rules["hint_cost"], rules["points_per_check"]) == (4 - 2, 2, 1)
+    assert (rules["release"], rules["collect"]) == ("after_goal", "automatic")
+    assert slot_rules(tracker(total=5), options)["hint_cost"] == 1
+    assert slot_rules(tracker(), {**options, "hint_cost": 0})["hint_cost"] == 0
+    # at the goal, both are the player's to use; nothing left means nothing to do
+    rules = slot_rules(tracker(checked=3, goal=True), options)
+    assert (rules["release"], rules["collect"]) == ("available", "available")
+    rules = slot_rules(tracker(checked=25, goal=True, items_left=0), options)
+    assert (rules["release"], rules["collect"]) == ("done", "done")
+    # enabled and auto-enabled work any time; disabled never
+    for mode, expected in (("enabled", "available"), ("auto-enabled", "available"), ("disabled", "disabled")):
+        assert slot_rules(tracker(), {**options, "release_mode": mode})["release"] == expected

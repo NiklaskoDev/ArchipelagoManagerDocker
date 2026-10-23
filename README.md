@@ -95,6 +95,13 @@ by your players:
 4. While you play, **Your tracker** on the game page shows the items you received (and from whom), the locations you
    still have to check, and your hints: where your items are, and which items of other players are in your world. It
    is read from the server's save, so it can be up to a minute behind.
+   - It also shows your hint points, what a hint costs, and how many hints they buy (or how many checks until the
+     next one).
+   - **Release my items** (`!release`: everything still in your world goes to its players) and **Collect my items**
+     (`!collect`: everything of yours still in other worlds comes to you) appear when the game's rules let you use
+     them, for example only after your goal. Otherwise the tracker says when they become available, or that they
+     happen by themselves at your goal. Both ask before they act, as neither can be undone. The manager sends the
+     command in your name, like the text client below, and shows the server's answer.
 5. The **Text client** on the game page does what Archipelago's text client does, in the browser: *Connect*, then chat
    with everyone in the multiworld or type the server's commands, such as `!hint Hookshot` (a hint for an item; the
    names of your items are suggested as you type), `!hint_location`, `!remaining` or `!help`. It shows what happens in
