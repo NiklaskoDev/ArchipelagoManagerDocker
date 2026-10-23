@@ -10,7 +10,7 @@ from collections.abc import Iterable, Iterator
 
 from .config import CONFIG
 
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 
 # Added in schema version 3
 _SIGNUPS = """
@@ -194,7 +194,9 @@ CREATE TABLE games (
     start_at          REAL,
     start_open_minutes INTEGER NOT NULL DEFAULT 10,
     start_countdown   INTEGER NOT NULL DEFAULT 1,
-    start_stage       TEXT
+    start_stage       TEXT,
+    stopped_at        REAL,
+    asleep            INTEGER NOT NULL DEFAULT 0
 );
 CREATE UNIQUE INDEX games_port ON games(port) WHERE port IS NOT NULL;
 
@@ -282,6 +284,8 @@ MIGRATIONS: dict[int, str] = {
         "ALTER TABLE games ADD COLUMN start_stage TEXT; "
         "ALTER TABLE game_slots ADD COLUMN goal_logged_at REAL;",
     11: _AUDIT,
+    # when the server last stopped, and whether it fell asleep (rooms.py): a player's visit wakes it up again
+    12: "ALTER TABLE games ADD COLUMN stopped_at REAL; ALTER TABLE games ADD COLUMN asleep INTEGER NOT NULL DEFAULT 0;",
 }
 
 

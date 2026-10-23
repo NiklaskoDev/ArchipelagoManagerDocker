@@ -402,8 +402,10 @@ def test_restart_is_only_requested_when_a_startup_option_really_changes(admin):
         # settings that are applied live never need a restart
         r = admin.patch(f"/api/games/{gid}", json={"options": {**options, "hint_cost": 77}, "password": "live"})
         assert r.json()["restart_required"] is False and r.json()["options"]["hint_cost"] == 77
-        # but a startup-only option does
         r = admin.patch(f"/api/games/{gid}", json={"options": {**options, "auto_shutdown_minutes": 30}})
+        assert r.json()["restart_required"] is False  # the manager puts the server to sleep, not the server
+        # but a startup-only option does
+        r = admin.patch(f"/api/games/{gid}", json={"options": {**options, "loglevel": "debug"}})
         assert r.json()["restart_required"] is True
         port = admin.get(f"/api/games/{gid}").json()["port"]
         r = admin.patch(f"/api/games/{gid}", json={"port": port + 7 if port + 7 < 65535 else port - 7})

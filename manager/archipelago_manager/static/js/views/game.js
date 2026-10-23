@@ -80,13 +80,35 @@ export default async function render({ root, params, cleanup, isCurrent, query }
       h("div", {}, t("Starts {date}", { date: fmtDate(start.at) }), " · ", left), h("div", { class: "muted small" }, how)));
   }
 
+  // A game that falls asleep: a player's visit wakes it up, and keeps it from falling asleep for a while
+  const wakes = () => game.sleep_minutes && game.my_slots.length && !game.finished_at && ["sleeping", "running"].includes(game.state);
+  async function wake() {
+    const next = await post(`/api/games/${id}/wake`);
+    if (isCurrent()) applyGame(next);
+  }
+  function sleepNote() {
+    if (game.state === "sleeping") {
+      return h("div", { class: "row spread" },
+        h("span", { class: "muted small" }, t("It wakes up when one of its players opens this page.")),
+        game.my_slots.length && !game.can_control
+          ? h("button", { class: "btn sm primary", type: "button", onclick: action(wake) }, icon("play", 14), t("Wake up")) : null);
+    }
+    if (!game.sleep_minutes || !isActive(game)) return null;
+    return h("p", { class: "muted small" }, plural(game.sleep_minutes,
+      "Falls asleep after {n} minute with nobody connected. Opening this page wakes it up again.",
+      "Falls asleep after {n} minutes with nobody connected. Opening this page wakes it up again."));
+  }
+
   function drawInfo() {
     const running = game.state === "running";
     clear(infoHost).append(h("div", { class: "card stack" },
       h("div", { class: "card-head" }, h("h2", {}, t("Connect")),
-        !running && game.state !== "starting" ? h("span", { class: "muted small" }, t("The server is not running right now.")) : null),
+        game.state === "sleeping" ? h("span", { class: "muted small" }, t("The server is asleep."))
+          : !running && game.state !== "starting" ? h("span", { class: "muted small" }, t("The server is not running right now.")) : null),
+      sleepNote(),
       h("dl", { class: "kv" },
-        h("dt", {}, t("Server")), h("dd", {}, game.address ? copyField(game.address) : h("span", { class: "muted" }, t("No port assigned"))),
+        h("dt", {}, t("Server")), h("dd", {}, game.address ? copyField(game.address)
+          : h("span", { class: "muted" }, game.state === "sleeping" ? t("Gets a port when it wakes up") : t("No port assigned"))),
         game.password ? [h("dt", {}, t("Password")), h("dd", {}, copyField(game.password))] : null,
         game.my_slots.length ? [h("dt", {}, plural(game.my_slots.length, "Your slot", "Your slots")),
           h("dd", { class: "stack tight" }, game.my_slots.map((s) => h("div", { class: "row" },
@@ -168,7 +190,7 @@ export default async function render({ root, params, cleanup, isCurrent, query }
 
   function signature() {
     return JSON.stringify([game.state, game.error, game.slots, game.progress, game.password, game.address, game.missing_games, game.my_slots,
-      game.finished_at, game.start]);
+      game.finished_at, game.start, game.sleep_minutes]);
   }
   function drawLive() {
     drawnSignature = signature();
@@ -653,6 +675,7 @@ export default async function render({ root, params, cleanup, isCurrent, query }
   }
   const timer = setInterval(() => { if (!document.hidden) refresh().catch(() => {}); }, 4000);
   cleanup(() => clearInterval(timer));
+  if (wakes()) wake().catch((err) => toast(err.message, "error"));
 }
 
 // change handlers on plain elements still need error toasts

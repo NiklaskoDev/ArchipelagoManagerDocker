@@ -8,6 +8,9 @@ players log in to keep their YAML configs, see their games and download their pa
 
 - **Runs several multiworlds at once.** Every game gets its own server process on its own port, with its own
   password and rules. Games that were running come back after a container restart; a crashed server is restarted.
+- **Lets games sleep.** A game can fall asleep when nobody has been connected for a while, and wakes up when one of its
+  players opens the game page, like on archipelago.gg. Games that are not running lend their port to one that needs it,
+  so there can be more games than ports. A game can also be set to never fall asleep.
 - **Hosts pregenerated games.** Upload the zip a generator produced (or just the `.archipelago` file). The patch files
   are extracted and handed to the players they belong to, matched by slot name. YAMLs bundled in the zip are copied
   into the library of the user who owns the slot.
@@ -91,7 +94,9 @@ by your players:
 2. When an admin generates a game with your config, or uploads a game with a slot of that name, it appears under
    **Games** with the server address, password, your slot name and your files. If the game allows it you can *claim*
    a slot yourself ("This is mine").
-3. Download your patch file(s), patch your game, and connect with the Archipelago client of your game.
+3. Download your patch file(s), patch your game, and connect with the Archipelago client of your game. If the game is
+   *Asleep*, opening its page wakes it up: connect once it shows *Running*. When there was no port free for it while
+   it slept, it may come back on a different port, so take the address from the page.
 4. While you play, **Your tracker** on the game page shows the items you received (and from whom), the locations you
    still have to check, and your hints: where your items are, and which items of other players are in your world. It
    is read from the server's save, so it can be up to a minute behind.
@@ -207,8 +212,21 @@ itself. Both edit the same file, so switch whenever you like.
   user menu), and enter a Discord server ID to admit only members of that server. Accounts are matched by Discord's
   account ID only, never by name; admins see who is linked under *Admin → Users* and can unlink an account there.
 - **Run a game:** *Start / Stop / Restart* on the game page. *Settings* holds the room password, the remote-admin
-  password, hint cost, `!release`/`!collect`/`!remaining` rules and the idle shutdown. Passwords and rules apply to a
-  running server immediately; the port and a few startup options need a restart (the UI tells you).
+  password, hint cost, `!release`/`!collect`/`!remaining` rules and when the game falls asleep. Passwords and rules apply
+  to a running server immediately; the port and a few startup options need a restart (the UI tells you).
+- **Sleeping games:** *Falls asleep after (minutes)* in a game's settings (and in the defaults for new games under
+  *Admin → Settings*). Tick *Never falls asleep* to keep a game running until it is stopped; that is the default.
+  - A game falls asleep when nobody was connected to its server for that many minutes: the manager stops the server
+    and the game shows *Asleep*. A connected client keeps it awake, however long its player takes, and so does the
+    text client on the game page.
+  - It wakes up when one of its players opens the game page, whether or not players may start games themselves. A
+    look at the page of a game that is awake keeps it awake for that long again. A game opened ahead of its planned
+    start waits for it awake, and a finished game is not woken up by a visit (its players can press *Wake up*).
+  - Admins start an asleep game with *Start*. *Stop* turns it into a stopped game, which a visit does not wake up.
+  - An asleep game stays asleep through a container restart and keeps its port. Only when a game is started and no
+    port in `PORT_RANGE` is free does it take the port of a game whose server is not running: a finished one first,
+    then a stopped one, then an asleep one, each the one that stopped longest ago. That game gets a free port when it
+    starts again; the game page always shows the current address.
 - **Planned start and races:** *Settings → Planned start* on the game page: a start time, how many minutes before it
   the server opens (10 by default, so everyone can connect and get ready), and whether a countdown runs.
   - Setting it posts a *Planned start* message on Discord, mentioning the players who asked to hear when their game goes
@@ -242,8 +260,8 @@ itself. Both edit the same file, so switch whenever you like.
 - **Users and settings:** *Admin* has users, registration, what players may do, defaults for new games, Archipelago's
   `host.yaml`, and system information.
 - **Log:** *Admin → Log* lists who changed what: every change an administrator makes (games, slots, users, settings,
-  custom games, generation, sign-up rounds, configs, ROMs) and every start, stop and restart of a game, players'
-  included, with what it was done to and what changed. Names are kept as they were, so a deleted game or user is
+  custom games, generation, sign-up rounds, configs, ROMs) and every start, stop, restart and wake-up of a game,
+  players' included, with what it was done to and what changed. Names are kept as they were, so a deleted game or user is
   still named. Filter by person or area; the latest 50,000 entries are kept. Values of passwords and secrets are never
   written: the log says *which* settings changed, and console commands are masked like the console.
 - **Backup of everything:** *Admin → Settings → Backup of everything → Download a backup* makes one zip of the whole
@@ -405,8 +423,9 @@ approve pull requests*. You can also run the workflow by hand (*Actions → Arch
 
 ## Troubleshooting
 
-- **A game says "port already in use" or "No free port".** Another container or service holds the port, or all ports of
-  `PORT_RANGE` are taken by games. Pick a different port in the game's settings, or widen the range (and the published
+- **A game says "port already in use" or "No free port".** Another container or service holds the port, or the servers
+  of as many games as `PORT_RANGE` has ports are running. Stop a game (its port then goes to the next game that needs
+  one), let games fall asleep, pick a different port in the game's settings, or widen the range (and the published
   ports).
 - **Players cannot connect.** Check the address under *Connect* on the game page (set *Public address*), that the port is
   published by Docker and forwarded by your router, and that the game is *Running*.
