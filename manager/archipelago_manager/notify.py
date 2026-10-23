@@ -109,6 +109,13 @@ def duration(seconds: float) -> str:
     return tr("{m} min", m=mins)
 
 
+def race_time(seconds: float) -> str:
+    """A race time to the second: "1:23:45", or "23:45" under an hour."""
+    total = max(0, int(seconds))
+    hours, minutes, secs = total // 3600, total // 60 % 60, total % 60
+    return f"{hours}:{minutes:02d}:{secs:02d}" if hours else f"{minutes}:{secs:02d}"
+
+
 def timestamp(ts: float, style: str = "f") -> str:
     """A Discord timestamp: every reader sees it in their own time zone."""
     return f"<t:{int(ts)}:{style}>"

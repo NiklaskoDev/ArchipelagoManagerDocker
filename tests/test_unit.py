@@ -338,3 +338,9 @@ def test_what_the_rules_give_a_slot():
     # enabled and auto-enabled work any time; disabled never
     for mode, expected in (("enabled", "available"), ("auto-enabled", "available"), ("disabled", "disabled")):
         assert slot_rules(tracker(), {**options, "release_mode": mode})["release"] == expected
+
+
+def test_race_times_read_like_a_stopwatch():
+    from archipelago_manager.notify import race_time
+    assert [race_time(s) for s in (0, 9.9, 75, 3600, 3600 * 26 + 61, -5)] == ["0:00", "0:09", "1:15", "1:00:00",
+                                                                              "26:01:01", "0:00"]

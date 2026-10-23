@@ -10,7 +10,7 @@ from collections.abc import Iterable, Iterator
 
 from .config import CONFIG
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 # Added in schema version 3
 _SIGNUPS = """
@@ -173,7 +173,11 @@ CREATE TABLE games (
     play_started_at   REAL,
     finished_at       REAL,
     share_spoiler_when_done INTEGER NOT NULL DEFAULT 0,
-    discord_webhook_url TEXT
+    discord_webhook_url TEXT,
+    start_at          REAL,
+    start_open_minutes INTEGER NOT NULL DEFAULT 10,
+    start_countdown   INTEGER NOT NULL DEFAULT 1,
+    start_stage       TEXT
 );
 CREATE UNIQUE INDEX games_port ON games(port) WHERE port IS NOT NULL;
 
@@ -186,6 +190,7 @@ CREATE TABLE game_slots (
     locations INTEGER NOT NULL DEFAULT 0,
     user_id   INTEGER REFERENCES users(id) ON DELETE SET NULL,
     goal_at   REAL,
+    goal_logged_at REAL,
     PRIMARY KEY (game_id, slot)
 );
 
@@ -252,6 +257,13 @@ MIGRATIONS: dict[int, str] = {
     8: "ALTER TABLE users ADD COLUMN discord_pings TEXT NOT NULL DEFAULT '[]';",
     # a game's own Discord channel; configs their owner shares with the other players (since when)
     9: "ALTER TABLE games ADD COLUMN discord_webhook_url TEXT; ALTER TABLE configs ADD COLUMN shared_at REAL;",
+    # a planned start (schedule.py): when, how early the server opens, whether a countdown runs, how far it got;
+    # the moment the server announced a goal, to the second
+    10: "ALTER TABLE games ADD COLUMN start_at REAL; "
+        "ALTER TABLE games ADD COLUMN start_open_minutes INTEGER NOT NULL DEFAULT 10; "
+        "ALTER TABLE games ADD COLUMN start_countdown INTEGER NOT NULL DEFAULT 1; "
+        "ALTER TABLE games ADD COLUMN start_stage TEXT; "
+        "ALTER TABLE game_slots ADD COLUMN goal_logged_at REAL;",
 }
 
 

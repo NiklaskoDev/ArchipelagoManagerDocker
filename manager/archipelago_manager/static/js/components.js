@@ -1,5 +1,5 @@
 // Reusable pieces shared by several views.
-import { h, clear, icon, copyText, openModal, toast, action, confirmDialog, fmtBytes, fmtAgo, withNodes } from "./util.js";
+import { h, clear, icon, copyText, openModal, toast, action, confirmDialog, fmtBytes, fmtAgo, fmtDate, fmtUntil, withNodes } from "./util.js";
 import { api, get, post, del, state, isAdmin } from "./api.js";
 import { t, tServer, plural } from "./i18n.js";
 
@@ -393,6 +393,8 @@ export function gameCard(game, onUpdate) {
         chips(game.games, game.missing_games)),
       h("div", { class: "row" }, game.race_mode ? badge(t("Race"), "warn") : null, stateBadge(game.state))),
     game.error && game.state === "crashed" ? h("div", { class: "form-error" }, tServer(game.error)) : null,
+    game.start && game.start.stage !== "started" ? h("div", { class: "row small" }, icon("calendar", 14),
+      t("Starts {date}", { date: fmtDate(game.start.at) }), h("span", { class: "muted" }, fmtUntil(game.start.at))) : null,
     game.address ? h("div", { class: "row" }, h("span", { class: "muted small" }, t("Server")), copyField(game.address)) : null,
     game.my_slots.length
       ? h("div", { class: "stack tight" }, h("span", { class: "muted small" }, plural(game.my_slots.length, "Your slot", "Your slots")),

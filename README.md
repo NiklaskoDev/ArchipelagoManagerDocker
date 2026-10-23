@@ -204,6 +204,16 @@ itself. Both edit the same file, so switch whenever you like.
 - **Run a game:** *Start / Stop / Restart* on the game page. *Settings* holds the room password, the remote-admin
   password, hint cost, `!release`/`!collect`/`!remaining` rules and the idle shutdown. Passwords and rules apply to a
   running server immediately; the port and a few startup options need a restart (the UI tells you).
+- **Planned start and races:** *Settings → Planned start* on the game page: a start time, how many minutes before it
+  the server opens (10 by default, so everyone can connect and get ready), and whether a countdown runs.
+  - Setting it posts a *Planned start* message on Discord, mentioning the players who asked to hear when their game goes
+    online. The game page and the game list show the start with a clock counting down.
+  - Until the server opens, players cannot start it themselves; admins can, and the planned opening then leaves it
+    running.
+  - At the opening time the server starts by itself and is announced like any start. With the countdown on, the
+    server runs Archipelago's `/countdown` so that every client counts down and says GO at the start time.
+  - That moment is the start of the race. Goals are taken from the server's log the moment a client reports them, to
+    the second, and the results table and the Discord goal messages show each player's race time (`1:23:45`).
 - **Console:** every server's log, plus a command line for Archipelago's server commands (`/send`, `/hint`, `/help`, …).
 - **Progress:** per slot checks and whether a player is online, read from the server's save (refreshed about once a
   minute while the game is running). The tracker on the game page lets you pick any slot and see its items, locations
