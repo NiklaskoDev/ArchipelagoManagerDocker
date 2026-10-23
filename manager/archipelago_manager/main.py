@@ -10,7 +10,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import __version__, apbridge, db, notify, signups, sources, updates
+from . import __version__, apbridge, db, notify, schedule, signups, sources, updates
 from .config import CONFIG
 from .generation import GENERATION
 from .rooms import ROOMS
@@ -54,7 +54,8 @@ async def lifespan(_app: FastAPI):
     notify.start()
     await GENERATION.start()
     tasks = [asyncio.create_task(init_archipelago()), asyncio.create_task(ROOMS.watch_progress()),
-             asyncio.create_task(signups.run_periodically()), asyncio.create_task(TEXT_CLIENTS.run_periodically())]
+             asyncio.create_task(signups.run_periodically()), asyncio.create_task(TEXT_CLIENTS.run_periodically()),
+             asyncio.create_task(schedule.run_periodically())]
     if CONFIG.update_check:  # both talk to GitHub on their own, which UPDATE_CHECK=false rules out
         tasks.append(asyncio.create_task(updates.run_periodically()))
         tasks.append(asyncio.create_task(sources.run_periodically()))

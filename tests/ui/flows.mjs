@@ -259,6 +259,20 @@ log("owner assignment and settings save work");
 await admin.locator("details[open]").getByRole("button", { name: "Send a test message" }).click();
 await expectText(admin, "Enter a Discord webhook address first");
 log("the game's own Discord channel can be tested from its settings");
+{
+  const at = new Date(Date.now() + 2 * 3600 * 1000);
+  const pad = (n) => String(n).padStart(2, "0");
+  const local = `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}T${pad(at.getHours())}:${pad(at.getMinutes())}`;
+  await admin.locator("details[open] input[type=datetime-local]").fill(local);
+  await admin.getByRole("button", { name: "Save settings" }).click();
+  await expectText(admin, "The server opens at");
+  await shot(admin, "planned-start");
+  log("a planned start shows on the game page, with when the server opens");
+  await admin.locator("details[open] input[type=datetime-local]").fill("");
+  await admin.getByRole("button", { name: "Save settings" }).click();
+  await admin.getByText("The server opens at").waitFor({ state: "detached" });
+  log("the planned start can be taken back");
+}
 await admin.locator("details", { hasText: "Console" }).first().locator("summary").click();
 await admin.locator(".console").getByText("starting server").first().waitFor({ timeout: 10000 });
 await admin.fill("input[placeholder^='Server command']", "/help");

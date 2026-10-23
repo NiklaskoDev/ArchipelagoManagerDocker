@@ -5,6 +5,7 @@ import asyncio
 import os
 import sqlite3
 import tempfile
+import time
 import zipfile
 from pathlib import Path
 
@@ -12,7 +13,8 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPExcepti
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from .. import apbridge, backups, db, gamepaths, gamestore, history, notify, settings as app_settings, textclient
+from .. import (apbridge, backups, db, gamepaths, gamestore, history, notify, schedule, settings as app_settings,
+               textclient)
 from ..config import CONFIG
 from ..rooms import ROOMS, STATUS_GOAL, RoomError, slot_rules, valid_password
 from ..security import admin_user, current_user, is_admin
@@ -94,6 +96,10 @@ def game_summary(row: sqlite3.Row, slots: list[sqlite3.Row], user: sqlite3.Row, 
         "visibility": row["visibility"], "claimable": bool(row["claimable"]),
         "single_claim": bool(row["single_claim"]),
         "play_started_at": row["play_started_at"], "finished_at": row["finished_at"],
+        # a planned start: when, when the server opens, whether a countdown runs, and how far it got
+        "start": {"at": row["start_at"], "opens_at": row["start_at"] - row["start_open_minutes"] * 60,
+                  "open_minutes": row["start_open_minutes"], "countdown": bool(row["start_countdown"]),
+                  "stage": row["start_stage"] or "planned"} if row["start_at"] else None,
         "goal_count": sum(1 for s in players if s["goal_at"] is not None),
         "my_slots": [{"slot": s["slot"], "name": s["name"], "game": s["game"]} for s in mine],
         "my_file_count": db.query_one(
@@ -238,6 +244,9 @@ class GamePatch(BaseModel):
     share_spoiler_when_done: bool | None = None
     finished: bool | None = None
     discord_webhook_url: str | None = Field(default=None, max_length=512)
+    start_at: float | None = None  # null takes a planned start back
+    start_open_minutes: int | None = None
+    start_countdown: bool | None = None
 
 
 @router.patch("/games/{game_id}")
@@ -287,6 +296,21 @@ async def patch_game(game_id: int, body: GamePatch, request: Request, user: sqli
         changes["notes"] = (body.notes or "").strip() or None
     if "share_spoiler_when_done" in given and body.share_spoiler_when_done is not None:
         changes["share_spoiler_when_done"] = int(body.share_spoiler_when_done)
+    announce_start = False
+    if "start_at" in given:
+        if body.start_at is None:
+            changes["start_at"] = changes["start_stage"] = None
+        elif body.start_at != row["start_at"]:
+            if not (time.time() + 60 <= body.start_at <= time.time() + 366 * 86400):
+                raise HTTPException(400, "Pick a start at least a minute from now and within a year")
+            changes["start_at"], changes["start_stage"] = body.start_at, None
+            announce_start = True
+    if "start_open_minutes" in given and body.start_open_minutes is not None:
+        if not 0 <= body.start_open_minutes <= schedule.MAX_OPEN_MINUTES:
+            raise HTTPException(400, f"The server can open at most {schedule.MAX_OPEN_MINUTES} minutes before the start")
+        changes["start_open_minutes"] = body.start_open_minutes
+    if "start_countdown" in given and body.start_countdown is not None:
+        changes["start_countdown"] = int(body.start_countdown)
     if "discord_webhook_url" in given and body.discord_webhook_url is not None:
         webhook = body.discord_webhook_url.strip()
         if webhook and not app_settings.valid_url(webhook):
@@ -301,6 +325,8 @@ async def patch_game(game_id: int, body: GamePatch, request: Request, user: sqli
         await ROOMS.apply_options(game_id)
     if "finished" in given and body.finished is not None:  # after the spoiler setting, which finishing applies
         history.finish(game_id, body.finished)
+    if announce_start:
+        schedule.announce(game_id)
     return {**await _detail(game_id, user, request), "restart_required": restart_required}
 
 
@@ -344,7 +370,9 @@ def _controllable(game_id: int, user: sqlite3.Row) -> sqlite3.Row:
 
 @router.post("/games/{game_id}/start")
 async def start_game(game_id: int, request: Request, user: sqlite3.Row = Depends(current_user)) -> dict:
-    _controllable(game_id, user)
+    row = _controllable(game_id, user)
+    if row["start_at"] and row["start_stage"] is None and not is_admin(user):
+        raise HTTPException(409, "This game opens at its planned time. An administrator can open it earlier.")
     try:
         await ROOMS.start(game_id, announce=True)
     except RoomError as e:

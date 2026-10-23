@@ -1,4 +1,5 @@
-import { h, clear, icon, toast, action, confirmDialog, fmtBytes, fmtAgo, fmtDate, shortName } from "../util.js";
+import { h, clear, icon, toast, action, confirmDialog, fmtBytes, fmtAgo, fmtDate, fmtUntil, shortName, toLocalInput,
+         fromLocalInput } from "../util.js";
 import { api, get, post, patch, del, isAdmin, state } from "../api.js";
 import { stateBadge, badge, chips, progressBar, copyField, copyButton, controlButtons, banner, field, checkbox, select,
          missingGamesPanel, isActive, serverOptionsForm, deliveryStatus } from "../components.js";
@@ -45,10 +46,36 @@ export default async function render({ root, params, cleanup, isCurrent, query }
           // the same configs and options once more, with a new seed
           game.job_available && (admin || state.status?.permissions?.generate)
             ? h("a", { class: "btn sm", href: `#/generate?from=${game.job_id}` }, icon("restart", 14), t("Generate again")) : null)),
+      startBanner(),
       game.state === "crashed" ? banner("error", icon("alert", 18), h("div", { class: "grow" },
         h("strong", {}, t("The server stopped unexpectedly.")), " ", game.error ? tServer(game.error) : t("See the console for details."))) : null,
       game.missing_games.length ? missingGamesPanel(game.missing_games.map((g) => ({ game: g, configs: [], games: [{ id, name: game.name }], pending: [] })),
         refresh) : null);
+  }
+
+  // A planned start: when, when the server opens, and a clock counting down to it
+  let startTimer = null;
+  cleanup(() => clearInterval(startTimer));
+  function startBanner() {
+    clearInterval(startTimer);
+    const start = game.start;
+    if (!start || start.stage === "started") return null;
+    const left = h("strong");
+    const tick = () => {
+      const s = Math.round(start.at - Date.now() / 1000);
+      left.textContent = s <= 0 ? t("now") : s < 60 ? t("in {n} s", { n: s }) : fmtUntil(start.at);
+    };
+    tick();
+    startTimer = setInterval(tick, 1000);
+    const opened = start.stage === "opened";
+    const how = [
+      opened ? t("The server is open: connect now and get ready.")
+        : start.open_minutes ? t("The server opens at {time}, so everyone can connect and get ready first.", { time: fmtDate(start.opens_at) })
+          : t("The server opens at the start."),
+      start.countdown ? t("A countdown in every client ends at the start.") : null,
+    ].filter(Boolean).join(" ");
+    return banner(opened ? "ok" : "info", icon("calendar", 18), h("div", { class: "grow" },
+      h("div", {}, t("Starts {date}", { date: fmtDate(start.at) }), " · ", left), h("div", { class: "muted small" }, how)));
   }
 
   function drawInfo() {
@@ -139,7 +166,7 @@ export default async function render({ root, params, cleanup, isCurrent, query }
 
   function signature() {
     return JSON.stringify([game.state, game.error, game.slots, game.progress, game.password, game.address, game.missing_games, game.my_slots,
-      game.finished_at]);
+      game.finished_at, game.start]);
   }
   function drawLive() {
     drawnSignature = signature();
@@ -400,6 +427,12 @@ export default async function render({ root, params, cleanup, isCurrent, query }
     const shareSpoiler = checkbox(t("Share the spoiler log with the players when everyone has finished"), game.share_spoiler_when_done,
       t("When every player has reached their goal (or you move the game to the archive), the spoiler log becomes visible to every player in the game."));
     const rules = serverOptionsForm(opts);
+    // a planned start; the field holds minutes, so an unchanged value is not sent back
+    let plannedValue = toLocalInput(game.start?.at);
+    const startAt = h("input", { class: "input", type: "datetime-local", value: plannedValue });
+    const openMinutes = h("input", { class: "input", type: "number", min: 0, max: 1440, value: game.start?.open_minutes ?? 10 });
+    const countdown = checkbox(t("Count down to the start in every client"), game.start ? game.start.countdown : true,
+      t("Archipelago's countdown, so that everyone starts at the same moment, as in a race."));
     // the game's own Discord channel
     const webhook = h("input", { class: "input", type: "url", value: game.discord_webhook_url ?? "", autocomplete: "off",
       placeholder: t("Empty: the main channel") });
@@ -417,10 +450,13 @@ export default async function render({ root, params, cleanup, isCurrent, query }
       const options = rules.read();
       const body = { name: name.value, password: password.value, server_password: adminPassword.value, options,
         visibility: visibility.value, claimable: claimable.input.checked, single_claim: singleClaim.input.checked,
-        notes: notes.value, share_spoiler_when_done: shareSpoiler.input.checked, discord_webhook_url: webhook.value.trim() };
+        notes: notes.value, share_spoiler_when_done: shareSpoiler.input.checked, discord_webhook_url: webhook.value.trim(),
+        start_open_minutes: Number(openMinutes.value || 0), start_countdown: countdown.input.checked };
+      if (startAt.value !== plannedValue) body.start_at = fromLocalInput(startAt.value);
       if (port.value) body.port = Number(port.value);
       const result = await patch(`/api/games/${id}`, body);
       game = result;
+      plannedValue = toLocalInput(game.start?.at);
       drawLive();
       toast(result.restart_required ? t("Saved. Restart the server to apply the port or startup options.") : t("Settings saved"), "success");
     });
@@ -432,6 +468,12 @@ export default async function render({ root, params, cleanup, isCurrent, query }
           field(t("Remote admin password"), adminPassword, t("Lets clients use !admin; leave empty to disable")),
           field(t("Who can see this game"), visibility)),
         claimable, singleClaim, shareSpoiler, field(t("Notes"), notes),
+        h("h3", {}, t("Planned start")),
+        h("p", { class: "muted small" }, t("The server opens by itself before the start and is announced on Discord; until then only administrators can start it. The results time every goal from the start, to the second.")),
+        h("div", { class: "form-grid" },
+          field(t("Start time"), startAt, t("In your own time zone. Empty for no planned start.")),
+          field(t("Open the server this many minutes before"), openMinutes)),
+        countdown,
         h("h3", {}, t("Discord")),
         field(t("Webhook for this game"), webhook,
           t("Messages about this game (online, crashes, goals, hinted items found) go to this channel instead of the main one. Which kinds are sent is set under Admin → Settings.")),

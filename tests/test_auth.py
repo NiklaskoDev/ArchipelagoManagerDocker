@@ -220,6 +220,9 @@ def test_a_database_from_the_first_version_is_upgraded(tmp_path):
     conn.execute("ALTER TABLE users DROP COLUMN discord_pings")
     conn.execute("ALTER TABLE games DROP COLUMN discord_webhook_url")
     conn.execute("ALTER TABLE configs DROP COLUMN shared_at")
+    for column in ("start_at", "start_open_minutes", "start_countdown", "start_stage"):
+        conn.execute(f"ALTER TABLE games DROP COLUMN {column}")
+    conn.execute("ALTER TABLE game_slots DROP COLUMN goal_logged_at")
     conn.execute("ALTER TABLE job_players DROP COLUMN sha256")
     conn.execute("ALTER TABLE job_players DROP COLUMN error")
     conn.execute("DROP TABLE game_progress")
@@ -236,7 +239,7 @@ def test_a_database_from_the_first_version_is_upgraded(tmp_path):
         games = admin.get("/api/games").json()
         assert [(g["name"], g["single_claim"], g["finished_at"]) for g in games] == [("Old game", False, None)]
         conn = sqlite3.connect(db_path)
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 9
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 10
         conn.close()
         # tables added since then exist and work
         r = admin.post("/api/signups", json={"name": "After the upgrade"})
@@ -244,6 +247,7 @@ def test_a_database_from_the_first_version_is_upgraded(tmp_path):
         assert r.json()["test"] is None
         assert admin.get(f"/api/games/{games[0]['id']}/history").json()["slots"] == []
         assert admin.get(f"/api/games/{games[0]['id']}").json()["discord_webhook_url"] == ""
+        assert admin.get(f"/api/games/{games[0]['id']}").json()["start"] is None
         assert admin.get("/api/apworld-sources").json() == []
         assert admin.get("/api/users").json()[0]["discord_name"] is None
         assert admin.get("/api/users").json()[0]["discord_pings"] == []

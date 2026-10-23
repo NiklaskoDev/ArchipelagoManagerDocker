@@ -116,7 +116,7 @@ def test_a_game_played_before_the_history_is_archived_at_the_next_start(tmp_path
     # what a database from before the history looks like
     conn = sqlite3.connect(tmp_path / "data" / "manager.sqlite3")
     conn.execute("DELETE FROM game_progress")
-    conn.execute("UPDATE game_slots SET goal_at = NULL")
+    conn.execute("UPDATE game_slots SET goal_at = NULL, goal_logged_at = NULL")
     conn.execute("UPDATE games SET play_started_at = NULL, finished_at = NULL")
     conn.commit()
     conn.close()

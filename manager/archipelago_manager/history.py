@@ -55,7 +55,8 @@ def record(game_id: int, state: dict, now: float | None = None) -> bool:
                 conn.execute("UPDATE game_slots SET goal_at = ? WHERE game_id = ? AND slot = ?", (now, game_id, slot))
                 new_goal = True
             elif not at_goal and player["goal_at"] is not None:  # a restored backup from before the goal
-                conn.execute("UPDATE game_slots SET goal_at = NULL WHERE game_id = ? AND slot = ?", (game_id, slot))
+                conn.execute("UPDATE game_slots SET goal_at = NULL, goal_logged_at = NULL WHERE game_id = ? AND slot = ?",
+                             (game_id, slot))
         if started != game["play_started_at"]:
             conn.execute("UPDATE games SET play_started_at = ? WHERE id = ?", (started, game_id))
         everyone = all(state["slots"].get(p["slot"], {}).get("status") == STATUS_GOAL for p in players)
@@ -86,8 +87,30 @@ def forget(game_id: int) -> None:
     """After the progress was reset: the game starts over."""
     with db.connection() as conn:
         conn.execute("DELETE FROM game_progress WHERE game_id = ?", (game_id,))
-        conn.execute("UPDATE game_slots SET goal_at = NULL WHERE game_id = ?", (game_id,))
+        conn.execute("UPDATE game_slots SET goal_at = NULL, goal_logged_at = NULL WHERE game_id = ?", (game_id,))
         conn.execute("UPDATE games SET play_started_at = NULL, finished_at = NULL WHERE id = ?", (game_id,))
+
+
+def note_goal(game_id: int, name: str, at: float) -> None:
+    """The server announced in its log that a player reached their goal: the moment, to the second, where the save is
+    up to a minute late. The name is the one the server shows, "Alias (Name)" for a player who set an alias."""
+    slots = {r["name"]: r["slot"] for r in db.query("SELECT slot, name FROM game_slots WHERE game_id = ? AND type = 1",
+                                                     (game_id,))}
+    slot = slots.get(name)
+    # A chat line reads "Name: text" and could imitate a goal line, so an alias may not hold ": " (nor be longer than
+    # the server allows); such a player's goal is timed from the save instead
+    if slot is None and ": " not in name:
+        slot = next((s for n, s in slots.items() if name.endswith(f" ({n})") and len(name) - len(n) - 3 <= 16), None)
+    if slot is not None:
+        db.execute("UPDATE game_slots SET goal_logged_at = ? WHERE game_id = ? AND slot = ? AND goal_logged_at IS NULL",
+                   (at, game_id, slot))
+
+
+def goal_time(slot: Any) -> float | None:
+    """When a slot reached its goal: the moment the server announced it, once the save confirms it."""
+    if slot["goal_at"] is None:
+        return None
+    return slot["goal_logged_at"] or slot["goal_at"]
 
 
 def has_history(game_id: int) -> bool:
@@ -104,18 +127,22 @@ def thin(points: list[tuple[float, int]], limit: int = MAX_POINTS) -> list[tuple
 
 def series(game_id: int) -> dict:
     """The progress of every player slot over time, for the chart and the results."""
-    game = db.query_one("SELECT play_started_at, finished_at FROM games WHERE id = ?", (game_id,))
+    game = db.query_one("SELECT play_started_at, finished_at, start_at, start_stage FROM games WHERE id = ?",
+                        (game_id,))
     points: dict[int, list[tuple[float, int]]] = {}
     for row in db.query("SELECT slot, at, checked FROM game_progress WHERE game_id = ? ORDER BY slot, at", (game_id,)):
         points.setdefault(row["slot"], []).append((row["at"], row["checked"]))
     recorded_from = min((p[0][0] for p in points.values()), default=None)
     slots = []
-    for s in db.query("SELECT s.slot, s.name, s.game, s.locations, s.goal_at, u.username AS owner FROM game_slots s "
+    for s in db.query("SELECT s.slot, s.name, s.game, s.locations, s.goal_at, s.goal_logged_at, u.username AS owner "
+                      "FROM game_slots s "
                       "LEFT JOIN users u ON u.id = s.user_id WHERE s.game_id = ? AND s.type = 1 ORDER BY s.slot",
                       (game_id,)):
         slots.append({"slot": s["slot"], "name": s["name"], "game": s["game"], "owner": s["owner"],
-                      "total": s["locations"], "goal_at": s["goal_at"],
+                      "total": s["locations"], "goal_at": goal_time(s),
                       "points": [list(p) for p in thin(points.get(s["slot"], []))]})
     return {"play_started_at": game["play_started_at"] if game else None,
+            # a race: the planned start, from which every goal is timed
+            "race_start": game["start_at"] if game and game["start_at"] and game["start_stage"] == "started" else None,
             "finished_at": game["finished_at"] if game else None,
             "recorded_from": recorded_from, "now": time.time(), "slots": slots}

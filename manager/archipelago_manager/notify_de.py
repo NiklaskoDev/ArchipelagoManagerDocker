@@ -12,6 +12,12 @@ MESSAGES = {
 
     # game servers
     "{game} is online": "{game} ist online",
+    "Planned start: {game}": "Geplanter Start: {game}",
+    "The server opens before the start, so everyone can connect and get ready.":
+        "Der Server öffnet vor dem Start, damit sich alle verbinden und bereit machen können.",
+    "Start": "Start",
+    "Server opens": "Server öffnet",
+    "Could not open {game}": "{game} konnte nicht geöffnet werden",
     "Server": "Server",
     "Password": "Passwort",
     "Shown on the game page": "Steht auf der Spielseite",

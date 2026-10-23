@@ -43,6 +43,8 @@ def mask_secrets(line: str) -> str:
 
 # `/option password <word>` turns these into "no password", which would silently disable the one being set.
 _RESERVED_PASSWORDS = {"null", "none", '""', "''"}
+# MultiServer logs every goal the moment a client reports it; the save has it up to a minute later
+_GOAL_LINE = re.compile(r"Notice \(all\): (.+) \(Team #\d+\) has completed their goal\.$")
 
 
 def valid_password(value: str) -> bool:
@@ -362,7 +364,10 @@ class RoomManager:
             raw = await proc.stdout.readline()
             if not raw:
                 return
-            self._append_log(room, raw.decode(errors="replace").rstrip("\r\n"))
+            line = raw.decode(errors="replace").rstrip("\r\n")
+            self._append_log(room, line)
+            if goal := _GOAL_LINE.search(line):
+                history.note_goal(room.game_id, goal.group(1), time.time())
 
     async def _wait_ready(self, room: Room, proc: asyncio.subprocess.Process) -> None:
         deadline = time.monotonic() + READY_TIMEOUT
@@ -585,13 +590,15 @@ class RoomManager:
     # notifications
     # ------------------------------------------------------------------------------------------------------------
     def _announce_online(self, room: Room) -> None:
-        game = db.query_one("SELECT name, password FROM games WHERE id = ?", (room.game_id,))
+        game = db.query_one("SELECT name, password, start_at FROM games WHERE id = ?", (room.game_id,))
         if not game:
             return
         address = notify.game_address(room.port)
         fields = [(notify.tr("Server"), f"`{address}`" if address else f"Port {room.port}", True)]
         if game["password"]:
             fields.append((notify.tr("Password"), notify.tr("Shown on the game page"), True))
+        if game["start_at"] and game["start_at"] > time.time():  # opened ahead of its planned start
+            fields.append((notify.tr("Start"), notify.timestamp(game["start_at"], "R"), True))
         fields.append((notify.tr("Players"), player_list(room.game_id)))
         notify.emit("game_online", notify.tr("{game} is online", game=game["name"]),
                     url=notify.link(f"/games/{room.game_id}"), fields=fields, color="success",
@@ -716,25 +723,34 @@ class RoomManager:
         if not new:
             return
         players = {r["slot"]: r for r in db.query(
-            "SELECT s.slot, s.name, s.game, u.username FROM game_slots s LEFT JOIN users u ON u.id = s.user_id "
-            "WHERE s.game_id = ? AND s.type = 1", (game_id,))}
+            "SELECT s.slot, s.name, s.game, s.goal_at, s.goal_logged_at, u.username FROM game_slots s "
+            "LEFT JOIN users u ON u.id = s.user_id WHERE s.game_id = ? AND s.type = 1", (game_id,))}
         if not players:
             return
+        game = db.query_one("SELECT play_started_at, finished_at, start_at, start_stage FROM games WHERE id = ?",
+                            (game_id,))
+        # a race is timed from its planned start, to the second; other games from their first check
+        race = game["start_at"] if game and game["start_at"] and game["start_stage"] == "started" else None
         finished = len(players.keys() & done)
         url = notify.link(f"/games/{game_id}")
         for slot in sorted(new & players.keys()):
             p = players[slot]
             who = notify.md(p["name"]) + (f" ({notify.md(p['username'])})" if p["username"] else "")
+            fields = [(notify.tr("Done"), notify.tr("{finished} of {total} players", finished=finished,
+                                                    total=len(players)), True)]
+            reached = history.goal_time(p)
+            if race and reached and reached >= race:
+                fields.append((notify.tr("Time"), notify.race_time(reached - race), True))
             notify.emit("player_goal", notify.tr("{player} reached their goal", player=p["name"]),
                         notify.tr("{who} finished **{game}** in {name}.", who=who, game=notify.md(p["game"]),
                                   name=notify.md(game_name)),
-                        url=url, fields=[(notify.tr("Done"), notify.tr("{finished} of {total} players",
-                                                                        finished=finished, total=len(players)), True)],
-                        color="success", game_id=game_id)
+                        url=url, fields=fields, color="success", game_id=game_id)
         if players.keys() <= done and not players.keys() <= known:
-            game = db.query_one("SELECT play_started_at, finished_at FROM games WHERE id = ?", (game_id,))
             fields = None
-            if game and game["play_started_at"] and game["finished_at"]:
+            last = max((history.goal_time(p) or 0) for p in players.values())
+            if race and last >= race:
+                fields = [(notify.tr("Time"), notify.race_time(last - race), True)]
+            elif game and game["play_started_at"] and game["finished_at"]:
                 fields = [(notify.tr("Time"), notify.duration(game["finished_at"] - game["play_started_at"]), True)]
             notify.emit("player_goal", notify.tr("Everyone finished {game}!", game=game_name),
                         notify.tr("All {n} players reached their goal. Congratulations!", n=len(players)), url=url,

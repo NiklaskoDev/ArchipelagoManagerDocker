@@ -38,8 +38,17 @@ function valueAt(points, at) {
   return value;
 }
 
+// A race time to the second: "1:23:45", or "23:45" under an hour
+export function raceTime(seconds) {
+  const total = Math.max(0, Math.floor(seconds));
+  const hours = Math.floor(total / 3600), minutes = Math.floor(total / 60) % 60, secs = total % 60;
+  const pad = (n) => String(n).padStart(2, "0");
+  return hours ? `${hours}:${pad(minutes)}:${pad(secs)}` : `${minutes}:${pad(secs)}`;
+}
+
 export function progressSection(data, { mine = new Set(), cleanup }) {
-  const start = data.play_started_at ?? data.recorded_from;
+  // a race counts from its planned start; any other game from its first check
+  const start = data.race_start ?? data.play_started_at ?? data.recorded_from;
   const end = Math.max(data.finished_at ?? data.now, start + 60);
   const known = (ts) => ts != null && ts > data.recorded_from + 1;  // goals before recording began have no real time
   const players = data.slots.filter((s) => s.points.length).map((s, i, all) => {
@@ -165,10 +174,13 @@ function standings(data, players, known, start) {
   const goal = (s) => {
     if (s.goal_at == null) return h("span", { class: "muted" }, "—");
     if (!known(s.goal_at)) return h("span", { class: "muted" }, t("before recording began"));
+    if (data.race_start != null && s.goal_at >= data.race_start) {
+      return [h("strong", { class: "mono" }, raceTime(s.goal_at - data.race_start)), h("div", { class: "muted small" }, fmtDate(s.goal_at))];
+    }
     return [fmtDate(s.goal_at), start != null && s.goal_at >= start ? h("div", { class: "muted small" }, t("after {time}", { time: fmtSpan(s.goal_at - start) })) : null];
   };
   return h("div", { class: "table-wrap" }, h("table", { class: "table" },
-    h("thead", {}, h("tr", {}, ["#", t("Player"), t("Game"), t("Checked"), t("Goal reached")].map((text) => h("th", {}, text)))),
+    h("thead", {}, h("tr", {}, ["#", t("Player"), t("Game"), t("Checked"), data.race_start != null ? t("Race time") : t("Goal reached")].map((text) => h("th", {}, text)))),
     h("tbody", {}, rows.map((s, i) => h("tr", {},
       h("td", { class: "muted" }, s.goal_at != null ? String(i + 1) : ""),
       h("td", {}, h("span", { class: "row", style: { gap: "8px" } }, s.color ? h("span", { class: "line-key", style: { background: s.color } }) : null,
@@ -180,12 +192,18 @@ function standings(data, players, known, start) {
 
 // One line about when the game was played
 export function playedText(data) {
+  const begun = data.race_start ?? data.play_started_at;
+  const lastGoal = Math.max(...data.slots.map((s) => s.goal_at ?? 0));
+  if (data.finished_at && data.race_start != null && lastGoal >= data.race_start) {
+    return t("Race finished {date}, the last player after {time}", { date: fmtDate(lastGoal), time: raceTime(lastGoal - data.race_start) });
+  }
   if (data.finished_at) {
-    return data.play_started_at
-      ? t("Finished {date} after {time}", { date: fmtDate(data.finished_at), time: fmtSpan(data.finished_at - data.play_started_at) })
+    return begun
+      ? t("Finished {date} after {time}", { date: fmtDate(data.finished_at), time: fmtSpan(data.finished_at - begun) })
       : t("Finished {date}", { date: fmtDate(data.finished_at) });
   }
-  if (data.play_started_at) return t("Started {date}, {time} ago", { date: fmtDate(data.play_started_at), time: fmtSpan(data.now - data.play_started_at) });
+  if (data.race_start != null) return t("Race started {date}, {time} ago", { date: fmtDate(data.race_start), time: fmtSpan(data.now - data.race_start) });
+  if (begun) return t("Started {date}, {time} ago", { date: fmtDate(begun), time: fmtSpan(data.now - begun) });
   if (data.recorded_from) return t("Recorded since {date}", { date: fmtDate(data.recorded_from) });
   return null;
 }
