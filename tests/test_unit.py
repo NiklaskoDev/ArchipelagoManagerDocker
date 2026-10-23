@@ -346,7 +346,7 @@ def test_race_times_read_like_a_stopwatch():
                                                                               "26:01:01", "0:00"]
 
 
-def test_the_activity_feed_keeps_what_players_see():
+def test_the_activity_feed_keeps_what_players_see(tmp_path, monkeypatch):
     from archipelago_manager import activity
     parse = activity.parse
     assert parse("Notice (all): Old (Team #1) playing ChecksFinder has joined. Client(0.6.8), ['AP'].") == \
@@ -367,8 +367,7 @@ def test_the_activity_feed_keeps_what_players_see():
 
     # kept with the game, and read back after a restart
     game_id = 987654321
-    folder = CONFIG.games_dir / str(game_id)
-    folder.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(activity, "_path", lambda _game_id: tmp_path / "activity.jsonl")  # not in the data folder
     try:
         activity.note(game_id, "Notice (all): Ann: first")
         activity.note(game_id, "Set option password to ********")
@@ -379,6 +378,3 @@ def test_the_activity_feed_keeps_what_players_see():
         assert [e["text"] for e in activity.entries(game_id, after=1)["entries"]] == ["second"]
     finally:
         activity.forget(game_id)
-        for path in folder.iterdir():
-            path.unlink()
-        folder.rmdir()
