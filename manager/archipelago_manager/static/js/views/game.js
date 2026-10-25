@@ -10,7 +10,8 @@ import { awaySummary } from "../away.js";
 import { progressSection, playedText } from "../progresschart.js";
 
 // what a backup was made for, and the kind of a game file, as the server names them
-const BACKUP_REASONS = { auto: t("automatic"), manual: t("made by hand"), "before-reset": t("before a reset"), "before-restore": t("before a restore") };
+const BACKUP_REASONS = { auto: t("automatic"), manual: t("made by hand"), "before-reset": t("before a reset"), "before-restore": t("before a restore"),
+  "before-import": t("before taking over from archipelago.gg") };
 const FILE_KINDS = { patch: t("patch"), spoiler: t("spoiler"), yaml: t("yaml"), other: t("other") };
 // what a player says about how they are doing (PUT /api/games/{id}/slots/{slot}/status)
 const SLOT_STATUSES = { playing: ["ok", () => t("Playing")], stuck: ["warn", () => t("Stuck")], away: ["muted", () => t("On a break")] };
@@ -854,6 +855,35 @@ export default async function render({ root, params, cleanup, isCurrent, query }
     return details;
   }
 
+  // Moving a game here from archipelago.gg: its progress comes from the room's tracker (ggimport.py)
+  function importSection() {
+    const room = h("input", { class: "input", placeholder: "https://archipelago.gg/room/…", autocomplete: "off" });
+    const go = h("button", { class: "btn", type: "button" }, icon("download", 14), t("Take over the progress"));
+    const note = h("p", { class: "muted small" });
+    const sync = () => {
+      go.disabled = isActive(game);
+      note.textContent = isActive(game) ? t("Stop the server first") : "";
+    };
+    go.onclick = action(async () => {
+      if (!room.value.trim()) throw new Error(t("Paste the address of the room first"));
+      if (!(await confirmDialog(t("The progress of this game is replaced by the room's. The current progress is kept as a backup."),
+        { title: t("Take over the progress?"), confirmText: t("Take over") }))) return;
+      const result = await post(`/api/games/${id}/import-gg`, { room: room.value.trim() });
+      applyGame(result);
+      const r = result.imported;
+      toast(t("Taken over: {checked} locations checked, {received} items received, {hints} hints.", r)
+        + (r.patches ? ` ${plural(r.patches, "{n} patch file downloaded.", "{n} patch files downloaded.")}` : ""), "success", 9000);
+      room.value = "";
+    });
+    const details = h("details", { class: "card" }, h("summary", {}, t("Move from archipelago.gg")),
+      h("div", { class: "stack" },
+        h("p", { class: "muted small" }, t("Continue a game that was hosted on archipelago.gg here. archipelago.gg does not hand out a room's multiworld, so add this game from the zip the generator made (the one uploaded there), then paste the room's address: the locations checked, the items received, the hints and who reached their goal are taken from the room's tracker.")),
+        h("p", { class: "muted small" }, t("The room must hold this very multiworld. Hint points already spent and what some games keep in the server's data storage are not carried over. Patch files this game has none of yet are downloaded from the room. Let everyone stop playing there first: the tracker is up to a minute behind.")),
+        h("div", { class: "row" }, h("div", { class: "grow" }, room), go), note));
+    details.addEventListener("toggle", sync);
+    return details;
+  }
+
   function dangerSection() {
     return h("details", { class: "card" }, h("summary", {}, t("Danger zone")),
       h("div", { class: "stack" },
@@ -878,7 +908,8 @@ export default async function render({ root, params, cleanup, isCurrent, query }
   root.append(headerHost, awayHost, infoHost, trackerHost, textClientHost, activityHost, progressHost, slotsHost, adminHost);
   drawLive();
   if (manage) {
-    adminHost.append(settingsSection(), archiveHost, spectateSection(), filesSection(), consoleSection(), backupsSection(), dangerSection());
+    adminHost.append(settingsSection(), archiveHost, spectateSection(), filesSection(), consoleSection(), backupsSection(), importSection(),
+      dangerSection());
     if (query.get("tab") === "console") adminHost.querySelector("details:nth-of-type(4)")?.setAttribute("open", "");
   }
   const timer = setInterval(() => { if (!document.hidden) refresh().catch(() => {}); }, 4000);

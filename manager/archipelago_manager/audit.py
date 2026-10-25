@@ -36,6 +36,7 @@ ACTIONS: dict[tuple[str, str], str] = {
     ("POST", "/api/games/{game_id}/stop"): "game.stop",
     ("POST", "/api/games/{game_id}/restart"): "game.restart",
     ("POST", "/api/games/{game_id}/reset-save"): "game.reset",
+    ("POST", "/api/games/{game_id}/import-gg"): "game.import",
     ("POST", "/api/games/{game_id}/backups"): "game.backup",
     ("POST", "/api/games/{game_id}/backups/{name}/restore"): "game.restore",
     ("DELETE", "/api/games/{game_id}/backups/{name}"): "game.backup_delete",
@@ -93,8 +94,9 @@ ACTIONS: dict[tuple[str, str], str] = {
 SKIP = {("POST", "/api/configs"), ("POST", "/api/configs/text"), ("POST", "/api/configs/{config_id}/copy"),
         ("POST", "/api/games/{game_id}/wake"), ("POST", "/api/games/{game_id}/visit"),
         ("PUT", "/api/games/{game_id}/slots/{slot}/status"),
-        ("POST", "/api/configs/form/read"), ("POST", "/api/configs/form/write"),
-        ("POST", "/api/signups/{signup_id}/entries"), ("POST", "/api/signups/{signup_id}/entries/{entry_id}/refresh")}
+        ("POST", "/api/configs/form/read"), ("POST", "/api/configs/form/write"), ("POST", "/api/configs/roll"),
+        ("POST", "/api/signups/{signup_id}/entries"), ("POST", "/api/signups/{signup_id}/entries/{entry_id}/refresh"),
+        ("POST", "/api/signups/{signup_id}/mystery-entries"), ("POST", "/api/mystery-weights")}
 # Recorded for everyone, not only administrators
 FOR_EVERYONE = {"game.start", "game.stop", "game.restart", "slot.action", "slot.handover_accept"}
 

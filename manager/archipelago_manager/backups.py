@@ -21,7 +21,7 @@ from .config import CONFIG
 AUTO_INTERVAL = 30 * 60
 KEEP_AUTO = 48
 KEEP_OTHER = 20
-_NAME = re.compile(r"^(\d{8}-\d{6})(?:-(\d+))?-(auto|manual|before-reset|before-restore)\.apsave$")
+_NAME = re.compile(r"^(\d{8}-\d{6})(?:-(\d+))?-(auto|manual|before-reset|before-restore|before-import)\.apsave$")
 
 
 class BackupError(Exception):

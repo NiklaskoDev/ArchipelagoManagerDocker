@@ -13,8 +13,8 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPExcepti
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from .. import (activity, apbridge, audit, backups, db, gamepaths, gamestore, history, notify, reminders, schedule,
-               spectate, versions, visits, settings as app_settings, textclient)
+from .. import (activity, apbridge, audit, backups, db, gamepaths, gamestore, ggimport, history, notify, reminders,
+               schedule, spectate, versions, visits, settings as app_settings, textclient)
 from ..config import CONFIG
 from ..rooms import ROOMS, STATUS_GOAL, RoomError, mask_secrets, sleep_minutes, slot_rules, valid_password
 from ..security import current_user, is_admin, manages, organizer_user
@@ -529,6 +529,23 @@ async def reset_save(game_id: int, request: Request, user: sqlite3.Row = Depends
     ROOMS.forget_progress(game_id)
     history.forget(game_id)
     return await _detail(game_id, user, request)
+
+
+class GGImport(BaseModel):
+    room: str = Field(max_length=300)
+
+
+@router.post("/games/{game_id}/import-gg")
+async def import_from_archipelago_gg(game_id: int, body: GGImport, request: Request,
+                                     user: sqlite3.Row = Depends(current_user)) -> dict:
+    """Takes over how far everyone got in a room on archipelago.gg that hosts this multiworld (ggimport.py)."""
+    managed_game(game_id, user)
+    try:
+        result = await ggimport.take_over(game_id, body.room)
+    except ggimport.GGImportError as e:
+        raise HTTPException(e.status, e.message) from None
+    audit.note(request, room=result["room"], checked=result["checked"], patches=result["patches"])
+    return {**await _detail(game_id, user, request), "imported": result}
 
 
 # ----------------------------------------------------------------------------------------------------------------------

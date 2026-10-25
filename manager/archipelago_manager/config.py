@@ -54,6 +54,8 @@ class Config:
     ap_source_url: str
     # GitHub's API, for custom games that come from a repository's releases (replaced by a fake in tests)
     github_api: str
+    # archipelago.gg, where games are taken over from (ggimport.py; replaced by a fake in tests)
+    archipelago_gg: str
     # Discord's OAuth2 endpoints, for signing in with Discord (replaced by a fake in tests)
     discord_api: str
     discord_authorize: str
@@ -120,6 +122,7 @@ def load_config() -> Config:
         ap_source_url=os.environ.get(
             "AP_SOURCE_URL", "https://github.com/ArchipelagoMW/Archipelago/archive/refs/tags/{version}.tar.gz"),
         github_api=os.environ.get("GITHUB_API_URL", "https://api.github.com").rstrip("/"),
+        archipelago_gg=os.environ.get("ARCHIPELAGO_GG_URL", "https://archipelago.gg").rstrip("/"),
         discord_api=os.environ.get("DISCORD_API_URL", "https://discord.com/api/v10").rstrip("/"),
         discord_authorize=os.environ.get("DISCORD_AUTHORIZE_URL", "https://discord.com/oauth2/authorize"),
         sleep_minute_seconds=max(1, _int("SLEEP_MINUTE_SECONDS", 60)),

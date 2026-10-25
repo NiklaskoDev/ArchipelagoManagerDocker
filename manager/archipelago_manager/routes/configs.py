@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Res
 from fastapi.responses import FileResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 
-from .. import apbridge, configstore, db, yamlform, yamlinfo
+from .. import apbridge, configstore, db, mystery, yamlform, yamlinfo
 from ..configstore import config_path
 from ..security import current_user, is_admin
 
@@ -280,6 +280,22 @@ async def get_options_form(request: Request, game: str = Query(max_length=200),
 
 class YamlText(BaseModel):
     content: str = Field(max_length=yamlinfo.MAX_YAML_BYTES)
+
+
+class RollRequest(BaseModel):
+    content: str = Field(max_length=yamlinfo.MAX_YAML_BYTES)
+
+
+@router.post("/configs/roll")
+async def roll_config(body: RollRequest, _user: sqlite3.Row = Depends(current_user)) -> dict:
+    """What a file with weights comes out as when the generator rolls it, once (mystery.py)."""
+    try:
+        await asyncio.to_thread(yamlinfo.analyze, body.content, "config")
+        return await mystery.roll(body.content)
+    except yamlinfo.YamlError as e:
+        raise HTTPException(400, str(e)) from None
+    except mystery.RollError as e:
+        raise HTTPException(400, f"This file cannot be rolled: {e}") from None
 
 
 @router.post("/configs/form/read")

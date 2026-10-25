@@ -253,7 +253,7 @@ def test_a_database_from_the_first_version_is_upgraded(tmp_path):
         games = admin.get("/api/games").json()
         assert [(g["name"], g["single_claim"], g["finished_at"]) for g in games] == [("Old game", False, None)]
         conn = sqlite3.connect(db_path)
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 17
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 18
         conn.close()
         # tables added since then exist and work
         r = admin.post("/api/signups", json={"name": "After the upgrade"})

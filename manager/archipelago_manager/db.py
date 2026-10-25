@@ -13,7 +13,7 @@ from .config import CONFIG
 
 log = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 17
+SCHEMA_VERSION = 18
 
 # Added in schema version 3
 _SIGNUPS = """
@@ -183,6 +183,8 @@ _SPECTATE_REMINDERS = (
     "ALTER TABLE game_slots ADD COLUMN player_since REAL; "
     "ALTER TABLE game_slots ADD COLUMN reminded_at REAL; "
     "ALTER TABLE game_slots ADD COLUMN reminders INTEGER NOT NULL DEFAULT 0;")
+# Added in schema version 18: a mystery round (mystery.py), whose players all get what one file of weights rolls
+_MYSTERY = "ALTER TABLE signups ADD COLUMN mystery INTEGER NOT NULL DEFAULT 0;"
 
 SCHEMA = _USERS + _USERS_INDEX + """
 CREATE TABLE sessions (
@@ -323,7 +325,7 @@ CREATE TABLE job_players (
 );
 CREATE INDEX job_players_job ON job_players(job_id);
 """ + _SIGNUPS + _SOURCES + "ALTER TABLE apworld_sources ADD COLUMN latest_asset TEXT; " + \
-    "ALTER TABLE signups ADD COLUMN test_job_id INTEGER;" + _PROGRESS + _AUDIT + _VISITS + _AP_VERSIONS + _API_TOKENS + _SPECTATE_REMINDERS
+    "ALTER TABLE signups ADD COLUMN test_job_id INTEGER;" + _PROGRESS + _AUDIT + _VISITS + _AP_VERSIONS + _API_TOKENS + _SPECTATE_REMINDERS + _MYSTERY
 
 
 # Upgrades for databases created by older versions: MIGRATIONS[n] turns schema n - 1 into schema n. New databases get
@@ -377,6 +379,7 @@ MIGRATIONS: dict[int, str] = {
           "WHERE name = 'users_new' AND EXISTS (SELECT 1 FROM sqlite_sequence WHERE name = 'users'); "
           "DROP TABLE users; ALTER TABLE users_new RENAME TO users; "
         + _USERS_INDEX + _SPECTATE_REMINDERS,
+    18: _MYSTERY,
 }
 
 
