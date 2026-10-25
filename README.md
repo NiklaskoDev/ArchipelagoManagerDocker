@@ -603,5 +603,5 @@ DATA_DIR=../data AP_DIR=$PWD/../Archipelago AP_PYTHON=$PWD/../ap-venv/bin/python
 
 ## Limitations
 
-- One Archipelago version at a time; images are published for `linux/amd64`.
+- Images are published for `linux/amd64` only.
 - Game ports are served by Archipelago's own server and are not behind TLS.
