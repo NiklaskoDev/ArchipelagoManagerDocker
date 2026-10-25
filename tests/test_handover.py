@@ -7,8 +7,8 @@ from helpers import make_game
 
 pytestmark = pytest.mark.ap
 
-ALL_EVENTS = ["game_online", "game_crashed", "player_goal", "player_stuck", "slot_handover", "hint_found", "generation",
-              "signup", "apworld_pending", "apworld_update", "ap_update"]
+ALL_EVENTS = ["game_online", "game_crashed", "player_goal", "player_stuck", "player_inactive", "slot_handover", "hint_found",
+              "generation", "signup", "apworld_pending", "apworld_update", "ap_update"]
 
 
 def offer(client, gid, slot, to=None, note=""):

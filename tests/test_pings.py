@@ -8,9 +8,10 @@ import pytest
 from archipelago_manager.notify import MAX_MENTIONS, build_payload
 from helpers import APClient, make_game, save_now, wait_for, wait_state
 
-ALL_EVENTS = ["game_online", "game_crashed", "player_goal", "player_stuck", "slot_handover", "hint_found", "generation",
-              "signup", "apworld_pending", "apworld_update", "ap_update"]
-KINDS = ["game_ready", "game_online", "hint_found", "player_stuck", "slot_handover", "signup_open", "signup_closing"]
+ALL_EVENTS = ["game_online", "game_crashed", "player_goal", "player_stuck", "player_inactive", "slot_handover", "hint_found",
+              "generation", "signup", "apworld_pending", "apworld_update", "ap_update"]
+KINDS = ["game_ready", "game_online", "hint_found", "player_stuck", "player_inactive", "slot_handover", "signup_open",
+         "signup_closing"]
 CHECKS_FINDER_BASE = 81000
 
 
@@ -87,7 +88,7 @@ def test_players_choose_their_mentions_and_sign_ups_mention_them(plain_server):
                                                "notify_events": [e for e in ALL_EVENTS if e != "signup"]})
         assert r.status_code == 200 and r.json()["notify_mentions"] is True
         assert ann.get("/api/auth/status").json()["ping_kinds"] == ["game_ready", "game_online", "hint_found",
-                                                                    "player_stuck", "slot_handover"]
+                                                                    "player_stuck", "player_inactive", "slot_handover"]
         admin.patch("/api/settings", json={"notify_events": ALL_EVENTS})
         assert ann.get("/api/auth/status").json()["ping_kinds"] == KINDS
         assert server.client().get("/api/auth/status").json()["ping_kinds"] == []  # not signed in
