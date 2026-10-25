@@ -33,6 +33,8 @@ players log in to keep their YAML configs, see their games and download their pa
 - **Runs every game on the Archipelago version it needs.** Besides the version in the image, admins can install
   further Archipelago releases from the web UI. Each game runs, and each generation generates, on the version chosen for
   it, so an old seed or a custom game that needs another version keeps working next to the rest.
+- **An API for scripts and bots.** Everyone can make personal API tokens (read only, or read and change) for a Discord
+  bot, a status page or a script, which then use the same API as the web UI in their name.
 - **One UI for admins and players.** Players see only their games, can start and stop them (if allowed) and download
   their files. Admins also get the live console, file management, per-game settings and user management.
 - **A text client in the browser.** Players chat with the multiworld and use the server's commands (`!hint`,
@@ -305,6 +307,29 @@ itself. Both edit the same file, so switch whenever you like.
 - **Backup of everything:** *Admin → Settings → Backup of everything → Download a backup* makes one zip of the whole
   data folder (see [Data and backups](#data-and-backups)) and downloads it.
 
+### API tokens
+
+Scripts and bots (a Discord bot, a status page, a scheduled script) use the same JSON API as the web UI, with a personal
+token instead of signing in. *API tokens* in the user menu makes one: a name, the access, and how long it lasts (30 or
+90 days, a year, or never). The token is shown once; only a hash of it is stored.
+
+- **Read only** tokens can make `GET` requests only: look up games, slots, progress, the activity feed.
+- **Read and change** tokens can do everything their user can do in the web UI, such as starting a game or claiming a
+  slot. An administrator's token can do what administrators can.
+
+Send it in the `Authorization` header:
+
+```sh
+curl -H "Authorization: Bearer apm_…" https://archipelago.example.com/api/games
+curl -X POST -H "Authorization: Bearer apm_…" https://archipelago.example.com/api/games/1/start
+curl -H "Authorization: Bearer apm_…" "https://archipelago.example.com/api/games/1/activity?after=0"
+```
+
+Tokens cannot make or list tokens, change passwords, sign in or out, or link Discord. The token page shows when each
+token was last used, and from where; *Revoke* ends one at once. Administrators see everyone's tokens there and can
+revoke any of them. A token also stops working when it expires or its user is disabled, and goes with its user. The
+administrators' log names the token an administrator's change was made with.
+
 ### Language
 
 The web UI is available in English and German. It follows the browser's language at first; switch it on the sign-in
@@ -433,6 +458,11 @@ approve pull requests*. You can also run the workflow by hand (*Actions → Arch
 
 - Passwords are stored as salted scrypt hashes; sessions are `HttpOnly`, `SameSite=Lax` cookies; state-changing API
   calls require a custom header, which blocks cross-site requests; failed logins are rate limited.
+- API tokens are 256-bit random values of which only a SHA-256 hash is stored. They go in the `Authorization` header,
+  which another website cannot make a browser send, so they need no CSRF header. A request with a token is judged by
+  the token alone, never by a cookie it also carries, and a token cannot manage tokens, passwords, sign-ins or Discord
+  links, so a leaked token cannot lock its owner out or keep itself alive after it is revoked. Other `Authorization`
+  headers, such as a reverse proxy's basic auth, are ignored.
 - Archipelago's game connections are plain websockets and are not encrypted. A room password only keeps people out,
   it is sent unencrypted. Do not reuse a password you care about.
 - The web UI speaks plain HTTP. Do not expose it to the internet without an HTTPS reverse proxy.

@@ -1,4 +1,4 @@
-"""Password hashing, cookie sessions and request guards."""
+"""Password hashing, cookie sessions, API tokens and request guards."""
 from __future__ import annotations
 
 import base64
@@ -17,6 +17,11 @@ SESSION_COOKIE = "apm_session"
 SESSION_TTL = 30 * 24 * 3600
 CSRF_HEADER = "x-requested-with"
 CSRF_VALUE = "archipelago-manager"
+
+# Personal API tokens: "Authorization: Bearer apm_..." instead of the session cookie (routes/tokens.py)
+TOKEN_PREFIX = "apm_"
+TOKEN_TOUCH_INTERVAL = 60  # how often a token's "last used" is written, at most
+SAFE_METHODS = ("GET", "HEAD", "OPTIONS")
 
 _SCRYPT_N, _SCRYPT_R, _SCRYPT_P = 2 ** 14, 8, 1
 MIN_PASSWORD_LENGTH = 8
@@ -90,7 +95,51 @@ def set_session_cookie(request: Request, response: Response, token: str) -> None
                         secure=https_in_use(request), path="/")
 
 
+def bearer_token(request: Request) -> str | None:
+    """The API token a request carries, if any. Other Authorization headers (a reverse proxy's basic auth) are not
+    ours and are left alone."""
+    scheme, _, value = request.headers.get("authorization", "").partition(" ")
+    value = value.strip()
+    return value if scheme.lower() == "bearer" and value.startswith(TOKEN_PREFIX) else None
+
+
+def new_api_token() -> tuple[str, str]:
+    """A new token and the hash that is stored for it."""
+    token = TOKEN_PREFIX + secrets.token_urlsafe(32)
+    return token, _hash_token(token)
+
+
+def token_for_request(request: Request) -> dict | None:
+    """What the request's API token is (id, name, access), once user_for_request has accepted it."""
+    return request.scope.get("api_token")
+
+
+def _user_for_token(request: Request, token: str) -> sqlite3.Row | None:
+    now = time.time()
+    found = db.query_one("SELECT id, user_id, name, access, last_used_at FROM api_tokens "
+                         "WHERE token_hash = ? AND (expires_at IS NULL OR expires_at > ?)", (_hash_token(token), now))
+    if not found:
+        return None
+    user = db.query_one("SELECT * FROM users WHERE id = ? AND disabled = 0", (found["user_id"],))
+    if user is None:
+        return None
+    request.scope["api_token"] = {"id": found["id"], "name": found["name"], "access": found["access"]}
+    if not found["last_used_at"] or now - found["last_used_at"] > TOKEN_TOUCH_INTERVAL:
+        db.execute("UPDATE api_tokens SET last_used_at = ?, last_used_ip = ? WHERE id = ?",
+                   (now, request.client.host if request.client else None, found["id"]))
+    return user
+
+
 def user_for_request(request: Request) -> sqlite3.Row | None:
+    """The signed-in user: from an API token if the request carries one (then only from it), from the session cookie
+    otherwise."""
+    if "api_token_user" in request.scope:  # looked up once per request (the middlewares and the route all ask)
+        return request.scope["api_token_user"]
+    api_token = bearer_token(request)
+    if api_token is not None:
+        user = _user_for_token(request, api_token)
+        request.scope["api_token_user"] = user
+        return user
     token = request.cookies.get(SESSION_COOKIE)
     if not token:
         return None
