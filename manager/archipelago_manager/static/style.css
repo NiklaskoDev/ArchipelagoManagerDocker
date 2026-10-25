@@ -71,9 +71,8 @@ code, .mono { font-family: var(--mono); font-size: .9em; }
 .topbar-inner { max-width: 1180px; margin: 0 auto; padding: 0 16px; display: flex; align-items: center; gap: 20px; min-height: 56px; }
 .brand { display: flex; align-items: center; gap: 10px; color: var(--text); font-weight: 650; white-space: nowrap; }
 .brand:hover { text-decoration: none; }
-.brand-mark { display: inline-grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; background: var(--accent);
-  color: var(--on-accent); font-weight: 800; font-size: .8rem; letter-spacing: .02em; }
-.brand-mark.large { width: 44px; height: 44px; font-size: 1.1rem; border-radius: 12px; }
+.brand-mark { display: block; width: 30px; height: 30px; flex: none; }
+.brand-mark.large { width: 44px; height: 44px; }
 .nav { display: flex; gap: 2px; flex: 1; overflow-x: auto; scrollbar-width: none; }
 .nav::-webkit-scrollbar { display: none; }
 .nav-link { display: inline-flex; align-items: center; gap: 7px; padding: 8px 12px; border-radius: 8px; color: var(--muted);

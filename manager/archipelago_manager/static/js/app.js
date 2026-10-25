@@ -122,7 +122,7 @@ function renderShell() {
   document.addEventListener("click", () => { menu.hidden = true; });
   const topbar = h("header", { class: "topbar" },
       h("div", { class: "topbar-inner" },
-        h("a", { class: "brand", href: "#/" }, h("span", { class: "brand-mark" }, "AP"), h("span", { class: "brand-name" }, "Archipelago Manager")),
+        h("a", { class: "brand", href: "#/" }, h("img", { class: "brand-mark", src: "favicon.svg", alt: "" }), h("span", { class: "brand-name" }, "Archipelago Manager")),
         h("nav", { class: "nav", "aria-label": t("Main") }, links),
         h("div", { class: "user-menu" }, userButton, menu)));
   clear(app).append(topbar, view, h("footer", { class: "footer muted small" }, `Archipelago Manager ${state.status.version}`));
@@ -357,7 +357,7 @@ function renderAuth(notice) {
     error, submit);
     const other = lang === "de" ? "en" : "de";
     clear(card).append(
-      h("div", { class: "auth-brand" }, h("span", { class: "brand-mark large" }, "AP"), h("h1", {}, "Archipelago Manager")),
+      h("div", { class: "auth-brand" }, h("img", { class: "brand-mark large", src: "favicon.svg", alt: "" }), h("h1", {}, "Archipelago Manager")),
       mode === "setup" ? h("p", { class: "muted" }, t("Welcome! Create the administrator account to get started.")) : null,
       form,
       mode !== "setup" && status.discord_login ? [h("div", { class: "auth-or" }, t("or")), discordButton(status)] : null,
