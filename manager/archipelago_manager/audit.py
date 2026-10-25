@@ -1,9 +1,11 @@
-"""Who changed what: every change an administrator makes, and every start and stop of a game, for the administrators.
+"""Who changed what: every change an administrator or organizer makes, and every start and stop of a game, for the
+administrators.
 
-A middleware (main.py) records each successful state-changing API request of an administrator, and the starts, stops,
-restarts, releases and collects of players. The action is named after the route (ACTIONS). What it acted on (a game, a
-user, ...) is looked up before the request runs, so a deleted one keeps its name in the log. Routes add what the log
-should know about a change with note(): which settings changed, the console command, a new user's name, ...
+A middleware (main.py) records each successful state-changing API request of an administrator or an organizer, and
+the starts, stops, restarts, releases and collects of players. The action is named after the route (ACTIONS). What it
+acted on (a game, a user, ...) is looked up before the request runs, so a deleted one keeps its name in the log. Routes
+add what the log should know about a change with note(): which settings changed, the console command, a new user's
+name, ...
 
 Passwords never reach the log: routes note which fields changed, not their values, and the console command is masked
 like the console itself (rooms.mask_secrets).
@@ -28,6 +30,8 @@ ACTIONS: dict[tuple[str, str], str] = {
     ("PATCH", "/api/games/{game_id}"): "game.settings",
     ("DELETE", "/api/games/{game_id}"): "game.delete",
     ("POST", "/api/games/{game_id}/test-notification"): "game.test_notification",
+    ("POST", "/api/games/{game_id}/spectate"): "game.spectate",
+    ("DELETE", "/api/games/{game_id}/spectate"): "game.spectate_end",
     ("POST", "/api/games/{game_id}/start"): "game.start",
     ("POST", "/api/games/{game_id}/stop"): "game.stop",
     ("POST", "/api/games/{game_id}/restart"): "game.restart",
@@ -137,7 +141,7 @@ def finish(request: Request, user: sqlite3.Row, before: tuple | None) -> None:
     if key in SKIP:
         return
     action = ACTIONS.get(key, f"{request.method} {template}")
-    if user["role"] != "admin" and action not in FOR_EVERYONE:
+    if user["role"] == "user" and action not in FOR_EVERYONE:
         return
     details = dict(request.scope.get("audit") or {})
     if request.scope.get("api_token"):  # done by a script or bot with one of the user's API tokens

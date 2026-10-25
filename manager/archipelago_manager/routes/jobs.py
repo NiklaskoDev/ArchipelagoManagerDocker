@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 
 from .. import apbridge, audit, db, versions, settings as app_settings
 from ..generation import GENERATION, JobRequestError, create_job, job_dir, prepare_players
-from ..security import current_user, is_admin
+from ..security import current_user, is_admin, is_organizer
 
 router = APIRouter(prefix="/api")
 
@@ -64,7 +64,7 @@ class JobCreate(BaseModel):
 @router.post("/jobs")
 async def start_job(body: JobCreate, request: Request, user: sqlite3.Row = Depends(current_user)):
     admin = is_admin(user)
-    if not admin and not app_settings.get_setting("users_can_generate"):
+    if not is_organizer(user) and not app_settings.get_setting("users_can_generate"):
         raise HTTPException(403, "Only administrators can generate games on this server")
     try:
         version = versions.check_choice(body.ap_version)

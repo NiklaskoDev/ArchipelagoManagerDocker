@@ -1,5 +1,5 @@
 import { h, clear, icon, toast, openModal, action, confirmDialog } from "./util.js";
-import { api, state, refreshStatus, setUnauthorizedHandler, isAdmin, post, put, ApiError } from "./api.js";
+import { api, state, refreshStatus, setUnauthorizedHandler, isAdmin, canGenerate, post, put, ApiError } from "./api.js";
 import { banner, loading, field, checkbox } from "./components.js";
 import { t, lang, LANGUAGES, setLanguage } from "./i18n.js";
 
@@ -100,19 +100,19 @@ function navLink(href, section, label, iconName) {
 }
 
 function renderShell() {
-  const perms = state.status.permissions;
   const links = [
     navLink("#/", "home", t("Dashboard"), "home"),
     navLink("#/games", "games", t("Games"), "server"),
     navLink("#/configs", "configs", t("My configs"), "file"),
     navLink("#/signups", "signups", t("Sign-ups"), "calendar"),
-    (isAdmin() || perms.generate) ? navLink("#/generate", "generate", t("Generate"), "zap") : null,
+    canGenerate() ? navLink("#/generate", "generate", t("Generate"), "zap") : null,
     navLink("#/worlds", "worlds", t("Custom games"), "package"),
     isAdmin() ? navLink("#/admin/users", "admin", t("Admin"), "settings") : null,
   ];
   view = h("main", { id: "view", class: "view", tabindex: "-1" });
   const userButton = h("button", { class: "btn ghost user-btn", type: "button", "aria-haspopup": "menu" },
-    icon("user", 16), h("span", {}, state.user.username), isAdmin() ? h("span", { class: "badge accent" }, t("admin")) : null);
+    icon("user", 16), h("span", {}, state.user.username), isAdmin() ? h("span", { class: "badge accent" }, t("admin"))
+      : state.user.role === "organizer" ? h("span", { class: "badge accent" }, t("organizer")) : null);
   const menu = h("div", { class: "menu", hidden: true, role: "menu" });
   userButton.onclick = (e) => {
     e.stopPropagation();
@@ -222,6 +222,7 @@ const PING_KINDS = [
   ["game_online", () => t("A game you play in is online")],
   ["hint_found", () => t("Someone found an item that was hinted for you")],
   ["player_stuck", () => t("Someone in a game you play in is stuck")],
+  ["player_inactive", () => t("You have not played a game for a while and the others play on")],
   ["slot_handover", () => t("A slot is offered to you, or looks for a new player")],
   ["signup_open", () => t("Sign-ups open")],
   ["signup_closing", () => t("Sign-ups close soon and you have not entered yet")],

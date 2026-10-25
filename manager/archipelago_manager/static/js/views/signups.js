@@ -1,5 +1,5 @@
 import { h, clear, icon, fmtAgo } from "../util.js";
-import { get, isAdmin } from "../api.js";
+import { get, isOrganizer } from "../api.js";
 import { pageHeader, empty, chips } from "../components.js";
 import { openSignupForm, signupBadge, deadlineText } from "./signup.js";
 import { t, plural } from "../i18n.js";
@@ -20,7 +20,7 @@ export function signupCard(s) {
 }
 
 export default async function render({ root, cleanup, isCurrent }) {
-  const admin = isAdmin();
+  const organizer = isOrganizer();  // opens rounds
   const host = h("div");
   let signature = "";
 
@@ -33,9 +33,9 @@ export default async function render({ root, cleanup, isCurrent }) {
     clear(host);
     if (!list.length) {
       host.append(empty(t("No sign-up rounds yet"),
-        admin ? t("Open a round: players enter their YAML until the deadline, then the game is generated from all entries.")
+        organizer ? t("Open a round: players enter their YAML until the deadline, then the game is generated from all entries.")
               : t("When an administrator opens a round, you can enter your config here."),
-        admin ? h("button", { class: "btn primary", type: "button", onclick: create }, icon("plus", 14), t("New round")) : null));
+        organizer ? h("button", { class: "btn primary", type: "button", onclick: create }, icon("plus", 14), t("New round")) : null));
       return;
     }
     const active = list.filter((s) => s.status !== "done");
@@ -53,7 +53,7 @@ export default async function render({ root, cleanup, isCurrent }) {
 
   root.append(
     pageHeader(t("Sign-ups"), t("Rounds that collect everyone's YAML until a deadline, then generate one game from them."),
-      admin ? h("button", { class: "btn primary", type: "button", onclick: create }, icon("plus", 14), t("New round")) : null),
+      organizer ? h("button", { class: "btn primary", type: "button", onclick: create }, icon("plus", 14), t("New round")) : null),
     host);
   await load(true);
   const timer = setInterval(() => { if (!document.hidden) load().catch(() => {}); }, 8000);

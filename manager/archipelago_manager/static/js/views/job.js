@@ -1,5 +1,5 @@
 import { h, clear, icon, toast, action, confirmDialog, fmtDate, fmtDuration } from "../util.js";
-import { get, post, del, isAdmin, state } from "../api.js";
+import { get, post, del, canGenerate } from "../api.js";
 import { pageHeader, jobBadge, chips, banner, badge } from "../components.js";
 import { t, tServer } from "../i18n.js";
 
@@ -12,7 +12,7 @@ export default async function render({ root, params, cleanup, isCurrent }) {
   let after = 0, timer = null, busy = false;
 
   const finished = () => !["queued", "running"].includes(job.status);
-  const canGenerate = isAdmin() || !!state.status?.permissions?.generate;
+  const generates = canGenerate();
 
   function drawHead() {
     const elapsed = job.started_at ? (job.finished_at || Date.now() / 1000) - job.started_at : 0;
@@ -33,7 +33,7 @@ export default async function render({ root, params, cleanup, isCurrent }) {
           drawHead();
         }) }, icon("stop", 14), t("Cancel")) : null,
         job.game_id ? h("a", { class: "btn primary", href: `#/games/${job.game_id}` }, icon("server", 14), t("Open game")) : null,
-        finished() && !job.test && canGenerate ? h("a", { class: "btn", href: `#/generate?from=${id}` }, icon("restart", 14), t("Generate again")) : null,
+        finished() && !job.test && generates ? h("a", { class: "btn", href: `#/generate?from=${id}` }, icon("restart", 14), t("Generate again")) : null,
         finished() ? h("button", { class: "btn ghost", type: "button", onclick: action(async () => {
           if (!(await confirmDialog(t("Remove this job and its log?"), { danger: true, confirmText: t("Remove") }))) return;
           await del(`/api/jobs/${id}`);

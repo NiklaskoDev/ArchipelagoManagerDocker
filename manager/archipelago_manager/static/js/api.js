@@ -58,6 +58,9 @@ export const put = (path, body) => api("PUT", path, body);
 export const del = (path) => api("DELETE", path);
 
 export const isAdmin = () => state.user?.role === "admin";
+// Organizers add games, generate and open sign-up rounds, and run those, without administering the server
+export const isOrganizer = () => ["admin", "organizer"].includes(state.user?.role);
+export const canGenerate = () => isOrganizer() || !!state.status?.permissions?.generate;
 
 export async function refreshStatus() {
   state.status = await get("/api/auth/status");

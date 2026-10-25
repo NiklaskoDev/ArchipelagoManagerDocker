@@ -59,6 +59,8 @@ class Config:
     discord_authorize: str
     # How long a minute of the sleep timer lasts (rooms.py): seconds in tests
     sleep_minute_seconds: int
+    # How long a day lasts for reminding players who stopped playing (reminders.py): seconds in tests
+    reminder_day_seconds: int
 
     # --- derived paths -------------------------------------------------------------------------------------------
     @property
@@ -121,6 +123,7 @@ def load_config() -> Config:
         discord_api=os.environ.get("DISCORD_API_URL", "https://discord.com/api/v10").rstrip("/"),
         discord_authorize=os.environ.get("DISCORD_AUTHORIZE_URL", "https://discord.com/oauth2/authorize"),
         sleep_minute_seconds=max(1, _int("SLEEP_MINUTE_SECONDS", 60)),
+        reminder_day_seconds=max(1, _int("REMINDER_DAY_SECONDS", 86400)),
     )
 
 

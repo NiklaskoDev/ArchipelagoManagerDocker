@@ -1,10 +1,11 @@
 import { h, clear, icon, openModal, toast, action, fmtDate, fmtSpan } from "../util.js";
-import { api, get, isAdmin } from "../api.js";
+import { api, get, isAdmin, isOrganizer } from "../api.js";
 import { pageHeader, empty, stateBadge, chips, badge, controlButtons, copyField, checkbox, field, promptMissingGames, apVersionField } from "../components.js";
 import { t, tServer } from "../i18n.js";
 
 export default async function render({ root, cleanup, isCurrent }) {
   const admin = isAdmin();
+  const organizer = isOrganizer();  // adds games
   const host = h("div");
   let signature = "";
 
@@ -21,10 +22,10 @@ export default async function render({ root, cleanup, isCurrent }) {
     clear(host);
     if (!games.length) {
       host.append(empty(t("No games here yet"),
-        admin ? t("Upload the zip of a pregenerated multiworld, or generate one from player configs.")
+        organizer ? t("Upload the zip of a pregenerated multiworld, or generate one from player configs.")
               : t("You will see a game here once an administrator adds you to one."),
-        admin ? h("button", { class: "btn primary", type: "button", onclick: action(uploadDialog) }, icon("upload", 14), t("Add a game")) : null,
-        admin ? h("a", { class: "btn", href: "#/generate" }, icon("zap", 14), t("Generate")) : null));
+        organizer ? h("button", { class: "btn primary", type: "button", onclick: action(uploadDialog) }, icon("upload", 14), t("Add a game")) : null,
+        organizer ? h("a", { class: "btn", href: "#/generate" }, icon("zap", 14), t("Generate")) : null));
       return;
     }
     const running = games.filter((g) => !g.finished_at);
@@ -117,9 +118,10 @@ export default async function render({ root, cleanup, isCurrent }) {
   }
 
   root.append(
-    pageHeader(t("Games"), admin ? t("Every hosted multiworld on this server.") : t("Multiworlds you are part of."),
-      admin ? h("button", { class: "btn primary", type: "button", onclick: action(uploadDialog) }, icon("upload", 14), t("Add a game")) : null,
-      admin ? h("a", { class: "btn", href: "#/generate" }, icon("zap", 14), t("Generate")) : null),
+    pageHeader(t("Games"), admin ? t("Every hosted multiworld on this server.")
+      : organizer ? t("Multiworlds you run or are part of.") : t("Multiworlds you are part of."),
+      organizer ? h("button", { class: "btn primary", type: "button", onclick: action(uploadDialog) }, icon("upload", 14), t("Add a game")) : null,
+      organizer ? h("a", { class: "btn", href: "#/generate" }, icon("zap", 14), t("Generate")) : null),
     host);
   await load(true);
   const timer = setInterval(() => { if (!document.hidden) load().catch(() => {}); }, 5000);

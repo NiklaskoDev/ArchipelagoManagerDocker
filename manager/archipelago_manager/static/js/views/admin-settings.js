@@ -21,13 +21,15 @@ export default async function render({ root, cleanup }) {
     auto_restart_crashed: checkbox(t("Restart game servers that crash"), settings.auto_restart_crashed, t("Gives up after three crashes in ten minutes.")),
   };
   const rules = serverOptionsForm(settings.default_server_options);
+  // after how many days without playing, while the others play on, a player is reminded (reminders.py)
+  const remindDays = h("input", { class: "input", type: "number", min: 0, max: 60, value: settings.remind_days });
   const discord = notificationsCard(settings);
   const login = discordLoginCard(settings, siteUrl);
   useThisPage.onclick = () => { siteUrl.value = location.origin; login.siteChanged(); };
   const saveSettings = h("button", { class: "btn primary", type: "button" }, t("Save settings"));
   saveSettings.onclick = action(async () => {
     const body = { public_host: publicHost.value.trim(), site_url: siteUrl.value.trim(), default_server_options: rules.read(),
-      ...discord.read(), ...login.read() };
+      remind_days: Number(remindDays.value || 0), ...discord.read(), ...login.read() };
     for (const [key, box] of Object.entries(toggles)) body[key] = box.input.checked;
     const saved = await patch("/api/settings", body);
     discord.drawStatus(saved.notify_status);
@@ -104,7 +106,9 @@ export default async function render({ root, cleanup }) {
           t("Where players open this page, e.g. https://archipelago.example.com. Discord messages link here, and signing in with Discord needs it.")),
         h("div", { class: "stack tight" }, Object.values(toggles))),
       h("div", { class: "card stack" }, h("h2", {}, t("Defaults for new games")),
-        h("p", { class: "muted small" }, t("Applied when a game is added. Each game can override them.")), rules.node),
+        h("p", { class: "muted small" }, t("Applied when a game is added. Each game can override them.")), rules.node,
+        field(t("Remind players who stopped playing after (days)"), remindDays,
+          t("For every game that does not set its own: a player who has not played for this many days while the others play on is reminded on their dashboard and on Discord, up to three times. 0 turns it off."))),
       login.node,
       discord.node,
       romsCard(),
@@ -198,6 +202,8 @@ const EVENTS = [
   ["game_crashed", t("A game server crashes")],
   ["player_goal", t("A player reaches their goal, and when everyone has")],
   ["player_stuck", t("A player says they are stuck"), t("With their note and where the items hinted for them are.")],
+  ["player_inactive", t("A player has not played for a while, and the others play on"),
+    t("With how many hinted items of the others wait in their world. When this happens is set under Defaults for new games, and per game.")],
   ["slot_handover", t("A player hands their slot over, and someone takes it over"),
     t("A slot offered to whoever takes it is announced to everyone who can see the game.")],
   ["hint_found", t("A hinted item is found"), t("Many at once, for example after a !release, come as one message.")],

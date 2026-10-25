@@ -1,6 +1,6 @@
-import { h, clear, icon, toast, action, confirmDialog, openModal, fmtBytes, fmtAgo, fmtDate, fmtUntil, shortName, toLocalInput,
-         fromLocalInput } from "../util.js";
-import { api, get, post, patch, del, isAdmin, state } from "../api.js";
+import { h, clear, icon, toast, action, confirmDialog, openModal, fmtBytes, fmtAgo, fmtDate, fmtUntil, fmtSpan, shortName,
+         toLocalInput, fromLocalInput } from "../util.js";
+import { api, get, post, patch, del, isAdmin, canGenerate, state } from "../api.js";
 import { stateBadge, badge, chips, progressBar, copyField, copyButton, controlButtons, banner, field, checkbox, select,
          missingGamesPanel, isActive, serverOptionsForm, deliveryStatus } from "../components.js";
 import { t, tServer, plural } from "../i18n.js";
@@ -20,8 +20,9 @@ export default async function render({ root, params, cleanup, isCurrent, query }
   const id = Number(params[0]);
   const admin = isAdmin();
   let game = await get(`/api/games/${id}`);
-  const users = admin ? await get("/api/users") : [];
-  const apVersions = admin ? await get("/api/ap-versions") : null;
+  const manage = game.can_manage;  // an administrator, or the organizer who added or generated the game
+  const users = manage ? await get("/api/users/names") : [];
+  const apVersions = manage ? await get("/api/ap-versions") : null;
 
   const headerHost = h("div");
   // what happened while the player was away, for players of the game
@@ -53,9 +54,10 @@ export default async function render({ root, params, cleanup, isCurrent, query }
           ].filter(Boolean).join(" · "))),
         h("div", { class: "page-actions" }, controlButtons(game, applyGame),
           // the same configs and options once more, with a new seed
-          game.job_available && (admin || state.status?.permissions?.generate)
+          game.job_available && canGenerate()
             ? h("a", { class: "btn sm", href: `#/generate?from=${game.job_id}` }, icon("restart", 14), t("Generate again")) : null)),
       startBanner(),
+      waitingBanner(),
       offersBanner(),
       game.state === "crashed" ? banner("error", icon("alert", 18), h("div", { class: "grow" },
         h("strong", {}, t("The server stopped unexpectedly.")), " ", game.error ? tServer(game.error) : t("See the console for details."))) : null,
@@ -90,6 +92,19 @@ export default async function render({ root, params, cleanup, isCurrent, query }
     ].filter(Boolean).join(" ");
     return banner(opened ? "ok" : "info", icon("calendar", 18), h("div", { class: "grow" },
       h("div", {}, t("Starts {date}", { date: fmtDate(start.at) }), " · ", left), h("div", { class: "muted small" }, how)));
+  }
+
+  // The player was reminded that the others play on without them (reminders.py)
+  function waitingBanner() {
+    return game.my_slots.filter((s) => s.idle_since).map((mine) => {
+      const slot = game.slots.find((s) => s.slot === mine.slot);
+      return banner("warn", icon("bell", 18), h("div", { class: "grow" },
+        h("div", {}, t("You have not played {slot} for {time}, and the others play on.", { slot: mine.name, time: fmtSpan(Date.now() / 1000 - mine.idle_since) })),
+        h("div", { class: "muted small" }, t("Say how you are doing, so the others know. No time any more? Hand the slot over and someone plays on from where you are."))),
+      slot ? h("div", { class: "row" },
+        h("button", { class: "btn sm", type: "button", onclick: () => statusDialog(slot) }, t("Set status")),
+        slot.handover ? null : h("button", { class: "btn sm", type: "button", onclick: () => handoverDialog(slot) }, t("Hand over"))) : null);
+    });
   }
 
   // Slots their players hand over to this user, or to whoever takes them
@@ -156,7 +171,7 @@ export default async function render({ root, params, cleanup, isCurrent, query }
   function handoverLine(slot) {
     const o = slot.handover;
     if (!o) return null;
-    const mine = slot.mine || admin;
+    const mine = slot.mine || manage;
     return h("div", { class: "stack tight" },
       h("span", { class: "small" }, badge(t("Handing over"), "warn"), " ",
         o.to ? (o.to_me ? t("to you") : t("to {user}", { user: o.to })) : t("to whoever takes it")),
@@ -259,7 +274,7 @@ export default async function render({ root, params, cleanup, isCurrent, query }
 
   function ownerCell(slot) {
     if (slot.type !== 1) return h("span", { class: "muted" }, "—");
-    if (admin) {
+    if (manage) {
       const sel = h("select", { class: "input", "aria-label": t("Owner of {slot}", { slot: slot.name }) },
         h("option", { value: "" }, t("— nobody —")),
         users.map((u) => h("option", { value: u.id, selected: u.id === slot.user_id }, u.username)));
@@ -310,11 +325,11 @@ export default async function render({ root, params, cleanup, isCurrent, query }
           h("td", {}, s.files.length
             ? h("div", { class: "stack tight" }, s.files.map((f) => h("a", { class: "btn sm", href: `/api/games/${id}/files/${f.id}`, title: f.filename },
                 icon("download", 14), shortName(f.filename), h("span", { class: "muted" }, fmtBytes(f.size)))))
-            : h("span", { class: "muted" }, s.type === 1 ? (admin || s.mine ? t("no file") : "") : ""))))))),
-      !admin && game.claimable && !game.my_slots.length
+            : h("span", { class: "muted" }, s.type === 1 ? (manage || s.mine ? t("no file") : "") : ""))))))),
+      !manage && game.claimable && !game.my_slots.length
         ? h("p", { class: "muted small", style: { marginTop: "8px" } }, t("Find your slot above and press “{button}” to get your files.", { button: t("This is mine") }),
           game.single_claim ? ` ${t("Each player can claim one slot.")}` : "") : null,
-      !admin && game.claimable && game.single_claim && game.my_slots.length && game.slots.some((s) => s.type === 1 && !s.user_id)
+      !manage && game.claimable && game.single_claim && game.my_slots.length && game.slots.some((s) => s.type === 1 && !s.user_id)
         ? h("p", { class: "muted small", style: { marginTop: "8px" } }, t("Each player can claim one slot. To swap, release yours first.")) : null));
   }
 
@@ -330,7 +345,7 @@ export default async function render({ root, params, cleanup, isCurrent, query }
     syncTracker();
     syncTextClient();
     syncActivity();
-    if (admin) drawArchive();
+    if (manage) drawArchive();
     loadHistory().catch(() => {});  // progress, a goal or the archive changed
   }
 
@@ -406,9 +421,10 @@ export default async function render({ root, params, cleanup, isCurrent, query }
   let trackerKey = null, trackerTimer = null;
   cleanup(() => clearInterval(trackerTimer));
 
-  // Players get their own slots, admins every player slot; rebuilt only when that list changes (a claim, an assignment).
+  // Players get their own slots, whoever runs the game every player slot; rebuilt only when that list changes (a claim,
+  // an assignment).
   function syncTracker() {
-    const slots = game.slots.filter((s) => s.type === 1 && (admin || s.mine));
+    const slots = game.slots.filter((s) => s.type === 1 && (manage || s.mine));
     const key = slots.map((s) => s.slot).join(",");
     if (key === trackerKey) return;
     trackerKey = key;
@@ -564,7 +580,7 @@ export default async function render({ root, params, cleanup, isCurrent, query }
     // the server reads the save again only when it changed, so asking often is cheap
     trackerTimer = setInterval(() => { if (!document.hidden) load(); }, 10000);
     return h("div", { class: "section" }, h("div", { class: "card stack" },
-      h("div", { class: "card-head" }, h("h2", {}, admin && !slots.some((s) => s.mine) ? t("Tracker") : t("Your tracker")), picker),
+      h("div", { class: "card-head" }, h("h2", {}, manage && !slots.some((s) => s.mine) ? t("Tracker") : t("Your tracker")), picker),
       summary, rulesHost, h("div", { class: "row spread" }, tabs, h("div", { style: { minWidth: "200px" } }, search)), content,
       h("p", { class: "muted small" }, t("Read from the server's save, so it can be up to a minute behind the game."))));
   }
@@ -591,7 +607,7 @@ export default async function render({ root, params, cleanup, isCurrent, query }
       t("Administrators can still assign more slots to someone by hand."));
     const claimable = checkbox(t("Let users claim unowned slots themselves"), game.claimable,
       t("Handy when you upload a seed and your friends should pick their own slot."));
-    const notes = h("textarea", { class: "input", rows: 2, maxLength: 2000, placeholder: t("Only visible to administrators") }, game.notes ?? "");
+    const notes = h("textarea", { class: "input", rows: 2, maxLength: 2000, placeholder: t("Only visible to whoever runs this game") }, game.notes ?? "");
     const shareSpoiler = checkbox(t("Share the spoiler log with the players when everyone has finished"), game.share_spoiler_when_done,
       t("When every player has reached their goal (or you move the game to the archive), the spoiler log becomes visible to every player in the game."));
     const rules = serverOptionsForm(opts);
@@ -603,6 +619,14 @@ export default async function render({ root, params, cleanup, isCurrent, query }
       versionChoices.push([game.ap_version_own, t("{version} (not installed)", { version: game.ap_version_own })]);
     }
     const apVersion = select(versionChoices, game.ap_version_own || "");
+    // after how many days without playing, while the others play on, a player is reminded (null: the server's default)
+    const remindChoices = [["", game.remind_days_default ? plural(game.remind_days_default, "As on this server (after {n} day)", "As on this server (after {n} days)")
+      : t("As on this server (never)")], ["0", t("Never")],
+      ...[1, 2, 3, 5, 7, 14].map((n) => [String(n), plural(n, "After {n} day", "After {n} days")])];
+    if (game.remind_days != null && !remindChoices.some(([value]) => value === String(game.remind_days))) {
+      remindChoices.push([String(game.remind_days), plural(game.remind_days, "After {n} day", "After {n} days")]);
+    }
+    const remind = select(remindChoices, game.remind_days == null ? "" : String(game.remind_days));
     // a planned start; the field holds minutes, so an unchanged value is not sent back
     let plannedValue = toLocalInput(game.start?.at);
     const startAt = h("input", { class: "input", type: "datetime-local", value: plannedValue });
@@ -627,7 +651,8 @@ export default async function render({ root, params, cleanup, isCurrent, query }
       const body = { name: name.value, password: password.value, server_password: adminPassword.value, options,
         visibility: visibility.value, claimable: claimable.input.checked, single_claim: singleClaim.input.checked,
         notes: notes.value, share_spoiler_when_done: shareSpoiler.input.checked, discord_webhook_url: webhook.value.trim(),
-        start_open_minutes: Number(openMinutes.value || 0), start_countdown: countdown.input.checked, ap_version: apVersion.value };
+        start_open_minutes: Number(openMinutes.value || 0), start_countdown: countdown.input.checked, ap_version: apVersion.value,
+        remind_days: remind.value === "" ? null : Number(remind.value) };
       if (startAt.value !== plannedValue) body.start_at = fromLocalInput(startAt.value);
       if (port.value) body.port = Number(port.value);
       const result = await patch(`/api/games/${id}`, body);
@@ -646,7 +671,7 @@ export default async function render({ root, params, cleanup, isCurrent, query }
           field(t("Archipelago version"), apVersion, t("What the server runs, and what players need a client of. Further versions are installed under Admin → Settings."))),
         claimable, singleClaim, shareSpoiler, field(t("Notes"), notes),
         h("h3", {}, t("Planned start")),
-        h("p", { class: "muted small" }, t("The server opens by itself before the start and is announced on Discord; until then only administrators can start it. The results time every goal from the start, to the second.")),
+        h("p", { class: "muted small" }, t("The server opens by itself before the start and is announced on Discord; until then only whoever runs the game can start it. The results time every goal from the start, to the second.")),
         h("div", { class: "form-grid" },
           field(t("Start time"), startAt, t("In your own time zone. Empty for no planned start.")),
           field(t("Open the server this many minutes before"), openMinutes)),
@@ -655,8 +680,52 @@ export default async function render({ root, params, cleanup, isCurrent, query }
         field(t("Webhook for this game"), webhook,
           t("Messages about this game (online, crashes, goals, hinted items found) go to this channel instead of the main one. Which kinds are sent is set under Admin → Settings.")),
         webhookStatus, h("div", { class: "row" }, testWebhook),
+        field(t("Remind players who stopped playing"), remind,
+          t("After this many days without playing, while the others play on, a player is reminded on their dashboard and on Discord, where they can ask to be mentioned. Players who said they are on a break are not reminded.")),
         h("h3", {}, t("Server rules")), rules.node,
         h("div", { class: "row" }, save)));
+  }
+
+  // A link that shows the game without signing in (spectate.py), for viewers and as an overlay in a stream
+  function spectateSection() {
+    const host = h("div", { class: "stack" });
+    const draw = () => {
+      const link = game.spectate;
+      const base = `${state.status?.site_url || location.origin}/watch.html#`;
+      const intro = h("p", { class: "muted small" }, t("A link that shows this game without signing in: how far everyone got, the standings and race times. Nothing to connect with, and no user names. Open it for viewers, or add the overlay to OBS as a browser source."));
+      if (!link) {
+        clear(host).append(intro, h("div", { class: "row" }, h("button", { class: "btn", type: "button", onclick: action(async () => {
+          game = await post(`/api/games/${id}/spectate`);
+          draw();
+          toast(t("Spectator link made"), "success");
+        }) }, icon("link", 14), t("Make a link"))));
+        return;
+      }
+      const activityBox = checkbox(t("Also show what happens: items, hints, joins and goals"), link.activity, t("Never the chat. Hints show where items are, which is a spoiler for viewers who play along."));
+      activityBox.input.onchange = action2(async () => {
+        game = await patch(`/api/games/${id}`, { spectate_activity: activityBox.input.checked });
+        draw();
+      });
+      clear(host).append(intro,
+        field(t("Spectator page"), copyField(base + link.token)),
+        field(t("Overlay for OBS"), copyField(`${base}${link.token}/overlay`), t("Transparent, with every player's progress and the race clock. A width of about 400 pixels suits it.")),
+        activityBox,
+        h("div", { class: "row" },
+          h("a", { class: "btn", href: base + link.token, target: "_blank", rel: "noopener" }, icon("external", 14), t("Open")),
+          h("button", { class: "btn", type: "button", onclick: action(async () => {
+            if (!(await confirmDialog(t("The current link stops working. Everyone who should keep watching needs the new one."), { title: t("Make a new link?"), confirmText: t("New link") }))) return;
+            game = await post(`/api/games/${id}/spectate`);
+            draw();
+            toast(t("New spectator link made"), "success");
+          }) }, icon("restart", 14), t("New link")),
+          h("button", { class: "btn ghost", type: "button", onclick: action(async () => {
+            game = await del(`/api/games/${id}/spectate`);
+            draw();
+            toast(t("Spectating is turned off"), "success");
+          }) }, t("Turn off"))));
+    };
+    draw();
+    return h("details", { class: "card" }, h("summary", {}, t("Spectators")), host);
   }
 
   function filesSection() {
@@ -808,9 +877,9 @@ export default async function render({ root, params, cleanup, isCurrent, query }
   // -------------------------------------------------------------------------------------------------------------------
   root.append(headerHost, awayHost, infoHost, trackerHost, textClientHost, activityHost, progressHost, slotsHost, adminHost);
   drawLive();
-  if (admin) {
-    adminHost.append(settingsSection(), archiveHost, filesSection(), consoleSection(), backupsSection(), dangerSection());
-    if (query.get("tab") === "console") adminHost.querySelector("details:nth-of-type(3)")?.setAttribute("open", "");
+  if (manage) {
+    adminHost.append(settingsSection(), archiveHost, spectateSection(), filesSection(), consoleSection(), backupsSection(), dangerSection());
+    if (query.get("tab") === "console") adminHost.querySelector("details:nth-of-type(4)")?.setAttribute("open", "");
   }
   const timer = setInterval(() => { if (!document.hidden) refresh().catch(() => {}); }, 4000);
   cleanup(() => clearInterval(timer));

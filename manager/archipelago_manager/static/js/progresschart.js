@@ -46,7 +46,8 @@ export function raceTime(seconds) {
   return hours ? `${hours}:${pad(minutes)}:${pad(secs)}` : `${minutes}:${pad(secs)}`;
 }
 
-export function progressSection(data, { mine = new Set(), cleanup }) {
+// table: false leaves the standings out, for a page that shows them its own way
+export function progressSection(data, { mine = new Set(), cleanup, table = true }) {
   // a race counts from its planned start; any other game from its first check
   const start = data.race_start ?? data.play_started_at ?? data.recorded_from;
   const end = Math.max(data.finished_at ?? data.now, start + 60);
@@ -161,7 +162,8 @@ export function progressSection(data, { mine = new Set(), cleanup }) {
   cleanup(() => observer.disconnect());
   requestAnimationFrame(draw);
 
-  return h("div", { class: "stack" }, players.length ? [frame, players.length > 1 ? legend : null] : null, standings(data, players, known, start));
+  return h("div", { class: "stack" }, players.length ? [frame, players.length > 1 ? legend : null] : null,
+    table ? standings(data, players, known, start) : null);
 }
 
 // Who reached their goal first, then who got furthest

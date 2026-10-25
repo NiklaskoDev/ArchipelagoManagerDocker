@@ -1,5 +1,5 @@
 import { h, clear, icon, toast, action, confirmDialog, openModal, fmtAgo, fmtDate, fmtUntil, toLocalInput, fromLocalInput } from "../util.js";
-import { api, get, post, patch, del, isAdmin } from "../api.js";
+import { api, get, post, patch, del } from "../api.js";
 import { banner, badge, chips, field, checkbox, select, missingGamesPanel, missingRomsPanel, promptMissingGames } from "../components.js";
 import { t, plural, tServer } from "../i18n.js";
 
@@ -14,7 +14,7 @@ export function signupBadge(signup) {
 export function deadlineText(signup) {
   if (signup.status !== "open") return signup.closed_at ? t("Closed {date}", { date: fmtDate(signup.closed_at) }) : null;
   return signup.deadline ? t("Closes {date} ({until})", { date: fmtDate(signup.deadline), until: fmtUntil(signup.deadline) })
-    : t("No deadline: an administrator closes it");
+    : t("No deadline: the organizer closes it");
 }
 
 // Create (no `signup`) or edit a round. `onSaved` receives the round as the server returns it.
@@ -111,8 +111,8 @@ export async function openSignupForm({ signup = null, onSaved }) {
 
 export default async function render({ root, params, cleanup, isCurrent }) {
   const id = Number(params[0]);
-  const admin = isAdmin();
   let signup = await get(`/api/signups/${id}`);
+  const manager = signup.can_manage;  // its organizer, or an administrator
   let configs = await get("/api/configs");
   const host = h("div");
   let signature = "";
@@ -149,7 +149,7 @@ export default async function render({ root, params, cleanup, isCurrent }) {
   // ---------------------------------------------------------------------------------------------------------------------
   function header() {
     const actions = [];
-    if (admin) {
+    if (manager) {
       actions.push(h("button", { class: "btn", type: "button", disabled: !["open", "closed"].includes(signup.status),
         onclick: action(() => openSignupForm({ signup, onSaved: apply })) }, icon("edit", 14), t("Edit")));
       if (signup.status === "open") {
@@ -207,12 +207,12 @@ export default async function render({ root, params, cleanup, isCurrent }) {
       return banner("info", icon("calendar", 18), h("div", { class: "grow" },
         h("strong", {}, t("Sign-ups are open.")), " ",
         signup.deadline ? t("Enter your config {until}, until {date}.", { until: fmtUntil(signup.deadline), date: fmtDate(signup.deadline) })
-          : t("Enter your config until an administrator closes the round."),
+          : t("Enter your config until the organizer closes the round."),
         h("div", { class: "small muted" }, t("You can still change or withdraw your entry until then."))));
     }
     if (signup.status === "generating") {
       return banner("info", h("span", { class: "spinner" }), h("div", { class: "grow" }, h("strong", {}, t("Generating the game…")),
-        admin && signup.job_id ? [" ", h("a", { href: `#/jobs/${signup.job_id}` }, t("Show the log"))] : null));
+        manager && signup.job_id ? [" ", h("a", { href: `#/jobs/${signup.job_id}` }, t("Show the log"))] : null));
     }
     if (signup.status === "done") {
       return banner("ok", icon("check", 18), h("div", { class: "grow" }, h("strong", {}, t("The game is ready.")), " ",
@@ -221,8 +221,8 @@ export default async function render({ root, params, cleanup, isCurrent }) {
     if (signup.status === "closed" || !signup.open) {
       return [
         banner("warn", icon("alert", 18), h("div", { class: "grow" }, h("strong", {}, t("Sign-ups are closed.")), " ",
-          admin ? t("Generate the game when you are ready, or reopen the round.") : t("The game will be generated soon."))),
-        admin && signup.error ? banner("error", icon("alert", 18), h("div", { class: "grow" }, h("strong", {}, t("Last attempt failed:")), " ", tServer(signup.error))) : null,
+          manager ? t("Generate the game when you are ready, or reopen the round.") : t("The game will be generated soon."))),
+        manager && signup.error ? banner("error", icon("alert", 18), h("div", { class: "grow" }, h("strong", {}, t("Last attempt failed:")), " ", tServer(signup.error))) : null,
       ];
     }
     return null;
@@ -230,7 +230,7 @@ export default async function render({ root, params, cleanup, isCurrent }) {
 
   const testRunning = () => ["queued", "running"].includes(signup.test?.status);
 
-  // The latest test generation, for the admin who will generate the round
+  // The latest test generation, for whoever will generate the round
   function testBanner() {
     const test = signup.test;
     if (!test || !["open", "closed"].includes(signup.status)) return null;
@@ -277,7 +277,7 @@ export default async function render({ root, params, cleanup, isCurrent }) {
   function myCard() {
     const mine = signup.entries.filter((e) => e.mine);
     // Admins can still fix entries after the deadline, until the game is generated
-    const editable = signup.open || (admin && signup.status === "closed");
+    const editable = signup.open || (manager && signup.status === "closed");
     const canEnter = editable && mine.length < signup.configs_per_user;
     if (!mine.length && !editable) return null;
     const entered = new Set(mine.map((e) => e.config_id));
@@ -317,9 +317,9 @@ export default async function render({ root, params, cleanup, isCurrent }) {
         e.outdated && editable ? banner("info", icon("edit", 16), h("div", { class: "grow" }, t("You changed this config after entering it. The round still has the old version.")),
           h("button", { class: "btn sm primary", type: "button", onclick: action(() => run("POST", `/api/signups/${id}/entries/${e.id}/refresh`)) }, t("Use the new version"))) : null,
         e.issues.map((issue) => h("div", { class: "form-error" }, tServer(issue))), generationError(e)))) : h("p", { class: "muted" }, t("You have not entered yet.")),
-      // admins see these for every entry at the top of the page
-      !admin && missing.length ? missingGamesPanel(missing.map((game) => ({ game, configs: [], games: [], pending: [] })), reloadConfigs) : null,
-      admin ? null : missingRomsPanel(mine.map((e) => e.missing_roms)),
+      // the round's organizer sees these for every entry at the top of the page
+      !manager && missing.length ? missingGamesPanel(missing.map((game) => ({ game, configs: [], games: [], pending: [] })), reloadConfigs) : null,
+      manager ? null : missingRomsPanel(mine.map((e) => e.missing_roms)),
       canEnter ? h("div", { class: "stack tight" },
         h("span", { class: "field-label" }, mine.length ? t("Enter another config") : t("Enter with one of your configs")),
         h("div", { class: "row" }, picker ? h("div", { class: "grow" }, picker) : h("span", { class: "muted" }, configs.length ? t("You have no other configs.") : t("You have no configs yet.")), enter,
@@ -329,17 +329,17 @@ export default async function render({ root, params, cleanup, isCurrent }) {
 
   function entriesCard() {
     if (!signup.entries.length) return h("div", { class: "card" }, h("p", { class: "muted", style: { margin: 0 } }, t("No entries yet.")));
-    const removable = admin && ["open", "closed"].includes(signup.status);
+    const removable = manager && ["open", "closed"].includes(signup.status);
     return h("div", { class: "card flush table-wrap" }, h("table", { class: "table" },
       h("thead", {}, h("tr", {}, [t("Player"), t("Games"), t("Entered by"), t("When"), ""].map((text) => h("th", {}, text)))),
       h("tbody", {}, signup.entries.map((e) => h("tr", {},
         h("td", {}, h("span", { class: "slot-name" }, e.player_names.join(", ") || h("span", { class: "muted" }, t("name from file"))),
-          e.issues.map((issue) => h("div", { class: "form-error small" }, tServer(issue))), admin ? generationError(e, "small") : null),
+          e.issues.map((issue) => h("div", { class: "form-error small" }, tServer(issue))), manager ? generationError(e, "small") : null),
         h("td", {}, chips(e.games, e.missing_games)),
         h("td", {}, e.username, e.mine ? h("span", { class: "muted" }, " ", t("(you)")) : null),
         h("td", { class: "muted" }, fmtAgo(e.created_at)),
         h("td", { class: "actions" }, h("div", { class: "row", style: { justifyContent: "flex-end" } },
-          admin ? h("a", { class: "btn sm", href: `/api/signups/${id}/entries/${e.id}/download` }, icon("download", 14)) : null,
+          manager ? h("a", { class: "btn sm", href: `/api/signups/${id}/entries/${e.id}/download` }, icon("download", 14)) : null,
           removable ? h("button", { class: "btn sm", type: "button", title: t("Remove entry"), "aria-label": t("Remove the entry of {user}", { user: e.username }), onclick: action(async () => {
             if (await confirmDialog(t("Remove the entry of {user}? Their config stays in their library.", { user: e.username }),
               { title: t("Remove entry?"), confirmText: t("Remove"), danger: true })) {
@@ -348,9 +348,9 @@ export default async function render({ root, params, cleanup, isCurrent }) {
           }) }, icon("trash", 14)) : null)))))));
   }
 
-  // What has to be on the server before the round can be generated, for the admin who will generate it
-  function adminWarnings() {
-    if (!admin || !["open", "closed"].includes(signup.status)) return null;
+  // What has to be on the server before the round can be generated, for whoever will generate it
+  function managerWarnings() {
+    if (!manager || !["open", "closed"].includes(signup.status)) return null;
     const missing = [...new Set(signup.entries.flatMap((e) => e.missing_games))];
     return [
       missing.length ? missingGamesPanel(missing.map((game) => ({ game, configs: [], games: [], pending: [] })), () => refresh(true)) : null,
@@ -359,7 +359,7 @@ export default async function render({ root, params, cleanup, isCurrent }) {
   }
 
   function draw() {
-    clear(host).append(header(), h("div", { class: "stack" }, stateBanner(), testBanner(), adminWarnings(), rulesCard(), myCard(),
+    clear(host).append(header(), h("div", { class: "stack" }, stateBanner(), testBanner(), managerWarnings(), rulesCard(), myCard(),
       h("div", { class: "section" }, h("div", { class: "section-head" }, h("h2", {}, t("Entries"))), entriesCard())));
   }
 

@@ -10,7 +10,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import __version__, apbridge, audit, db, notify, schedule, signups, sources, updates, versions
+from . import __version__, apbridge, audit, db, notify, reminders, schedule, signups, sources, updates, versions
 from .config import CONFIG
 from .generation import GENERATION
 from .rooms import ROOMS
@@ -65,7 +65,7 @@ async def lifespan(_app: FastAPI):
     tasks = [asyncio.create_task(init_archipelago()), asyncio.create_task(ROOMS.watch_progress()),
              asyncio.create_task(ROOMS.watch_idle()),
              asyncio.create_task(signups.run_periodically()), asyncio.create_task(TEXT_CLIENTS.run_periodically()),
-             asyncio.create_task(schedule.run_periodically())]
+             asyncio.create_task(schedule.run_periodically()), asyncio.create_task(reminders.run_periodically())]
     if CONFIG.update_check:  # both talk to GitHub on their own, which UPDATE_CHECK=false rules out
         tasks.append(asyncio.create_task(updates.run_periodically()))
         tasks.append(asyncio.create_task(sources.run_periodically()))
@@ -103,8 +103,11 @@ class BodyLimit:
         admin = user["role"] == "admin"
         if path == "/api/apworlds":
             return upload if admin else min(upload, self.PLAYER_APWORLD_LIMIT)
-        if admin and (path in ("/api/games", "/api/roms") or (path.startswith("/api/games/") and path.endswith("/files"))):
-            return upload  # multiworld zips, extra files of a game, base ROMs
+        if admin and path == "/api/roms":
+            return upload  # base ROMs
+        if user["role"] in ("admin", "organizer") and (
+                path == "/api/games" or (path.startswith("/api/games/") and path.endswith("/files"))):
+            return upload  # multiworld zips, extra files of a game (whose game it is, the route checks)
         return self.SMALL_LIMIT
 
     async def __call__(self, scope, receive, send) -> None:

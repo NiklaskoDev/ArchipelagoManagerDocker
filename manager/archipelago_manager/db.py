@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 import time
 from contextlib import contextmanager
@@ -10,7 +11,9 @@ from collections.abc import Iterable, Iterator
 
 from .config import CONFIG
 
-SCHEMA_VERSION = 16
+log = logging.getLogger(__name__)
+
+SCHEMA_VERSION = 17
 
 # Added in schema version 3
 _SIGNUPS = """
@@ -151,12 +154,15 @@ CREATE TABLE api_tokens (
 CREATE INDEX api_tokens_user ON api_tokens(user_id);
 """
 
-SCHEMA = """
+# Added in schema version 17
+_USERS = """
+-- organizers (security.is_organizer) run sign-up rounds and the games they add or generate, without administering
+-- the server
 CREATE TABLE users (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     username      TEXT NOT NULL UNIQUE COLLATE NOCASE,
     password_hash TEXT NOT NULL,
-    role          TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('admin', 'user')),
+    role          TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('admin', 'organizer', 'user')),
     disabled      INTEGER NOT NULL DEFAULT 0,
     created_at    REAL NOT NULL,
     last_login    REAL,
@@ -164,8 +170,21 @@ CREATE TABLE users (
     discord_name  TEXT,
     discord_pings TEXT NOT NULL DEFAULT '[]'
 );
-CREATE UNIQUE INDEX users_discord ON users(discord_id) WHERE discord_id IS NOT NULL;
+"""
+_USERS_INDEX = "CREATE UNIQUE INDEX users_discord ON users(discord_id) WHERE discord_id IS NOT NULL;"
+# A game's link for spectators (spectate.py) and whether it shows the activity; how many days without playing a player
+# is reminded after (reminders.py: NULL is the server's default, 0 never). Per slot, since when its player has it and
+# when they were last reminded.
+_SPECTATE_REMINDERS = (
+    "ALTER TABLE games ADD COLUMN spectate_token TEXT; "
+    "ALTER TABLE games ADD COLUMN spectate_activity INTEGER NOT NULL DEFAULT 0; "
+    "ALTER TABLE games ADD COLUMN remind_days INTEGER; "
+    "CREATE UNIQUE INDEX games_spectate ON games(spectate_token) WHERE spectate_token IS NOT NULL; "
+    "ALTER TABLE game_slots ADD COLUMN player_since REAL; "
+    "ALTER TABLE game_slots ADD COLUMN reminded_at REAL; "
+    "ALTER TABLE game_slots ADD COLUMN reminders INTEGER NOT NULL DEFAULT 0;")
 
+SCHEMA = _USERS + _USERS_INDEX + """
 CREATE TABLE sessions (
     token_hash TEXT PRIMARY KEY,
     user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -304,7 +323,7 @@ CREATE TABLE job_players (
 );
 CREATE INDEX job_players_job ON job_players(job_id);
 """ + _SIGNUPS + _SOURCES + "ALTER TABLE apworld_sources ADD COLUMN latest_asset TEXT; " + \
-    "ALTER TABLE signups ADD COLUMN test_job_id INTEGER;" + _PROGRESS + _AUDIT + _VISITS + _AP_VERSIONS + _API_TOKENS
+    "ALTER TABLE signups ADD COLUMN test_job_id INTEGER;" + _PROGRESS + _AUDIT + _VISITS + _AP_VERSIONS + _API_TOKENS + _SPECTATE_REMINDERS
 
 
 # Upgrades for databases created by older versions: MIGRATIONS[n] turns schema n - 1 into schema n. New databases get
@@ -348,6 +367,16 @@ MIGRATIONS: dict[int, str] = {
     # further Archipelago versions, and the one a game runs on (NULL: the image's)
     15: _AP_VERSIONS + "ALTER TABLE games ADD COLUMN ap_version TEXT;",
     16: _API_TOKENS,
+    # A CHECK constraint cannot be changed in place: the users table is built anew with the organizer role (with
+    # foreign keys off, see init_db, so dropping the old one deletes nothing that refers to it)
+    17: _USERS.replace("CREATE TABLE users", "CREATE TABLE users_new")
+        + "INSERT INTO users_new SELECT id, username, password_hash, role, disabled, created_at, last_login, discord_id, "
+          "discord_name, discord_pings FROM users; "
+          # so that the ids of deleted users are not given out again
+          "UPDATE sqlite_sequence SET seq = (SELECT seq FROM sqlite_sequence WHERE name = 'users') "
+          "WHERE name = 'users_new' AND EXISTS (SELECT 1 FROM sqlite_sequence WHERE name = 'users'); "
+          "DROP TABLE users; ALTER TABLE users_new RENAME TO users; "
+        + _USERS_INDEX + _SPECTATE_REMINDERS,
 }
 
 
@@ -368,8 +397,15 @@ def init_db() -> None:
         if version == 0:
             conn.executescript("BEGIN;" + SCHEMA + f"PRAGMA user_version = {SCHEMA_VERSION}; COMMIT;")
         elif version < SCHEMA_VERSION:
+            # Some steps build a table anew; with foreign keys on, dropping the old one would delete what refers to
+            # it. The setting cannot change inside a transaction, so it is off for all steps, and checked after.
+            conn.execute("PRAGMA foreign_keys = OFF")
             for step in range(version + 1, SCHEMA_VERSION + 1):
                 conn.executescript("BEGIN;" + MIGRATIONS[step] + f"PRAGMA user_version = {step}; COMMIT;")
+            broken = conn.execute("PRAGMA foreign_key_check").fetchall()
+            if broken:
+                log.warning("After the upgrade, %d rows refer to rows that do not exist, such as %s",
+                            len(broken), [tuple(row) for row in broken[:5]])
         elif version > SCHEMA_VERSION:
             raise RuntimeError(f"Database schema v{version} is newer than this version of the manager "
                                f"(v{SCHEMA_VERSION}). Refusing to downgrade.")

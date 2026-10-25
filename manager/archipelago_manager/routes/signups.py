@@ -1,4 +1,5 @@
-"""Sign-up rounds: administrators open them, players enter configs, the game is generated from all entries."""
+"""Sign-up rounds: organizers and administrators open them, players enter configs, the game is generated from all
+entries. Organizers run the rounds they opened; administrators all of them."""
 from __future__ import annotations
 
 import sqlite3
@@ -9,7 +10,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 from .. import apbridge, audit, db, signups
-from ..security import admin_user, current_user, is_admin
+from ..security import current_user, is_admin, manages, organizer_user
 
 router = APIRouter(prefix="/api")
 
@@ -25,9 +26,16 @@ def _get(signup_id: int) -> sqlite3.Row:
     return signups.sync(row)
 
 
+def _managed(signup_id: int, user: sqlite3.Row) -> sqlite3.Row:
+    row = _get(signup_id)
+    if not manages(row, user):
+        raise HTTPException(403, "Only the organizer of this round and administrators can do this")
+    return row
+
+
 def signup_json(row: sqlite3.Row, user: sqlite3.Row, rows: list[sqlite3.Row] | None = None) -> dict:
     rows = signups.entries(row["id"]) if rows is None else rows
-    admin = is_admin(user)
+    manager = manages(row, user)
     creator = db.query_one("SELECT username FROM users WHERE id = ?", (row["created_by"],)) if row["created_by"] else None
     return {
         "id": row["id"], "name": row["name"], "description": row["description"], "status": row["status"],
@@ -35,14 +43,14 @@ def signup_json(row: sqlite3.Row, user: sqlite3.Row, rows: list[sqlite3.Row] | N
         "closed_at": row["closed_at"], "creator": creator["username"] if creator else None,
         "configs_per_user": row["configs_per_user"], "allowed_games": db.jloads(row["allowed_games"], []),
         "auto_generate": bool(row["auto_generate"]), "options": signups.clean_options(db.jloads(row["options"], {})),
-        "game_id": row["game_id"], "job_id": row["job_id"] if admin else None,
-        "error": row["error"] if admin else None,
+        "game_id": row["game_id"], "job_id": row["job_id"] if manager else None,
+        "error": row["error"] if manager else None, "can_manage": manager,
         "entry_count": len(rows), "user_count": len({r["user_id"] for r in rows}),
         "my_entry_count": sum(1 for r in rows if r["user_id"] == user["id"]),
     }
 
 
-def entry_json(row: sqlite3.Row, user: sqlite3.Row, issues: list[str], error: str | None) -> dict:
+def entry_json(row: sqlite3.Row, user: sqlite3.Row, issues: list[str], error: str | None, *, manager: bool) -> dict:
     mine = row["user_id"] == user["id"]
     games = db.jloads(row["games"], [])
     result = {
@@ -52,7 +60,7 @@ def entry_json(row: sqlite3.Row, user: sqlite3.Row, issues: list[str], error: st
         "issues": issues,
         "created_at": row["created_at"], "updated_at": row["updated_at"],
     }
-    if mine or is_admin(user):
+    if mine or manager:
         result["name"] = row["name"]
         result["config_id"] = row["config_id"]
         # The library copy was edited after entering: offer to update the entry
@@ -114,7 +122,7 @@ def _clean(body: SignupBody, *, creating: bool) -> dict:
 
 
 @router.post("/signups")
-def create_signup(body: SignupBody, request: Request, user: sqlite3.Row = Depends(admin_user)) -> dict:
+def create_signup(body: SignupBody, request: Request, user: sqlite3.Row = Depends(organizer_user)) -> dict:
     values = _clean(body, creating=True)
     signup_id = db.execute(
         "INSERT INTO signups(name, description, created_by, created_at, deadline, configs_per_user, allowed_games, "
@@ -132,13 +140,14 @@ def signup_detail(signup_id: int, user: sqlite3.Row = Depends(current_user)) -> 
     row = _get(signup_id)
     rows = signups.entries(signup_id)
     issues, errors = signups.entry_issues(row, rows), signups.entry_errors(row, rows)
-    return {**signup_json(row, user, rows), "test": signups.test_result(row, rows) if is_admin(user) else None,
-            "entries": [entry_json(r, user, issues[r["id"]], errors.get(r["id"])) for r in rows]}
+    manager = manages(row, user)
+    return {**signup_json(row, user, rows), "test": signups.test_result(row, rows) if manager else None,
+            "entries": [entry_json(r, user, issues[r["id"]], errors.get(r["id"]), manager=manager) for r in rows]}
 
 
 @router.patch("/signups/{signup_id}")
-def update_signup(signup_id: int, body: SignupBody, user: sqlite3.Row = Depends(admin_user)) -> dict:
-    row = _get(signup_id)
+def update_signup(signup_id: int, body: SignupBody, user: sqlite3.Row = Depends(current_user)) -> dict:
+    row = _managed(signup_id, user)
     if row["status"] not in ("open", "closed"):
         raise HTTPException(409, "This round was already generated")
     values = _clean(body, creating=False)
@@ -151,8 +160,8 @@ def update_signup(signup_id: int, body: SignupBody, user: sqlite3.Row = Depends(
 
 
 @router.delete("/signups/{signup_id}")
-def delete_signup(signup_id: int, _admin: sqlite3.Row = Depends(admin_user)):
-    _get(signup_id)
+def delete_signup(signup_id: int, user: sqlite3.Row = Depends(current_user)):
+    _managed(signup_id, user)
     try:
         signups.delete(signup_id)
     except signups.SignupError as e:
@@ -161,8 +170,8 @@ def delete_signup(signup_id: int, _admin: sqlite3.Row = Depends(admin_user)):
 
 
 @router.post("/signups/{signup_id}/close")
-def close_signup(signup_id: int, user: sqlite3.Row = Depends(admin_user)):
-    _get(signup_id)
+def close_signup(signup_id: int, user: sqlite3.Row = Depends(current_user)):
+    _managed(signup_id, user)
     try:
         signups.close(signup_id, user=user)
     except signups.SignupError as e:
@@ -175,8 +184,8 @@ class Reopen(BaseModel):
 
 
 @router.post("/signups/{signup_id}/reopen")
-def reopen_signup(signup_id: int, body: Reopen, user: sqlite3.Row = Depends(admin_user)):
-    _get(signup_id)
+def reopen_signup(signup_id: int, body: Reopen, user: sqlite3.Row = Depends(current_user)):
+    _managed(signup_id, user)
     try:
         signups.reopen(signup_id, body.deadline)
     except signups.SignupError as e:
@@ -185,8 +194,8 @@ def reopen_signup(signup_id: int, body: Reopen, user: sqlite3.Row = Depends(admi
 
 
 @router.post("/signups/{signup_id}/generate")
-def generate_signup(signup_id: int, user: sqlite3.Row = Depends(admin_user)):
-    _get(signup_id)
+def generate_signup(signup_id: int, user: sqlite3.Row = Depends(current_user)):
+    _managed(signup_id, user)
     try:
         signups.generate(signup_id, user=user)
     except signups.SignupError as e:
@@ -195,8 +204,8 @@ def generate_signup(signup_id: int, user: sqlite3.Row = Depends(admin_user)):
 
 
 @router.post("/signups/{signup_id}/test")
-def test_signup(signup_id: int, user: sqlite3.Row = Depends(admin_user)):
-    _get(signup_id)
+def test_signup(signup_id: int, user: sqlite3.Row = Depends(current_user)):
+    _managed(signup_id, user)
     try:
         signups.test(signup_id, user=user)
     except signups.SignupError as e:
@@ -213,31 +222,31 @@ class NewEntry(BaseModel):
 
 @router.post("/signups/{signup_id}/entries")
 def add_entry(signup_id: int, body: NewEntry, user: sqlite3.Row = Depends(current_user)):
-    _get(signup_id)
+    row = _get(signup_id)
     config = db.query_one("SELECT * FROM configs WHERE id = ?", (body.config_id,))
     # Players enter their own configs; an admin can also enter someone's config for them
     if not config or (config["user_id"] != user["id"] and not is_admin(user)):
         raise HTTPException(404, "No such config")
     try:
-        result = signups.add_entry(signup_id, config, by_admin=is_admin(user))
+        result = signups.add_entry(signup_id, config, by_admin=manages(row, user))
     except signups.SignupError as e:
         return _error(e)
     return {**signup_detail(signup_id, user), "warnings": result["warnings"]}
 
 
-def _entry(signup_id: int, entry_id: int, user: sqlite3.Row) -> sqlite3.Row:
-    row = db.query_one("SELECT * FROM signup_entries WHERE id = ? AND signup_id = ?", (entry_id, signup_id))
-    if not row or (row["user_id"] != user["id"] and not is_admin(user)):
+def _entry(signup: sqlite3.Row, entry_id: int, user: sqlite3.Row) -> sqlite3.Row:
+    row = db.query_one("SELECT * FROM signup_entries WHERE id = ? AND signup_id = ?", (entry_id, signup["id"]))
+    if not row or (row["user_id"] != user["id"] and not manages(signup, user)):
         raise HTTPException(404, "No such entry")
     return row
 
 
 @router.post("/signups/{signup_id}/entries/{entry_id}/refresh")
 def refresh_entry(signup_id: int, entry_id: int, user: sqlite3.Row = Depends(current_user)):
-    _get(signup_id)
-    entry = _entry(signup_id, entry_id, user)
+    row = _get(signup_id)
+    entry = _entry(row, entry_id, user)
     try:
-        result = signups.refresh_entry(signup_id, entry, by_admin=is_admin(user))
+        result = signups.refresh_entry(signup_id, entry, by_admin=manages(row, user))
     except signups.SignupError as e:
         return _error(e)
     return {**signup_detail(signup_id, user), "warnings": result["warnings"]}
@@ -246,9 +255,9 @@ def refresh_entry(signup_id: int, entry_id: int, user: sqlite3.Row = Depends(cur
 @router.delete("/signups/{signup_id}/entries/{entry_id}")
 def remove_entry(signup_id: int, entry_id: int, user: sqlite3.Row = Depends(current_user)) -> dict:
     row = _get(signup_id)
-    _entry(signup_id, entry_id, user)
-    # Players can withdraw while the round is open; admins can tidy up until it is generated
-    allowed = signups.is_open(row) or (is_admin(user) and row["status"] in ("open", "closed"))
+    _entry(row, entry_id, user)
+    # Players can withdraw while the round is open; its organizer can tidy up until it is generated
+    allowed = signups.is_open(row) or (manages(row, user) and row["status"] in ("open", "closed"))
     if not allowed:
         raise HTTPException(409, "Sign-ups for this round are closed")
     signups.remove_entry(signup_id, entry_id)
@@ -257,8 +266,7 @@ def remove_entry(signup_id: int, entry_id: int, user: sqlite3.Row = Depends(curr
 
 @router.get("/signups/{signup_id}/entries/{entry_id}/download")
 def download_entry(signup_id: int, entry_id: int, user: sqlite3.Row = Depends(current_user)) -> FileResponse:
-    _get(signup_id)
-    entry = _entry(signup_id, entry_id, user)
+    entry = _entry(_get(signup_id), entry_id, user)
     path = signups.entry_path(signup_id, entry_id)
     if not path.is_file():
         raise HTTPException(410, "The file of this entry is missing from disk")

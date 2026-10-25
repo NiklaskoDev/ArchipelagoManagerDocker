@@ -14,9 +14,10 @@ from pydantic import BaseModel, Field
 
 from .. import __version__, audit, db, discord_auth, notify, settings as app_settings
 from ..config import CONFIG
-from ..security import (SESSION_COOKIE, LoginThrottle, admin_user, check_password_policy, check_username, create_session,
-                        current_user, destroy_session, destroy_user_sessions, hash_password, https_in_use,
-                        login_throttle, set_session_cookie, user_for_request, verify_password)
+from ..security import (ROLES, SESSION_COOKIE, LoginThrottle, admin_user, check_password_policy, check_username,
+                        create_session, current_user, destroy_session, destroy_user_sessions, hash_password,
+                        https_in_use, is_organizer, login_throttle, organizer_user, set_session_cookie,
+                        user_for_request, verify_password)
 from ..security import ip_throttle
 
 router = APIRouter(prefix="/api")
@@ -79,6 +80,8 @@ def status(request: Request) -> dict:
             "start_rooms": cfg["users_can_start_rooms"],
             "generate": cfg["users_can_generate"],
             "upload_apworlds": cfg["users_can_upload_apworlds"],
+            # add games, generate and open sign-up rounds, and run those (security.is_organizer)
+            "organize": bool(user and is_organizer(user)),
         },
         # what players can ask to be mentioned for on Discord
         "ping_kinds": notify.ping_kinds_offered(cfg) if user else [],
@@ -293,6 +296,18 @@ def list_users(_admin: sqlite3.Row = Depends(admin_user)) -> list[dict]:
     return [{**user_json(r), "config_count": r["config_count"], "slot_count": r["slot_count"]} for r in rows]
 
 
+@router.get("/users/names")
+def user_names(_user: sqlite3.Row = Depends(organizer_user)) -> list[dict]:
+    """Who can be given a slot, for organizers, who do not see the rest of the user list."""
+    return [{"id": r["id"], "username": r["username"]}
+            for r in db.query("SELECT id, username FROM users WHERE disabled = 0 ORDER BY username COLLATE NOCASE")]
+
+
+def _check_role(role: str) -> None:
+    if role not in ROLES:
+        raise HTTPException(400, "Role must be 'admin', 'organizer' or 'user'")
+
+
 class NewUser(BaseModel):
     username: str = Field(max_length=64)
     password: str = Field(max_length=256)
@@ -301,8 +316,7 @@ class NewUser(BaseModel):
 
 @router.post("/users")
 def add_user(body: NewUser, request: Request, _admin: sqlite3.Row = Depends(admin_user)) -> dict:
-    if body.role not in ("admin", "user"):
-        raise HTTPException(400, "Role must be 'admin' or 'user'")
+    _check_role(body.role)
     user_id = create_user(body.username, body.password, body.role)
     row = db.query_one("SELECT * FROM users WHERE id = ?", (user_id,))
     audit.note(request, target=("user", user_id, row["username"]), role=body.role)
@@ -326,12 +340,11 @@ def patch_user(user_id: int, body: UserPatch, request: Request, admin: sqlite3.R
     target = db.query_one("SELECT * FROM users WHERE id = ?", (user_id,))
     if not target:
         raise HTTPException(404, "No such user")
-    demotes = (body.role == "user" and target["role"] == "admin") or (body.disabled is True and target["role"] == "admin")
+    demotes = target["role"] == "admin" and ((body.role is not None and body.role != "admin") or body.disabled is True)
     if demotes and _active_admin_count(excluding=user_id) == 0:
         raise HTTPException(409, "There must be at least one active administrator")
     if body.role is not None:
-        if body.role not in ("admin", "user"):
-            raise HTTPException(400, "Role must be 'admin' or 'user'")
+        _check_role(body.role)
         db.execute("UPDATE users SET role = ? WHERE id = ?", (body.role, user_id))
     if body.disabled is not None:
         db.execute("UPDATE users SET disabled = ? WHERE id = ?", (int(body.disabled), user_id))

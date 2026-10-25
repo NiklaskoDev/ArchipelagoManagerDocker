@@ -166,6 +166,27 @@ def is_admin(user: sqlite3.Row) -> bool:
     return user["role"] == "admin"
 
 
+# Organizers run sign-up rounds and the games they add or generate, as administrators do, but do not administer the
+# server: users, settings, custom games, ROMs and Archipelago versions stay with the administrators.
+ROLES = ("admin", "organizer", "user")
+
+
+def is_organizer(user: sqlite3.Row) -> bool:
+    """Whether a user may add games and open sign-up rounds (administrators may too)."""
+    return user["role"] in ("admin", "organizer")
+
+
+def organizer_user(user: sqlite3.Row = Depends(current_user)) -> sqlite3.Row:
+    if not is_organizer(user):
+        raise HTTPException(403, "Only organizers and administrators can do this")
+    return user
+
+
+def manages(row: sqlite3.Row, user: sqlite3.Row) -> bool:
+    """Whether a user runs a game or a sign-up round (created_by): administrators run all of them, organizers their own."""
+    return is_admin(user) or (user["role"] == "organizer" and row["created_by"] == user["id"])
+
+
 class LoginThrottle:
     """Allows `limit` failed logins per key within `window` seconds."""
 

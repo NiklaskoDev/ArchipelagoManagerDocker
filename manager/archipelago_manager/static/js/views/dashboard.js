@@ -1,11 +1,12 @@
-import { h, clear, icon, fmtBytes } from "../util.js";
-import { get, state, isAdmin } from "../api.js";
+import { h, clear, icon, fmtBytes, fmtSpan } from "../util.js";
+import { get, state, isAdmin, isOrganizer } from "../api.js";
 import { pageHeader, missingGamesPanel, gameCard, empty, updateBanner } from "../components.js";
 import { signupCard } from "./signups.js";
 import { t, plural } from "../i18n.js";
 
 export default async function render({ root, cleanup, isCurrent }) {
   const admin = isAdmin();
+  const organizer = isOrganizer();  // adds games
   const [games, missing, configs, system, rounds] = await Promise.all([
     get("/api/games"), get("/api/missing-games"), get("/api/configs"), admin ? get("/api/system") : null, get("/api/signups"),
   ]);
@@ -29,6 +30,16 @@ export default async function render({ root, cleanup, isCurrent }) {
     const others = list.filter((g) => !g.my_slots.length);
     const onUpdate = () => load();
     clear(gridHost);
+    // the player's slots in games that were reminded they wait for them (reminders.py)
+    const waiting = list.flatMap((g) => g.my_slots.filter((s) => s.idle_since).map((s) => ({ ...s, gameId: g.id, gameName: g.name })));
+    if (waiting.length) {
+      gridHost.append(h("div", { class: "section" }, h("div", { class: "section-head" }, h("h2", {}, t("Games waiting for you"))),
+        h("div", { class: "card stack tight" }, waiting.map((s) => h("div", { class: "row spread" },
+          h("div", {}, h("span", { class: "slot-name" }, s.name), h("span", { class: "muted" }, ` · ${s.game} · ${s.gameName}`),
+            h("div", { class: "muted small" }, t("You have not played for {time}, and the others play on. No time any more? Hand your slot over on the game page.",
+              { time: fmtSpan(Date.now() / 1000 - s.idle_since) }))),
+          h("a", { class: "btn sm primary", href: `#/games/${s.gameId}` }, t("Open the game")))))));
+    }
     const offered = list.flatMap((g) => g.offered_slots.map((o) => ({ ...o, gameId: g.id, gameName: g.name })));
     if (offered.length) {
       gridHost.append(h("div", { class: "section" }, h("div", { class: "section-head" }, h("h2", {}, t("Slots looking for a player"))),
@@ -40,9 +51,9 @@ export default async function render({ root, cleanup, isCurrent }) {
     }
     if (!all.length) {
       gridHost.append(empty(t("No games yet"),
-        admin ? t("Upload a pregenerated multiworld or generate a new one.") : t("When an administrator adds you to a game, it shows up here."),
-        admin ? h("a", { class: "btn primary", href: "#/games" }, icon("upload", 14), t("Add a game")) : null,
-        admin ? h("a", { class: "btn", href: "#/generate" }, icon("zap", 14), t("Generate")) : null));
+        organizer ? t("Upload a pregenerated multiworld or generate a new one.") : t("When an administrator adds you to a game, it shows up here."),
+        organizer ? h("a", { class: "btn primary", href: "#/games" }, icon("upload", 14), t("Add a game")) : null,
+        organizer ? h("a", { class: "btn", href: "#/generate" }, icon("zap", 14), t("Generate")) : null));
       return;
     }
     if (mine.length) {
