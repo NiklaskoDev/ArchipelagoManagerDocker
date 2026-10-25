@@ -19,7 +19,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from . import activity, apbridge, backups, db, gamepaths, history, notify, settings as app_settings, versions
+from . import activity, apbridge, backups, db, gamepaths, history, notify, settings as app_settings, tls, versions
 from .config import CONFIG
 from .history import STATUS_GOAL
 
@@ -83,6 +83,9 @@ class Room:
     announce: bool = False  # tell Discord once the server accepts connections
     clients: int = 0  # connected now, counted from the joins and leaves in the log
     idle_since: float | None = None  # since when nobody is connected, once the server accepts connections
+    # the certificate the server presents (tls.stamp), None while it runs unencrypted; and until when it is valid
+    tls_stamp: tuple | None = None
+    tls_expires_at: float | None = None
 
     @property
     def active(self) -> bool:
@@ -139,7 +142,7 @@ def _option_commands(game: Any) -> list[str]:
     return commands
 
 
-def build_command(game: Any) -> list[str]:
+def build_command(game: Any, certificate: tuple[str, str] | None = None) -> list[str]:
     opts = app_settings.clean_server_options(db.jloads(game["options"], {}))
     cmd = apbridge.ap_command(
         "MultiServer.py", str(gamepaths.multidata_path(game["id"])),
@@ -163,6 +166,8 @@ def build_command(game: Any) -> list[str]:
         cmd.append("--disable_item_cheat")
     if opts["use_embedded_options"]:
         cmd.append("--use_embedded_options")
+    if certificate:
+        cmd += [f"--cert={certificate[0]}", f"--cert_key={certificate[1]}"]
     return cmd
 
 
@@ -285,6 +290,7 @@ class RoomManager:
             "started_at": room.started_at,
             "exit_code": room.exit_code,
             "error": room.error,
+            "tls": room.tls_stamp is not None if room.active else None,  # None: decided when the server starts
         }
 
     def is_active(self, game_id: int) -> bool:
@@ -328,16 +334,24 @@ class RoomManager:
             game = db.query_one("SELECT * FROM games WHERE id = ?", (room.game_id,))
         if not port_is_free(game["port"]):
             raise RoomError(f"Port {game['port']} is already in use by something else")
+        try:
+            certificate = tls.for_game(game)
+        except tls.TLSError as e:
+            raise RoomError(f"The certificate for encrypted connections cannot be used: {e} Fix it under Admin → "
+                            f"Settings, or turn off encrypted connections in the game's settings.") from None
 
         room.want_stop = False
         room.state, room.error, room.exit_code, room.port = "starting", None, None, game["port"]
         room.started_at = time.time()
         room.clients, room.idle_since = 0, None
+        room.tls_stamp = tls.stamp(*certificate) if certificate else None
+        room.tls_expires_at = tls.inspect(*certificate)["expires_at"] if certificate else None
         self._load_log_tail(room)
-        self._append_log(room, f"--- starting server on port {game['port']} ---")
+        self._append_log(room, f"--- starting server on port {game['port']}"
+                               f"{' with encrypted connections (wss)' if certificate else ''} ---")
         try:
             room.proc = await asyncio.create_subprocess_exec(
-                *build_command(game),
+                *build_command(game, certificate),
                 stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
                 cwd=str(apbridge.ap_dir(game["ap_version"])), env=apbridge.ap_env(), start_new_session=True)
         except OSError as e:
@@ -568,6 +582,38 @@ class RoomManager:
         if room.state == "stopped":
             db.execute("UPDATE games SET desired_state = 'stopped', asleep = 1 WHERE id = ? AND desired_state = 'running'",
                        (room.game_id,))
+
+    async def watch_certificate(self) -> None:
+        """Restarts a server that presents another certificate than the one set: a renewed one, or none (or one) after
+        encrypted connections were turned on or off. It waits until nobody is connected, unless the certificate the
+        server has expired: then nobody could connect anew anyway."""
+        while True:
+            await asyncio.sleep(5 * CONFIG.sleep_minute_seconds)
+            for game_id, room in list(self.rooms.items()):
+                if room.state != "running":
+                    continue
+                try:
+                    game = db.query_one("SELECT * FROM games WHERE id = ?", (game_id,))
+                    if not game:
+                        continue
+                    try:
+                        certificate = tls.for_game(game)
+                    except tls.TLSError:
+                        continue  # restarting would fail; the server keeps the certificate it has
+                    wanted = tls.stamp(*certificate) if certificate else None
+                    expired = room.tls_expires_at is not None and room.tls_expires_at < time.time()
+                    if wanted == room.tls_stamp or (room.clients and not expired):
+                        continue
+                    self._append_log(room, "--- the certificate for encrypted connections changed: restarting the "
+                                           "server to use it ---")
+                    await self.stop(game_id, persist=False)
+                    try:
+                        await self.start(game_id)
+                    except RoomError as e:
+                        room.state, room.error = "crashed", str(e)
+                        self._append_log(room, f"--- restart failed: {e} ---")
+                except Exception:  # noqa: BLE001 - one broken game must not keep the others on an old certificate
+                    log.exception("Restarting game %s for its certificate failed", game_id)
 
     def _take_port(self, game_id: int) -> int | None:
         """When no port is free: the port of another game whose server is not running, and is not about to start.

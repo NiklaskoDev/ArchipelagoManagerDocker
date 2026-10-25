@@ -63,6 +63,9 @@ class Config:
     sleep_minute_seconds: int
     # How long a day lasts for reminding players who stopped playing (reminders.py): seconds in tests
     reminder_day_seconds: int
+    # Certificate and key for encrypted game connections (tls.py), until an admin sets others in the web UI
+    tls_cert: str
+    tls_key: str
 
     # --- derived paths -------------------------------------------------------------------------------------------
     @property
@@ -127,6 +130,8 @@ def load_config() -> Config:
         discord_authorize=os.environ.get("DISCORD_AUTHORIZE_URL", "https://discord.com/oauth2/authorize"),
         sleep_minute_seconds=max(1, _int("SLEEP_MINUTE_SECONDS", 60)),
         reminder_day_seconds=max(1, _int("REMINDER_DAY_SECONDS", 86400)),
+        tls_cert=os.environ.get("TLS_CERT", "").strip(),
+        tls_key=os.environ.get("TLS_KEY", "").strip(),
     )
 
 

@@ -15,6 +15,7 @@ import collections
 import contextlib
 import json
 import logging
+import ssl
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -168,6 +169,21 @@ def _server_up(game_id: int) -> bool:
     return ROOMS.status(game_id)["state"] in ("starting", "running")
 
 
+def server_address(game_id: int, port: int) -> str:
+    return f"{'wss' if ROOMS.room(game_id).tls_stamp else 'ws'}://127.0.0.1:{port}"
+
+
+def server_ssl(game_id: int) -> ssl.SSLContext | None:
+    """For a server with encrypted connections: encrypted, but without checking the certificate, which names the
+    public address, not 127.0.0.1. The connection does not leave the container."""
+    if not ROOMS.room(game_id).tls_stamp:
+        return None
+    context = ssl.create_default_context()
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+    return context
+
+
 # ----------------------------------------------------------------------------------------------------------------------
 # the connections
 # ----------------------------------------------------------------------------------------------------------------------
@@ -294,7 +310,8 @@ class TextClients:
             raise Refused("The game or the slot no longer exists")
         version = (apbridge.version_tuple(game["ap_version"]) or (0, 6, 0)) + (0, 0, 0)
         # The server is in the same container; no proxy from the environment may come between
-        async with connect(f"ws://127.0.0.1:{game['port']}", proxy=None, max_size=MAX_PACKET, open_timeout=15) as ws:
+        async with connect(server_address(session.game_id, game["port"]), ssl=server_ssl(session.game_id), proxy=None,
+                           max_size=MAX_PACKET, open_timeout=15) as ws:
             session.ws = ws
             room = await self._expect(ws, "RoomInfo")
             session.hint_cost_percent = _int(room.get("hint_cost"))

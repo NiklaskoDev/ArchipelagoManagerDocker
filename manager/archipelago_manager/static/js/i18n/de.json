@@ -1290,7 +1290,32 @@
   "The weights below are replaced by ones for the picked games.": "Die Gewichte unten werden durch welche für die ausgewählten Spiele ersetzt.",
   "Replace the weights?": "Gewichte ersetzen?",
   "Pick the games": "Spiele auswählen",
-  "Each game comes up as often as its weight says, against the others: 3 and 1 means three times as often. With every option at random, each option that can be left to chance is, except deathlink, progression balancing and accessibility.": "Jedes Spiel kommt im Verhältnis zu den anderen so oft dran, wie sein Gewicht sagt: 3 und 1 heißt dreimal so oft. Mit „Jede Option zufällig“ wird jede Option dem Zufall überlassen, die das zulässt, außer Deathlink, Progression Balancing und Accessibility."
+  "Each game comes up as often as its weight says, against the others: 3 and 1 means three times as often. With every option at random, each option that can be left to chance is, except deathlink, progression balancing and accessibility.": "Jedes Spiel kommt im Verhältnis zu den anderen so oft dran, wie sein Gewicht sagt: 3 und 1 heißt dreimal so oft. Mit „Jede Option zufällig“ wird jede Option dem Zufall überlassen, die das zulässt, außer Deathlink, Progression Balancing und Accessibility.",
+  "Encrypted connections (wss)": "Verschlüsselte Verbindungen (wss)",
+  "When a certificate is set under Admin → Settings. Turn it off for a game whose clients cannot encrypt; a running server changes over once nobody is connected.": "Wenn unter Admin → Einstellungen ein Zertifikat eingetragen ist. Schalte es für ein Spiel aus, dessen Clients nicht verschlüsseln können; ein laufender Server stellt um, sobald niemand verbunden ist.",
+  "Admin → Settings": "Admin → Einstellungen",
+  "Games with encrypted connections cannot start.": "Spiele mit verschlüsselten Verbindungen können nicht starten.",
+  "Fix the certificate under {where}, or turn off encrypted connections in the games' settings.": "Behebe das unter {where}, oder schalte verschlüsselte Verbindungen in den Einstellungen der Spiele aus.",
+  "The certificate for encrypted connections expired on {date}.": "Das Zertifikat für verschlüsselte Verbindungen ist am {date} abgelaufen.",
+  "The certificate for encrypted connections expires on {date}.": "Das Zertifikat für verschlüsselte Verbindungen läuft am {date} ab.",
+  "Players' clients refuse an expired certificate. Renew it: running servers take the new one over by themselves once nobody is connected.": "Die Clients der Spieler lehnen ein abgelaufenes Zertifikat ab. Erneuere es: Laufende Server übernehmen das neue von selbst, sobald niemand verbunden ist.",
+  "Off: games are served unencrypted.": "Aus: Spiele laufen unverschlüsselt.",
+  "Valid until": "Gültig bis",
+  "Issued by": "Ausgestellt von",
+  "itself (self-signed)": "sich selbst (selbstsigniert)",
+  "Archipelago's clients only accept certificates of a known authority, such as Let's Encrypt. With a self-signed one, players cannot connect.": "Die Clients von Archipelago akzeptieren nur Zertifikate einer bekannten Stelle wie Let's Encrypt. Mit einem selbstsignierten können sich die Spieler nicht verbinden.",
+  "The certificate is not for the public address {host}, so players' clients will refuse it. Set the public address to one of the names it is for.": "Das Zertifikat gilt nicht für die öffentliche Adresse {host}, deshalb lehnen die Clients der Spieler es ab. Stelle als öffentliche Adresse einen der Namen ein, für die es gilt.",
+  "{n} game is set to run without encryption.": "{n} Spiel ist so eingestellt, dass es ohne Verschlüsselung läuft.",
+  "{n} games are set to run without encryption.": "{n} Spiele sind so eingestellt, dass sie ohne Verschlüsselung laufen.",
+  "Encrypted game connections": "Verschlüsselte Spielverbindungen",
+  "With a certificate, the game servers accept encrypted connections only (wss://), so passwords and chat do not cross the internet readable. Archipelago's clients switch to it by themselves; players keep entering the same address. The certificate must be for the public address, from an authority such as Let's Encrypt: mount the folder your reverse proxy keeps it in into the container (read only), and enter the paths as the container sees them. Renewed certificates are taken over by the running servers once nobody is connected.": "Mit einem Zertifikat nehmen die Spielserver nur noch verschlüsselte Verbindungen an (wss://), damit Passwörter und Chat nicht lesbar durchs Internet gehen. Die Clients von Archipelago stellen von selbst darauf um; die Spieler geben weiter dieselbe Adresse ein. Das Zertifikat muss für die öffentliche Adresse gelten und von einer Stelle wie Let's Encrypt stammen: Binde den Ordner, in dem dein Reverse Proxy es ablegt, in den Container ein (nur lesend), und trage die Pfade so ein, wie der Container sie sieht. Erneuerte Zertifikate übernehmen die laufenden Server, sobald niemand verbunden ist.",
+  "Certificate": "Zertifikat",
+  "PEM file with the certificate and its chain, e.g. fullchain.pem": "PEM-Datei mit dem Zertifikat und seiner Kette, z. B. fullchain.pem",
+  "Private key": "Privater Schlüssel",
+  "PEM file without a password, e.g. privkey.pem. Empty if it is in the certificate's file.": "PEM-Datei ohne Passwort, z. B. privkey.pem. Leer, wenn er in der Datei des Zertifikats steht.",
+  "Leave both empty to turn encryption off.": "Lass beide leer, um die Verschlüsselung auszuschalten.",
+  "encrypted": "verschlüsselt",
+  "The connection is encrypted; a client that does not find that out by itself takes {address}.": "Die Verbindung ist verschlüsselt; ein Client, der das nicht selbst erkennt, nimmt {address}."
  },
  "server": {
   " (line {0})": " (Zeile {0})",
@@ -1634,7 +1659,16 @@
   "Each game can be picked once": "Jedes Spiel kann nur einmal ausgewählt werden",
   "A game's weight is a whole number from 0 to {0}": "Das Gewicht eines Spiels ist eine ganze Zahl von 0 bis {0}",
   "At least one game needs a weight above 0": "Mindestens ein Spiel braucht ein Gewicht über 0",
-  "The options of {0} are not known on this server": "Die Optionen von {0} sind auf diesem Server nicht bekannt"
+  "The options of {0} are not known on this server": "Die Optionen von {0} sind auf diesem Server nicht bekannt",
+  "Enter the certificate as well as its key": "Gib außer dem Schlüssel auch das Zertifikat an",
+  "Enter the path of the file in the container, e.g. /config/tls/fullchain.pem": "Gib den Pfad der Datei im Container an, z. B. /config/tls/fullchain.pem",
+  "Enter the certificate with its full path in the container, e.g. /config/tls/fullchain.pem": "Gib das Zertifikat mit seinem vollständigen Pfad im Container an, z. B. /config/tls/fullchain.pem",
+  "Enter the key with its full path in the container, e.g. /config/tls/privkey.pem": "Gib den Schlüssel mit seinem vollständigen Pfad im Container an, z. B. /config/tls/privkey.pem",
+  "There is no file {0} in the container": "Im Container gibt es keine Datei {0}",
+  "The manager runs as user {0} and may not read {1}": "Der Manager läuft als Benutzer {0} und darf {1} nicht lesen",
+  "{0} is not a certificate in PEM format (-----BEGIN CERTIFICATE-----)": "{0} ist kein Zertifikat im PEM-Format (-----BEGIN CERTIFICATE-----)",
+  "{0} is not the private key of this certificate (a PEM file without a password)": "{0} ist nicht der private Schlüssel dieses Zertifikats (eine PEM-Datei ohne Passwort)",
+  "The certificate for encrypted connections cannot be used: {0} Fix it under Admin → Settings, or turn off encrypted connections in the game's settings.": "Das Zertifikat für verschlüsselte Verbindungen ist nicht nutzbar: {0} Behebe das unter Admin → Einstellungen, oder schalte verschlüsselte Verbindungen in den Einstellungen des Spiels aus."
  },
  "server_extra": [
   " (line {0})",
@@ -1702,6 +1736,8 @@
   "Archipelago {0} is not installed on this server. Install it again under Admin → Settings → Archipelago versions, or choose another version in the game's settings.",
   "This API token is not valid (any more)",
   "API tokens cannot be used for this. Sign in instead.",
-  "This API token can only read"
+  "This API token can only read",
+  "Enter the certificate with its full path in the container, e.g. /config/tls/fullchain.pem",
+  "Enter the key with its full path in the container, e.g. /config/tls/privkey.pem"
  ]
 }

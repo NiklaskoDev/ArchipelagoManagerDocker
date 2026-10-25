@@ -43,6 +43,8 @@ players log in to keep their YAML configs, see their games and download their pa
   and download their files. Admins also get the live console, file management, per-game settings and user management.
   *Organizers* run sign-up rounds and the games they add or generate the way admins do, without administering the
   server.
+- **Encrypts game connections.** With a certificate (such as the one your reverse proxy already has), every game
+  server speaks `wss://`; Archipelago's clients switch over by themselves, and renewed certificates are taken over.
 - **Spectators and stream overlays.** A game can have a link that shows it without signing in: everyone's progress,
   the standings and the race clock, optionally what happens in it (never the chat). It comes with an overlay for OBS.
 - **Reminds players who stopped playing.** A player who has not played for some days while the others play on is
@@ -54,6 +56,9 @@ players log in to keep their YAML configs, see their games and download their pa
   archive with the playing time and who reached their goal when.
 
 ## Quick start
+
+Images are published for `linux/amd64` and `linux/arm64` (Raspberry Pi 4 and 5 with a 64-bit system, ARM NAS, Apple
+silicon); Docker picks the right one.
 
 ### Unraid
 
@@ -99,6 +104,36 @@ by your players:
   limit of failed logins (the log says so when it happens). Also set *Address of this web UI* (Admin → Settings) to the
   `https://` address; cookies are then always marked secure.
 - **Host networking:** works too and avoids publishing ports. Then set `PORT` to a free port for the web UI.
+
+### Encrypted game connections
+
+Archipelago's game connections are unencrypted websockets unless the server has a certificate. Give the manager one,
+and every game server accepts encrypted connections (`wss://`) only, so room passwords and chat no longer cross the
+internet readable.
+
+1. Get a certificate for the *Public address* from an authority the clients trust, such as Let's Encrypt. If a reverse
+   proxy already gets one for that name (SWAG, Nginx Proxy Manager, Caddy, Traefik), use that one: mount its folder
+   into the container, read only, e.g. `/mnt/user/appdata/swag/etc/letsencrypt:/certs:ro` (Unraid: the template's
+   *Certificates* path).
+2. *Admin → Settings → Encrypted game connections*: enter the certificate (`fullchain.pem`, with its chain) and the
+   key (`privkey.pem`, without a password) as paths inside the container, such as `/certs/live/example.com/fullchain.pem`.
+   Or set `TLS_CERT` and `TLS_KEY`. The manager loads them on saving and refuses files a server could not use; the
+   card shows the names the certificate is for, until when it is valid, and warns if it is not for the public address
+   or is self-signed (which Archipelago's clients refuse).
+
+Players change nothing: Archipelago's own clients try `wss://` by themselves when the plain connection gets no answer,
+and the game page marks the address *encrypted*. A client that cannot find out by itself takes the address with
+`wss://` in front. A client that cannot encrypt at all cannot connect to such a game: turn off *Encrypted connections
+(wss)* in that game's settings (or under *Defaults for new games*).
+
+- **Renewing:** a server reads the certificate when it starts. When the files change, every running server that still
+  presents the old certificate restarts once nobody is connected to it (or right away, if its certificate has
+  expired); the same happens when encryption is turned on or off. Admins see a warning on the dashboard two weeks
+  before the certificate expires.
+- **When the certificate cannot be used** (deleted, unreadable for `PUID`, not matching its key), games with encrypted
+  connections do not start, and say why, rather than starting unencrypted. Running ones keep the certificate they have.
+- The files need to be readable by the user the manager runs as (`PUID`). Some proxies keep the key readable for root
+  only; then copy the two files into the data folder (`/config/tls/`) after each renewal instead.
 
 ## Using it
 
@@ -467,6 +502,7 @@ Everything is optional except the volume. Set these as environment variables (Un
 | `GENERATION_TIMEOUT` | `3600` | Seconds before a generation is stopped. |
 | `TZ` | *(empty)* | Time zone for logs. |
 | `AP_SOURCE_URL` | GitHub | Where further Archipelago versions are downloaded from; `{version}` stands for the release number. Default `https://github.com/ArchipelagoMW/Archipelago/archive/refs/tags/{version}.tar.gz`. |
+| `TLS_CERT` / `TLS_KEY` | *(empty)* | Certificate and key for [encrypted game connections](#encrypted-game-connections), as paths inside the container. Also editable in the UI. |
 | `UPDATE_CHECK` | `true` | Ask GitHub for new releases of Archipelago and of custom games added from GitHub, and show them to admins. `false` stops all requests the manager makes to GitHub on its own. |
 
 ## Data and backups
@@ -511,7 +547,8 @@ saves stay, and games that were running start again. Custom APWorlds can stop lo
 
 **Where new images come from:** the `Archipelago update` workflow checks for a new release every day. When there is
 one, it opens a pull request that bumps `AP_VERSION` in the `Dockerfile` and starts CI for it, which tests the manager
-against the new release and smoke tests the image. Merging the pull request publishes the new image. This needs one
+against the new release and smoke tests the image, on amd64 and on arm64. Merging the pull request publishes the new
+image. This needs one
 setting in the repository: *Settings → Actions → General → Workflow permissions → Allow GitHub Actions to create and
 approve pull requests*. You can also run the workflow by hand (*Actions → Archipelago update → Run workflow*) or edit
 `AP_VERSION` yourself.
@@ -527,8 +564,9 @@ approve pull requests*. You can also run the workflow by hand (*Actions → Arch
   the token alone, never by a cookie it also carries, and a token cannot manage tokens, passwords, sign-ins or Discord
   links, so a leaked token cannot lock its owner out or keep itself alive after it is revoked. Other `Authorization`
   headers, such as a reverse proxy's basic auth, are ignored.
-- Archipelago's game connections are plain websockets and are not encrypted. A room password only keeps people out,
-  it is sent unencrypted. Do not reuse a password you care about.
+- Archipelago's game connections are plain websockets unless a certificate is set (see
+  [Encrypted game connections](#encrypted-game-connections)); without one, a room password only keeps people out and
+  is sent unencrypted. Do not reuse a password you care about. Games set to run without encryption stay unencrypted.
 - The web UI speaks plain HTTP. Do not expose it to the internet without an HTTPS reverse proxy.
 - Spoiler logs, bundled YAMLs and other players' files are visible to admins (and the game's organizer) only, unless
   they share them.
@@ -603,5 +641,6 @@ DATA_DIR=../data AP_DIR=$PWD/../Archipelago AP_PYTHON=$PWD/../ap-venv/bin/python
 
 ## Limitations
 
-- One Archipelago version at a time; images are published for `linux/amd64`.
-- Game ports are served by Archipelago's own server and are not behind TLS.
+- On `linux/arm64`, a further Archipelago version installed from the web UI comes without The Wind Waker: its
+  requirement `dolphin-memory-engine` has no build for arm64 and the image has no compiler to make one, so that world
+  is skipped (the install log says so). The version the image comes with has it.
