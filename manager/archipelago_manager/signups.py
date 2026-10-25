@@ -46,6 +46,11 @@ def entry_path(signup_id: int, entry_id: int) -> Path:
     return CONFIG.data_dir / "signups" / str(signup_id) / f"{entry_id}.yaml"
 
 
+def weights_path(signup_id: int) -> Path:
+    """A mystery round's file of weights (mystery.py), which every entry is a copy of."""
+    return CONFIG.data_dir / "signups" / str(signup_id) / "mystery.yaml"
+
+
 def get(signup_id: int) -> sqlite3.Row | None:
     return db.query_one("SELECT * FROM signups WHERE id = ?", (signup_id,))
 
@@ -140,6 +145,8 @@ def add_entry(signup_id: int, config: sqlite3.Row, *, by_admin: bool = False) ->
         signup = conn.execute("SELECT * FROM signups WHERE id = ?", (signup_id,)).fetchone()
         if not _takes_entries(signup, by_admin=by_admin):
             raise SignupError("Sign-ups for this round are closed", 409)
+        if signup["mystery"]:
+            raise SignupError("This is a mystery round: join it with your player name", 409)
         if conn.execute("SELECT 1 FROM signup_entries WHERE signup_id = ? AND config_id = ?",
                         (signup_id, config["id"])).fetchone():
             raise SignupError(f"'{config['name']}' is already entered in this round", 409)
@@ -169,6 +176,82 @@ def refresh_entry(signup_id: int, entry: sqlite3.Row, *, by_admin: bool = False)
                                       hashlib.sha256(data).hexdigest(), time.time(), entry["id"]))
         configstore.write_atomic(entry_path(signup_id, entry["id"]), data)
     return {"id": entry["id"], "warnings": _warnings(info)}
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+# mystery rounds: every entry is the round's file of weights with its player's name (mystery.py)
+# ----------------------------------------------------------------------------------------------------------------------
+def check_weights(text: str) -> yamlinfo.YamlInfo:
+    """A file of weights fit for a mystery round: one player, which the generator can take."""
+    try:
+        info = yamlinfo.analyze(text, "mystery")
+    except yamlinfo.YamlError as e:
+        raise SignupError(f"The weights are not valid: {e}") from None
+    if len(info.docs) != 1:
+        raise SignupError("The weights of a mystery round describe one player, which every entry is a copy of")
+    if info.problems:
+        raise SignupError(f"The weights cannot be generated: {info.problems[0]}")
+    missing = apbridge.missing_games(info.games)
+    if missing:
+        raise SignupError(f"Not installed on this server: {', '.join(missing)}", 409, missing)
+    return info
+
+
+def weights_games(signup: sqlite3.Row) -> list[str]:
+    """The games a mystery round's players may get."""
+    try:
+        return yamlinfo.analyze(weights_path(signup["id"]).read_text(encoding="utf-8"), "mystery").games
+    except (OSError, yamlinfo.YamlError):
+        return []
+
+
+def _mystery_copy(weights: str, player: str) -> tuple[bytes, yamlinfo.YamlInfo]:
+    try:
+        text = yamlinfo.with_player_name(weights, player)
+        return text.encode(), yamlinfo.analyze(text, player)
+    except yamlinfo.YamlError as e:
+        raise SignupError(str(e)) from None
+
+
+def set_weights(signup_id: int, text: str) -> None:
+    """Sets a mystery round's weights, and makes every entry a copy of them anew. Checked with check_weights first."""
+    with _LOCK, db.connection() as conn:
+        signup = conn.execute("SELECT * FROM signups WHERE id = ?", (signup_id,)).fetchone()
+        if not signup or signup["status"] not in ("open", "closed"):
+            raise SignupError("This round was already generated", 409)
+        rows = conn.execute("SELECT id, player_names FROM signup_entries WHERE signup_id = ?", (signup_id,)).fetchall()
+        copies = [(row["id"], *_mystery_copy(text, (db.jloads(row["player_names"], []) or ["Player"])[0]))
+                  for row in rows]
+        for entry_id, data, info in copies:
+            conn.execute("UPDATE signup_entries SET games = ?, sha256 = ?, updated_at = ? WHERE id = ?",
+                         (db.jdumps(info.games), hashlib.sha256(data).hexdigest(), time.time(), entry_id))
+        configstore.write_atomic(weights_path(signup_id), text.encode())
+        for entry_id, data, _info in copies:
+            configstore.write_atomic(entry_path(signup_id, entry_id), data)
+
+
+def add_mystery_entry(signup_id: int, user_id: int, player: str, *, by_admin: bool = False) -> dict:
+    """Enters a player into a mystery round with nothing but their player name."""
+    try:
+        weights = weights_path(signup_id).read_text(encoding="utf-8")
+    except FileNotFoundError:
+        raise SignupError("This is not a mystery round", 409) from None
+    data, info = _mystery_copy(weights, player)
+    now = time.time()
+    with db.connection() as conn:
+        signup = conn.execute("SELECT * FROM signups WHERE id = ?", (signup_id,)).fetchone()
+        if not _takes_entries(signup, by_admin=by_admin):
+            raise SignupError("Sign-ups for this round are closed", 409)
+        if not signup["mystery"]:
+            raise SignupError("This is not a mystery round", 409)
+        _check_entry(signup, info, player, user_id=user_id, ignore_entry=None, conn=conn)
+        entry_id = conn.execute(
+            "INSERT INTO signup_entries(signup_id, user_id, config_id, name, player_names, games, sha256, created_at, "
+            "updated_at) VALUES (?,?,NULL,?,?,?,?,?,?)",
+            (signup_id, user_id, "mystery.yaml", db.jdumps(info.player_names), db.jdumps(info.games),
+             hashlib.sha256(data).hexdigest(), now, now)).lastrowid
+        configstore.write_atomic(entry_path(signup_id, entry_id), data)
+    return {"id": entry_id, "warnings": _warnings(info)}
 
 
 def remove_entry(signup_id: int, entry_id: int) -> None:

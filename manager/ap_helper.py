@@ -449,6 +449,56 @@ def cmd_build_save(args) -> dict:
             "hints": len({h for v in hints.values() for h in v})}
 
 
+def cmd_roll(args) -> dict:
+    """Rolls a player file the way the generator does (Generate.roll_settings): weights, random ranges, triggers and a
+    game picked at random become one value each. The result is a file without chance in it: for every player, the game
+    it got and each option the weights name or that comes out other than its default."""
+    cmd_where(args)
+    import yaml
+    import Generate
+    import worlds  # noqa: F401  (registers all worlds)
+    from BaseClasses import PlandoOptions
+    from worlds.AutoWorld import AutoWorldRegister
+    every_plando = PlandoOptions.from_option_string("bosses, items, texts, connections")
+    documents, rolled = [], []
+    for weights in Generate.read_weights_yamls(args.path):
+        if weights is None:
+            continue
+        settings = Generate.roll_settings(weights, every_plando)
+        world = AutoWorldRegister.world_types[settings.game]
+        raw = weights.get(settings.game) or {}
+        options = {}
+        for key, option in world.options_dataclass.type_hints.items():
+            value = getattr(settings, key, None)
+            if value is None:
+                continue
+            given = raw.get(key) if isinstance(raw, dict) else None
+            if given is not None and not option.supports_weighting:
+                options[key] = _plain(given)  # taken as written: plando, item and location lists
+                continue
+            try:
+                shown = form_value(type(value), value.value)
+                default = form_value(option, option.default)
+            except Exception:  # noqa: BLE001 - an option the form cannot show is kept as the file has it
+                if given is not None:
+                    options[key] = _plain(given)
+                continue
+            if given is not None or shown != default:
+                options[key] = shown
+        document = {"name": settings.name, "game": settings.game, settings.game: options}
+        if isinstance(weights.get("description"), str):
+            document = {"name": settings.name, "description": weights["description"], "game": settings.game,
+                        settings.game: options}
+        if isinstance(weights.get("requires"), dict):
+            document["requires"] = _plain(weights["requires"])
+        documents.append(document)
+        rolled.append({"name": settings.name, "game": settings.game})
+    if not documents:
+        raise ValueError("There is no player in this file")
+    text = "---\n".join(yaml.safe_dump(d, sort_keys=False, allow_unicode=True, default_flow_style=False) for d in documents)
+    return {"yaml": text, "rolled": rolled}
+
+
 # --------------------------------------------------------------------------------------------------------------------
 # templates, and the options of every game as a form (what archipelago.gg's player options page shows)
 # --------------------------------------------------------------------------------------------------------------------
@@ -684,6 +734,7 @@ COMMANDS = {
     "names": cmd_names,
     "tracker": cmd_tracker,
     "build-save": cmd_build_save,
+    "roll": cmd_roll,
     "templates": cmd_templates,
 }
 
@@ -709,6 +760,8 @@ def main() -> None:
     p.add_argument("path", help="the multidata")
     p.add_argument("state", help="JSON file: how the game stands (see cmd_build_save)")
     p.add_argument("out", help="where the save is written")
+    p = sub.add_parser("roll")
+    p.add_argument("path", help="a player file, perhaps with weights")
     p = sub.add_parser("templates")
     p.add_argument("out")
     sub.add_parser("host-yaml")

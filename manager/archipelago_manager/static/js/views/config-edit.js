@@ -1,4 +1,4 @@
-import { h, clear, icon, toast, action, confirmDialog, fmtAgo } from "../util.js";
+import { h, clear, icon, toast, action, confirmDialog, openModal, fmtAgo } from "../util.js";
 import { get, post, put, del, isAdmin } from "../api.js";
 import { pageHeader, chips, banner, field, loading, missingGamesPanel, missingRomsPanel, badge, defaultPlayerName } from "../components.js";
 import { t, tServer } from "../i18n.js";
@@ -188,6 +188,43 @@ export default async function render({ root, params, query, cleanup, setDirtyChe
     }
   });
   save.onclick = doSave;
+
+  // What the file comes out as when the generator rolls its weights, random ranges and triggers (mystery.py)
+  async function rollDialog() {
+    if (mode === "form" && needsWrite()) editor.value = await writeForm();
+    const source = editor.value;
+    const summary = h("div", { class: "stack tight" });
+    const out = h("textarea", { class: "input editor", readOnly: true, spellcheck: false, wrap: "off", rows: 14, "aria-label": t("Rolled YAML") });
+    let rolled = null;
+    const again = h("button", { class: "btn", type: "button" }, icon("dice", 14), t("Roll again"));
+    const keep = h("button", { class: "btn primary", type: "button" }, icon("check", 14), t("Save as a new config"));
+    const roll = async () => {
+      again.disabled = keep.disabled = true;
+      try {
+        rolled = await post("/api/configs/roll", { content: source });
+        clear(summary).append(rolled.rolled.map((p) => h("div", {}, h("span", { class: "slot-name" }, p.name), " · ", p.game)));
+        out.value = rolled.yaml;
+      } finally {
+        again.disabled = keep.disabled = false;
+      }
+    };
+    again.onclick = action(roll);
+    keep.onclick = action(async () => {
+      const base = nameInput.value.replace(/\.ya?ml$/i, "");
+      const result = await post("/api/configs/text", { name: `${base} (${t("rolled")}).yaml`, content: rolled.yaml });
+      modal.close();
+      toast(t("Saved as {name}", { name: result.name }), "success");
+      location.hash = `#/configs/${result.id}`;
+    });
+    const modal = openModal({
+      title: t("Rolled"),
+      body: h("div", { class: "stack" },
+        h("p", { class: "muted small" }, t("What this file comes out as once its weights, random ranges and triggers are rolled, as the generator does it. Each generation rolls anew; save the result to play exactly this.")),
+        summary, out),
+      actions: [h("button", { class: "btn", type: "button", onclick: () => modal.close() }, t("Close")), again, keep],
+    });
+    await roll();
+  }
   const onKey = (e) => {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") { e.preventDefault(); save.click(); }
   };
@@ -204,6 +241,8 @@ export default async function render({ root, params, query, cleanup, setDirtyChe
   root.append(
     h("div", { class: "muted small" }, h("a", { href: "#/configs" }, t("← All configs"))),
     pageHeader(id === null ? t("New config") : config.name, t("Set the options in the form or edit the YAML directly. Everything is checked when you save."),
+      h("button", { class: "btn", type: "button", title: t("See what the weights, random ranges and triggers of this file come out as"),
+        onclick: action(rollDialog) }, icon("dice", 14), t("Roll")),
       id !== null ? h("a", { class: "btn", href: `/api/configs/${id}/download` }, icon("download", 14), t("Download")) : null,
       id !== null ? h("button", { class: "btn danger", type: "button", onclick: action(async () => {
         if (!(await confirmDialog(t("Delete {name}?", { name: config.name }), { danger: true, confirmText: t("Delete") }))) return;

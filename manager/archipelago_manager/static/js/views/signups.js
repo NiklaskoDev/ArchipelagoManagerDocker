@@ -1,6 +1,6 @@
 import { h, clear, icon, fmtAgo } from "../util.js";
 import { get, isOrganizer } from "../api.js";
-import { pageHeader, empty, chips } from "../components.js";
+import { pageHeader, empty, chips, badge } from "../components.js";
 import { openSignupForm, signupBadge, deadlineText } from "./signup.js";
 import { t, plural } from "../i18n.js";
 
@@ -8,7 +8,7 @@ export function signupCard(s) {
   return h("div", { class: "card game-card" },
     h("div", { class: "card-head" },
       h("div", { class: "stack tight" }, h("h3", {}, h("a", { href: `#/signups/${s.id}` }, s.name)),
-        s.allowed_games.length ? chips(s.allowed_games) : h("span", { class: "muted small" }, t("Any game"))),
+        s.mystery ? h("span", {}, badge(t("Mystery"), "accent")) : s.allowed_games.length ? chips(s.allowed_games) : h("span", { class: "muted small" }, t("Any game"))),
       signupBadge(s)),
     h("div", { class: "muted small" }, deadlineText(s) || t("Created {ago}", { ago: fmtAgo(s.created_at) })),
     h("div", {}, plural(s.entry_count, "{n} entry", "{n} entries"),

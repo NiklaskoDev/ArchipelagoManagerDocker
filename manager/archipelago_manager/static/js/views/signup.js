@@ -1,5 +1,5 @@
 import { h, clear, icon, toast, action, confirmDialog, openModal, fmtAgo, fmtDate, fmtUntil, toLocalInput, fromLocalInput } from "../util.js";
-import { api, get, post, patch, del } from "../api.js";
+import { api, get, post, patch, del, state } from "../api.js";
 import { banner, badge, chips, field, checkbox, select, missingGamesPanel, missingRomsPanel, promptMissingGames } from "../components.js";
 import { t, plural, tServer } from "../i18n.js";
 
@@ -61,6 +61,32 @@ export async function openSignupForm({ signup = null, onSaved }) {
   gameInput.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); addGame(); } });
   drawAllowed();
 
+  // a mystery round: players join with a name, and everyone's game and options are rolled from one file of weights
+  const mysteryBox = checkbox(t("Mystery round: everyone plays what one file of weights rolls for them"), !!signup?.mystery,
+    signup?.entry_count ? t("A round becomes a mystery round, or stops being one, only while nobody has entered.")
+      : t("Players join with just a player name. Nobody knows their game before it is generated."));
+  mysteryBox.input.disabled = !!signup?.entry_count;
+  const weightsText = signup?.mystery ? await fetch(`/api/signups/${signup.id}/mystery.yaml`, { credentials: "same-origin" })
+    .then((r) => (r.ok ? r.text() : "")) : "";
+  const weights = h("textarea", { class: "input editor", rows: 10, spellcheck: false, wrap: "off", value: weightsText,
+    placeholder: "name: Player\ngame:\n  A Link to the Past: 1\n  Super Metroid: 1\nA Link to the Past: {}\nSuper Metroid: {}" });
+  const weightsFile = h("input", { type: "file", accept: ".yaml,.yml", hidden: true });
+  weightsFile.onchange = async () => {
+    if (weightsFile.files[0]) weights.value = await weightsFile.files[0].text();
+    weightsFile.value = "";
+  };
+  const weightsField = field(t("Weights"), h("div", { class: "stack tight" }, weights,
+    h("div", { class: "row" }, h("button", { class: "btn sm", type: "button", onclick: () => weightsFile.click() }, icon("upload", 14), t("Load a file")), weightsFile)),
+    t("One player file with weights over games and options, like a mystery yaml. Every entry is this file with its player's name; changing it changes them all."));
+  const allowedField = field(t("Allowed games"), h("div", { class: "stack tight" }, chipsHost, h("div", { class: "row" }, h("div", { class: "grow" }, gameInput),
+    h("button", { class: "btn sm", type: "button", onclick: addGame }, icon("plus", 14), t("Add")))),
+    t("Leave empty to allow every installed game."));
+  const syncMystery = () => {
+    weightsField.hidden = !mysteryBox.input.checked;
+    allowedField.hidden = mysteryBox.input.checked;
+  };
+  mysteryBox.input.addEventListener("change", syncMystery);
+
   const autoGenerate = checkbox(t("Generate the game automatically when sign-ups close"), signup ? signup.auto_generate : true);
   const hostAfter = checkbox(t("Start the server once the game is generated"), opts.host_after);
   const spoiler = select(SPOILER_CHOICES, opts.spoiler);
@@ -77,11 +103,18 @@ export async function openSignupForm({ signup = null, onSaved }) {
     }
     const body = {
       name: name.value, description: description.value, deadline: when, configs_per_user: Number(perUser.value),
-      allowed_games: allowed, auto_generate: autoGenerate.input.checked,
+      allowed_games: allowed, auto_generate: autoGenerate.input.checked, mystery: mysteryBox.input.checked,
+      ...(mysteryBox.input.checked && weights.value !== weightsText ? { mystery_weights: weights.value } : {}),
       options: { spoiler: Number(spoiler.value), race: race.input.checked, skip_prog_balancing: skipBalance.input.checked,
         plando: plando.filter((p) => p.box.input.checked).map((p) => p.key), host_after: hostAfter.input.checked },
     };
-    const result = signup ? await patch(`/api/signups/${signup.id}`, body) : await post("/api/signups", body);
+    let result;
+    try {
+      result = signup ? await patch(`/api/signups/${signup.id}`, body) : await post("/api/signups", body);
+    } catch (err) {
+      if (err.data?.missing_games?.length) promptMissingGames(err.data.missing_games.map((game) => ({ game })));
+      throw err;
+    }
     modal.close();
     toast(signup ? t("Round saved") : t("Sign-ups are open"), "success");
     onSaved?.(result);
@@ -96,9 +129,7 @@ export async function openSignupForm({ signup = null, onSaved }) {
         field(t("Deadline"), deadline, signup?.status === "closed" ? t("Reopen the round to take entries again.") : t("Sign-ups close automatically at this time.")),
         field(t("Configs per player"), perUser)),
       noDeadline,
-      field(t("Allowed games"), h("div", { class: "stack tight" }, chipsHost, h("div", { class: "row" }, h("div", { class: "grow" }, gameInput),
-        h("button", { class: "btn sm", type: "button", onclick: addGame }, icon("plus", 14), t("Add")))),
-        t("Leave empty to allow every installed game.")),
+      mysteryBox, weightsField, allowedField,
       h("datalist", { id: listId }, known.map((g) => h("option", { value: g }))),
       h("div", { class: "stack tight" }, autoGenerate, hostAfter),
       h("details", {}, h("summary", { class: "muted" }, t("Generation options")),
@@ -107,6 +138,7 @@ export async function openSignupForm({ signup = null, onSaved }) {
           h("div", { class: "stack tight" }, h("span", { class: "field-label" }, t("Allowed plando")), h("div", { class: "row" }, plando.map((p) => p.box)))))),
     actions: [h("button", { class: "btn", type: "button", onclick: () => modal.close() }, t("Cancel")), save],
   });
+  syncMystery();
 }
 
 export default async function render({ root, params, cleanup, isCurrent }) {
@@ -267,7 +299,10 @@ export default async function render({ root, params, cleanup, isCurrent }) {
     return h("div", { class: "card stack" },
       signup.description ? h("p", { style: { whiteSpace: "pre-wrap", margin: 0 } }, signup.description) : null,
       h("dl", { class: "kv" },
-        h("dt", {}, t("Games")), h("dd", {}, signup.allowed_games.length ? chips(signup.allowed_games) : h("span", { class: "muted" }, t("Any game installed on this server"))),
+        signup.mystery ? [h("dt", {}, t("Mystery")), h("dd", { class: "stack tight" },
+          h("span", {}, t("Everyone joins with a player name and plays what the round's weights roll for them, out of these games:")),
+          chips(signup.mystery_games), h("a", { href: `/api/signups/${id}/mystery.yaml` }, icon("download", 14), " ", t("The weights")))]
+          : [h("dt", {}, t("Games")), h("dd", {}, signup.allowed_games.length ? chips(signup.allowed_games) : h("span", { class: "muted" }, t("Any game installed on this server")))],
         h("dt", {}, t("Configs per player")), h("dd", {}, String(signup.configs_per_user)),
         h("dt", {}, t("Entries")), h("dd", {}, plural(signup.user_count, "{entries} from {n} player", "{entries} from {n} players", { entries: signup.entry_count })),
         h("dt", {}, t("Settings")), h("dd", { class: "muted" }, extras.join(" · "))));
@@ -284,6 +319,7 @@ export default async function render({ root, params, cleanup, isCurrent }) {
     const choices = configs.filter((c) => !entered.has(c.id));
     const missing = [...new Set(mine.flatMap((e) => e.missing_games))];
 
+    if (signup.mystery) return mysteryCard(mine, editable, canEnter);
     const picker = choices.length ? select(choices.map((c) => [c.id, `${c.name} (${c.player_names.join(", ") || t("name from file")} · ${c.games.join(", ")})`]), choices[0].id) : null;
     const enter = picker ? h("button", { class: "btn primary", type: "button",
       onclick: action(() => run("POST", `/api/signups/${id}/entries`, { config_id: Number(picker.value) })) }, icon("check", 14), t("Enter")) : null;
@@ -325,6 +361,32 @@ export default async function render({ root, params, cleanup, isCurrent }) {
         h("div", { class: "row" }, picker ? h("div", { class: "grow" }, picker) : h("span", { class: "muted" }, configs.length ? t("You have no other configs.") : t("You have no configs yet.")), enter,
           h("button", { class: "btn", type: "button", onclick: () => file.click() }, icon("upload", 14), t("Upload a YAML")),
           h("a", { class: "btn ghost", href: "#/configs/new" }, t("Create a config"))), file) : null);
+  }
+
+  // A mystery round takes a player name, nothing more: the entry is the round's weights with that name
+  function mysteryCard(mine, editable, canEnter) {
+    const playerName = h("input", { class: "input", maxLength: 16, value: mine.length ? "" : state.user.username.slice(0, 16),
+      placeholder: t("Your player name"), "aria-label": t("Player name") });
+    const join = h("button", { class: "btn primary", type: "button" }, icon("dice", 14), t("Join"));
+    join.onclick = action(async () => {
+      if (!playerName.value.trim()) throw new Error(t("Enter a player name"));
+      await run("POST", `/api/signups/${id}/mystery-entries`, { player_name: playerName.value.trim() });
+      toast(t("You are in. Your game is rolled when the game is generated."), "success");
+    });
+    return h("div", { class: "card stack" },
+      h("h2", {}, mine.length > 1 ? t("Your entries") : t("Your entry")),
+      mine.length ? h("div", { class: "stack" }, mine.map((e) => h("div", { class: "row spread" },
+        h("div", {}, h("span", { class: "slot-name" }, e.player_names.join(", ")), " ", badge(t("Mystery"), "accent"),
+          h("div", { class: "muted small" }, t("entered {ago}", { ago: fmtAgo(e.created_at) }))),
+        h("div", { class: "row" },
+          signup.open ? h("button", { class: "btn sm", type: "button", onclick: action(async () => {
+            if (await confirmDialog(t("You can join again as long as the round is open."), { title: t("Withdraw this entry?"), confirmText: t("Withdraw") })) await run("DELETE", `/api/signups/${id}/entries/${e.id}`);
+          }) }, t("Withdraw")) : null),
+        e.issues.map((issue) => h("div", { class: "form-error" }, tServer(issue)))))) : h("p", { class: "muted" }, t("You have not entered yet.")),
+      canEnter ? h("div", { class: "stack tight" },
+        h("span", { class: "field-label" }, mine.length ? t("Join with another player name") : t("Join with your player name")),
+        h("div", { class: "row" }, h("div", { class: "grow" }, playerName), join),
+        h("p", { class: "muted small" }, t("You get a game and options rolled from the round's weights when the game is generated."))) : null);
   }
 
   function entriesCard() {

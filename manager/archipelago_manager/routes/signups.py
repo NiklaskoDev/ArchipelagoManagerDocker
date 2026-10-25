@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
-from .. import apbridge, audit, db, signups
+from .. import apbridge, audit, db, mystery, signups, yamlinfo
 from ..security import current_user, is_admin, manages, organizer_user
 
 router = APIRouter(prefix="/api")
@@ -47,6 +47,8 @@ def signup_json(row: sqlite3.Row, user: sqlite3.Row, rows: list[sqlite3.Row] | N
         "error": row["error"] if manager else None, "can_manage": manager,
         "entry_count": len(rows), "user_count": len({r["user_id"] for r in rows}),
         "my_entry_count": sum(1 for r in rows if r["user_id"] == user["id"]),
+        # a mystery round (mystery.py): everyone gets what one file of weights rolls, out of these games
+        "mystery": bool(row["mystery"]), "mystery_games": signups.weights_games(row) if row["mystery"] else [],
     }
 
 
@@ -90,6 +92,22 @@ class SignupBody(BaseModel):
     allowed_games: list[str] | None = Field(default=None, max_length=200)
     auto_generate: bool | None = None
     options: dict | None = None
+    mystery: bool | None = None  # only while the round has no entries
+    mystery_weights: str | None = Field(default=None, max_length=yamlinfo.MAX_YAML_BYTES)
+
+
+async def _checked_weights(text: str) -> str:
+    """A mystery round's weights, once the generator could roll them."""
+    try:
+        signups.check_weights(text)
+        await mystery.roll(yamlinfo.with_player_name(text, "Mystery"))
+    except signups.SignupError:
+        raise
+    except yamlinfo.YamlError as e:
+        raise signups.SignupError(f"The weights are not valid: {e}") from None
+    except mystery.RollError as e:
+        raise signups.SignupError(f"The weights cannot be rolled: {e}") from None
+    return text
 
 
 def _clean(body: SignupBody, *, creating: bool) -> dict:
@@ -122,14 +140,26 @@ def _clean(body: SignupBody, *, creating: bool) -> dict:
 
 
 @router.post("/signups")
-def create_signup(body: SignupBody, request: Request, user: sqlite3.Row = Depends(organizer_user)) -> dict:
+async def create_signup(body: SignupBody, request: Request, user: sqlite3.Row = Depends(organizer_user)):
     values = _clean(body, creating=True)
+    weights = values.pop("mystery_weights", None)
+    is_mystery = bool(values.pop("mystery", False))
+    if is_mystery:
+        if not (weights or "").strip():
+            raise HTTPException(400, "A mystery round needs the weights every player's game is rolled from")
+        try:
+            weights = await _checked_weights(weights)
+        except signups.SignupError as e:
+            return _error(e)
+        values["allowed_games"] = "[]"  # the weights say which games
     signup_id = db.execute(
         "INSERT INTO signups(name, description, created_by, created_at, deadline, configs_per_user, allowed_games, "
-        "auto_generate, options) VALUES (?,?,?,?,?,?,?,?,?)",
+        "auto_generate, options, mystery) VALUES (?,?,?,?,?,?,?,?,?,?)",
         (values["name"], values.get("description"), user["id"], time.time(), values.get("deadline"),
          values.get("configs_per_user", 1), values.get("allowed_games", "[]"), values.get("auto_generate", 1),
-         values["options"]))
+         values["options"], int(is_mystery)))
+    if is_mystery:
+        signups.set_weights(signup_id, weights)
     signups.announce_open(signup_id)
     audit.note(request, target=("signup", signup_id, values["name"]))
     return signup_detail(signup_id, user)
@@ -146,11 +176,31 @@ def signup_detail(signup_id: int, user: sqlite3.Row = Depends(current_user)) -> 
 
 
 @router.patch("/signups/{signup_id}")
-def update_signup(signup_id: int, body: SignupBody, user: sqlite3.Row = Depends(current_user)) -> dict:
+async def update_signup(signup_id: int, body: SignupBody, user: sqlite3.Row = Depends(current_user)):
     row = _managed(signup_id, user)
     if row["status"] not in ("open", "closed"):
         raise HTTPException(409, "This round was already generated")
     values = _clean(body, creating=False)
+    weights = values.pop("mystery_weights", None)
+    is_mystery = bool(values.pop("mystery")) if values.get("mystery") is not None else bool(row["mystery"])
+    values.pop("mystery", None)
+    if is_mystery != bool(row["mystery"]):
+        if signups.entries(signup_id):
+            raise HTTPException(409, "A round becomes a mystery round, or stops being one, only while nobody has entered")
+        if is_mystery and not (weights or "").strip():
+            raise HTTPException(400, "A mystery round needs the weights every player's game is rolled from")
+        values["mystery"] = int(is_mystery)
+        if is_mystery:
+            values["allowed_games"] = "[]"
+        else:
+            signups.weights_path(signup_id).unlink(missing_ok=True)
+    if is_mystery and "allowed_games" in values:
+        values["allowed_games"] = "[]"  # the weights say which games
+    if is_mystery and (weights or "").strip():
+        try:
+            signups.set_weights(signup_id, await _checked_weights(weights))
+        except signups.SignupError as e:
+            return _error(e)
     if "deadline" in values and values["deadline"] != row["deadline"]:
         values["reminded"] = 0
     if values:
@@ -232,6 +282,31 @@ def add_entry(signup_id: int, body: NewEntry, user: sqlite3.Row = Depends(curren
     except signups.SignupError as e:
         return _error(e)
     return {**signup_detail(signup_id, user), "warnings": result["warnings"]}
+
+
+class MysteryEntry(BaseModel):
+    player_name: str = Field(max_length=64)
+
+
+@router.post("/signups/{signup_id}/mystery-entries")
+def add_mystery_entry(signup_id: int, body: MysteryEntry, user: sqlite3.Row = Depends(current_user)):
+    """Joins a mystery round with nothing but a player name (mystery.py)."""
+    row = _get(signup_id)
+    try:
+        result = signups.add_mystery_entry(signup_id, user["id"], body.player_name, by_admin=manages(row, user))
+    except signups.SignupError as e:
+        return _error(e)
+    return {**signup_detail(signup_id, user), "warnings": result["warnings"]}
+
+
+@router.get("/signups/{signup_id}/mystery.yaml")
+def download_weights(signup_id: int, _user: sqlite3.Row = Depends(current_user)) -> FileResponse:
+    """A mystery round's weights, for everyone: what they may get is no secret, only what they will get."""
+    row = _get(signup_id)
+    path = signups.weights_path(signup_id)
+    if not row["mystery"] or not path.is_file():
+        raise HTTPException(404, "This is not a mystery round")
+    return FileResponse(path, media_type="application/x-yaml", filename=f"{row['name']} - weights.yaml".replace("/", "_"))
 
 
 def _entry(signup: sqlite3.Row, entry_id: int, user: sqlite3.Row) -> sqlite3.Row:
