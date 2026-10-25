@@ -1,13 +1,14 @@
 """Encrypted game connections: with a certificate set, the game servers speak wss:// only, the manager's own connection
 to them (the text client) follows, and a renewed certificate is taken over once nobody is connected. A minute lasts a
 second on the manager of its own here (SLEEP_MINUTE_SECONDS), so it looks at the certificate every five seconds."""
+import asyncio
 import shutil
 import ssl
 import subprocess
 import time
 
 import pytest
-from websockets.sync.client import connect
+from websockets.asyncio.client import connect
 
 from helpers import APClient, make_game, wait_for, wait_state
 
@@ -82,6 +83,16 @@ def secure(tmp_path_factory):
     server.stop()
 
 
+def room_info(port, cert) -> str:
+    """The server's first message to a client that connects with wss:// and checks the certificate. With websockets'
+    asyncio client, as Archipelago's clients and the manager's text client connect: its sync client now and then reads
+    the end of the connection instead of the server's answer right after the TLS handshake."""
+    async def talk():
+        async with connect(f"wss://127.0.0.1:{port}", ssl=trusting(cert), open_timeout=15) as ws:
+            return await asyncio.wait_for(ws.recv(), 15)
+    return asyncio.run(talk())
+
+
 def log_lines(admin, gid):
     return [line["text"] for line in admin.get(f"/api/games/{gid}/log").json()["lines"]]
 
@@ -112,8 +123,7 @@ def test_games_are_served_encrypted_and_take_renewed_certificates_over(secure, t
     # unencrypted, the server does not answer; encrypted, a client that checks the certificate connects
     with pytest.raises(Exception):  # noqa: B017 - whatever the websockets library makes of a TLS answer
         APClient(port, "Lock", "ChecksFinder")
-    with connect(f"wss://127.0.0.1:{port}", ssl=trusting(cert), open_timeout=15) as ws:
-        assert '"RoomInfo"' in ws.recv(timeout=15)
+    assert '"RoomInfo"' in room_info(port, cert)
 
     # the text client in the browser connects over wss too
     slot = next(s["slot"] for s in admin.get(f"/api/games/{gid}").json()["slots"] if s["name"] == "Lock")
