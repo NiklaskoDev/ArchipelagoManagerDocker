@@ -376,6 +376,79 @@ def cmd_tracker(args) -> dict:
             "server_rules": rules}
 
 
+def cmd_build_save(args) -> dict:
+    """A save for a multiworld from how a game stands elsewhere (an archipelago.gg room, ggimport.py): the checked
+    locations, the items each slot received, the hints, aliases, client states and times, all of team 0. The server
+    takes it like its own save. What it cannot know stays empty: hint points spent, the data storage. Server options
+    are left out, so the game's own settings apply."""
+    cmd_where(args)
+    import pickle
+    import random
+    from NetUtils import Hint, HintStatus, NetworkItem
+    md = decode_multidata(args.path)
+    with open(args.state, encoding="utf-8") as f:
+        state = json.load(f)
+    locations = md.get("locations", {})
+    players = {int(slot) for slot, info in md["slot_info"].items() if int(getattr(info, "type", 1)) == 1}
+    slot_of = lambda key: int(key)  # noqa: E731 - JSON keys are text
+    different = "The items in it lie elsewhere than in this multiworld, so it is another one"
+
+    location_checks = {}
+    for key, checked in state.get("location_checks", {}).items():
+        slot = slot_of(key)
+        unknown = set(checked) - set(locations.get(slot, {}))
+        if slot not in players or unknown:
+            raise ValueError(f"Slot {slot} has locations this multiworld does not have")
+        location_checks[0, slot] = set(checked)
+    received_items = {}
+    for key, items in state.get("received_items", {}).items():
+        slot = slot_of(key)
+        if slot not in players:
+            raise ValueError(f"There is no player slot {slot} in this multiworld")
+        received = [NetworkItem(int(i[0]), int(i[1]), int(i[2]), int(i[3]) if len(i) > 3 else 0) for i in items]
+        for item in received:
+            placed = locations.get(item.player, {}).get(item.location)
+            # (items from the server, cheats and starting inventories have no location of a slot's)
+            if item.location > 0 and item.player in players and (not placed or placed[0] != item.item or placed[1] != slot):
+                raise ValueError(different)
+        # as MultiServer.send_items_to keeps them: everything, and what came from other worlds
+        received_items[0, slot, True] = received
+        received_items[0, slot, False] = [item for item in received if item.player != slot]
+    hints = {}
+    for key, slot_hints in state.get("hints", {}).items():
+        slot = slot_of(key)
+        found = set()
+        for h in slot_hints:
+            placed = locations.get(int(h[1]), {}).get(int(h[2]))
+            if not placed or placed[0] != int(h[3]) or placed[1] != int(h[0]):
+                raise ValueError(different)
+            status = HintStatus(int(h[7])) if len(h) > 7 else HintStatus.HINT_UNSPECIFIED
+            found.add(Hint(int(h[0]), int(h[1]), int(h[2]), int(h[3]), bool(h[4]), str(h[5] or "") if len(h) > 5 else "",
+                           int(h[6]) if len(h) > 6 else 0, status))
+        hints[0, slot] = found
+    timers = lambda name: tuple(((0, slot_of(k)), float(v)) for k, v in state.get(name, {}).items() if v)  # noqa: E731
+    save = {
+        "version": 2,
+        "connect_names": md["connect_names"],
+        "received_items": received_items,
+        "hints_used": {},
+        "hints": hints,
+        "location_checks": location_checks,
+        "name_aliases": {(0, slot_of(k)): str(v) for k, v in state.get("aliases", {}).items() if v},
+        "client_game_state": {(0, slot_of(k)): int(v) for k, v in state.get("client_game_state", {}).items()},
+        "client_activity_timers": timers("client_activity_timers"),
+        "client_connection_timers": timers("client_connection_timers"),
+        "random_state": random.Random().getstate(),
+        "group_collected": {},
+        "stored_data": {},
+    }
+    with open(args.out, "wb") as f:
+        f.write(zlib.compress(pickle.dumps(save)))
+    return {"checked": sum(len(v) for v in location_checks.values()),
+            "received": sum(len(v) for (_team, _slot, everything), v in received_items.items() if everything),
+            "hints": len({h for v in hints.values() for h in v})}
+
+
 # --------------------------------------------------------------------------------------------------------------------
 # templates, and the options of every game as a form (what archipelago.gg's player options page shows)
 # --------------------------------------------------------------------------------------------------------------------
@@ -610,6 +683,7 @@ COMMANDS = {
     "progress": cmd_progress,
     "names": cmd_names,
     "tracker": cmd_tracker,
+    "build-save": cmd_build_save,
     "templates": cmd_templates,
 }
 
@@ -631,6 +705,10 @@ def main() -> None:
     p.add_argument("path", help="the multidata")
     p.add_argument("save", help="the server's save; need not exist yet")
     p.add_argument("slot", type=int)
+    p = sub.add_parser("build-save")
+    p.add_argument("path", help="the multidata")
+    p.add_argument("state", help="JSON file: how the game stands (see cmd_build_save)")
+    p.add_argument("out", help="where the save is written")
     p = sub.add_parser("templates")
     p.add_argument("out")
     sub.add_parser("host-yaml")
@@ -642,7 +720,7 @@ def main() -> None:
     args = parser.parse_args()
 
     # setup() changes the working directory, so resolve user supplied paths first
-    for attr in ("path", "save", "out"):
+    for attr in ("path", "save", "out", "state"):
         if getattr(args, attr, None):
             setattr(args, attr, os.path.abspath(getattr(args, attr)))
     setup(args.ap_dir)

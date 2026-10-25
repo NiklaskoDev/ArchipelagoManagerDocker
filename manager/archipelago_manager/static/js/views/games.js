@@ -112,6 +112,7 @@ export default async function render({ root, cleanup, isCurrent }) {
       title: t("Add a pregenerated game"),
       body: h("div", { class: "stack" }, drop, input,
         h("p", { class: "muted small" }, t("Files for each player are extracted and linked to users whose YAML player name matches the slot name. You can also assign slots by hand afterwards.")),
+        h("p", { class: "muted small" }, t("Moving a game from archipelago.gg? Add the zip you uploaded there; its progress can then be taken over on the game page.")),
         field(t("Name"), name), version?.node, start, note),
       actions: [h("button", { class: "btn", type: "button", onclick: () => modal.close() }, t("Cancel")), submit],
     });

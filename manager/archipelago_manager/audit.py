@@ -36,6 +36,7 @@ ACTIONS: dict[tuple[str, str], str] = {
     ("POST", "/api/games/{game_id}/stop"): "game.stop",
     ("POST", "/api/games/{game_id}/restart"): "game.restart",
     ("POST", "/api/games/{game_id}/reset-save"): "game.reset",
+    ("POST", "/api/games/{game_id}/import-gg"): "game.import",
     ("POST", "/api/games/{game_id}/backups"): "game.backup",
     ("POST", "/api/games/{game_id}/backups/{name}/restore"): "game.restore",
     ("DELETE", "/api/games/{game_id}/backups/{name}"): "game.backup_delete",
