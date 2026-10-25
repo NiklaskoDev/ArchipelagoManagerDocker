@@ -360,5 +360,8 @@ def delete_user(user_id: int, admin: sqlite3.Row = Depends(admin_user)) -> dict:
     if target["role"] == "admin" and _active_admin_count(excluding=user_id) == 0:
         raise HTTPException(409, "There must be at least one active administrator")
     db.execute("DELETE FROM users WHERE id = ?", (user_id,))
+    # slots offered to them stay with their players (their own slots lose their owner, and so their offers)
+    db.execute("UPDATE game_slots SET handover_at = NULL, handover_to = NULL, handover_note = NULL "
+               "WHERE handover_to = ? OR user_id IS NULL", (user_id,))
     shutil.rmtree(CONFIG.configs_dir / str(user_id), ignore_errors=True)
     return {"ok": True}

@@ -117,6 +117,8 @@ const EVENTS = [
   ["game_crashed", t("A game server crashes")],
   ["player_goal", t("A player reaches their goal, and when everyone has")],
   ["player_stuck", t("A player says they are stuck"), t("With their note and where the items hinted for them are.")],
+  ["slot_handover", t("A player hands their slot over, and someone takes it over"),
+    t("A slot offered to whoever takes it is announced to everyone who can see the game.")],
   ["hint_found", t("A hinted item is found"), t("Many at once, for example after a !release, come as one message.")],
   ["generation", t("A new game is generated, or generating fails")],
   ["signup", t("Sign-up rounds open, close soon and close")],

@@ -11,7 +11,7 @@ const FILTERS = [
   ["chat", () => t("Chat"), (e) => e.kind === "chat" || e.kind === "server"],
   ["item", () => t("Items"), (e) => e.kind === "item"],
   ["hint", () => t("Hints"), (e) => e.kind === "hint"],
-  ["event", () => t("Joins and goals"), (e) => ["join", "part", "goal", "release", "collect", "status"].includes(e.kind)],
+  ["event", () => t("Joins and goals"), (e) => ["join", "part", "goal", "release", "collect", "status", "handover", "handover_done"].includes(e.kind)],
 ];
 const HINT_STATUS = { found: () => t("found"), priority: () => t("priority"), avoid: () => t("avoid"),
   "no priority": () => t("no priority"), unspecified: () => t("unspecified") };
@@ -35,6 +35,7 @@ export function activitySection({ gameId, mySlots, cleanup, isCurrent }) {
   const item = (name) => h("span", { class: "tc-item" }, name);
   const place = (name) => h("span", { class: "tc-location" }, name);
   const concerns = (e) => [e.player, e.finder, e.receiver].some((name) => mine.has(name));
+  const user = (name) => h("strong", {}, name);
 
   function line(e) {
     let body;
@@ -56,6 +57,12 @@ export function activitySection({ gameId, mySlots, cleanup, isCurrent }) {
       const text = { playing: t("{player} is playing"), stuck: t("{player} is stuck"), away: t("{player} is taking a break") }[e.status]
         || t("{player} cleared their status");
       body = [withNodes(text, { player: player(e.player) }), e.note ? h("span", { class: "note" }, ` ${e.note}`) : null];
+    } else if (e.kind === "handover") {  // a player hands their slot over (the names of users, not of slots)
+      body = [withNodes(e.to ? t("{user} hands {player} over to {to}") : t("{user} is looking for someone to take over {player}"),
+        { user: user(e.from), player: player(e.player), to: user(e.to || "") }), e.note ? h("span", { class: "note" }, ` ${e.note}`) : null];
+    } else if (e.kind === "handover_done") {
+      body = withNodes(e.from ? t("{to} takes over {player} from {user}") : t("{to} takes over {player}"),
+        { to: user(e.to), player: player(e.player), user: user(e.from || "") });
     } else {
       const text = { join: t("{player} joined ({game})"), part: t("{player} left"), goal: t("{player} reached their goal"),
         release: t("{player} released the items still in their world"), collect: t("{player} collected their items from the other worlds") }[e.kind];

@@ -44,6 +44,7 @@ export default async function render({ root, cleanup, isCurrent }) {
       h("tbody", {}, games.map((g) => h("tr", {},
         h("td", {}, h("a", { href: `#/games/${g.id}`, class: "slot-name" }, g.name),
           g.race_mode ? [" ", badge(t("Race"), "warn")] : null,
+          g.offered_slots.length ? [" ", badge(t("Slot offered"), "accent")] : null,
           g.my_slots.length ? h("div", { class: "muted small" }, t("You: {names}", { names: g.my_slots.map((s) => s.name).join(", ") })) : null),
         h("td", {}, stateBadge(g.state)),
         h("td", {}, g.address ? copyField(g.address) : h("span", { class: "muted" }, t("no port"))),

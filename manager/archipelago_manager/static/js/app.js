@@ -220,6 +220,7 @@ const PING_KINDS = [
   ["game_online", () => t("A game you play in is online")],
   ["hint_found", () => t("Someone found an item that was hinted for you")],
   ["player_stuck", () => t("Someone in a game you play in is stuck")],
+  ["slot_handover", () => t("A slot is offered to you, or looks for a new player")],
   ["signup_open", () => t("Sign-ups open")],
   ["signup_closing", () => t("Sign-ups close soon and you have not entered yet")],
 ];

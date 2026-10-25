@@ -11,7 +11,8 @@ const ACTIONS = {
   "game.backup": () => t("Backed up the progress"), "game.restore": () => t("Restored a backup"), "game.backup_delete": () => t("Deleted a backup"),
   "game.command": () => t("Sent a console command"), "game.file_add": () => t("Added a file"), "game.file_change": () => t("Changed a file"),
   "game.file_delete": () => t("Deleted a file"), "slot.action": () => t("Released or collected items"), "slot.assign": () => t("Assigned a slot"),
-  "slot.claim": () => t("Claimed a slot"), "slot.unclaim": () => t("Gave up a slot"),
+  "slot.claim": () => t("Claimed a slot"), "slot.unclaim": () => t("Gave up a slot"), "slot.handover": () => t("Offered a slot to hand over"),
+  "slot.handover_cancel": () => t("Took back a handover"), "slot.handover_accept": () => t("Took over a slot"),
   "settings.change": () => t("Changed the settings"), "settings.test_notification": () => t("Sent a Discord test message"),
   "settings.host_yaml": () => t("Edited host.yaml"), "system.check_updates": () => t("Checked for updates"),
   "system.reload_worlds": () => t("Reloaded the worlds"), "system.backup": () => t("Made a backup of everything"),
@@ -31,7 +32,8 @@ const AREAS = [["", () => t("Everything")], ["game", () => t("Games")], ["slot",
   ["source", () => t("GitHub repositories")], ["config", () => t("Configs")], ["rom", () => t("Base ROMs")], ["system", () => t("System")]];
 const DETAIL_KEYS = { changed: () => t("changed"), command: () => t("command"), slot: () => t("slot"), role: () => t("role"),
   disabled: () => t("disabled"), password: () => t("password"), discord: () => t("Discord"), game: () => t("game"),
-  configs: () => t("configs"), action: () => t("action"), done: () => t("done"), name: () => t("name"), status: () => t("status") };
+  configs: () => t("configs"), action: () => t("action"), done: () => t("done"), name: () => t("name"), status: () => t("status"),
+  to: () => t("to"), previous: () => t("from") };
 
 const LINKS = { game: (id) => `#/games/${id}`, user: () => "#/admin/users", signup: (id) => `#/signups/${id}`, job: (id) => `#/jobs/${id}`,
   apworld: () => "#/worlds", source: () => "#/worlds", config: (id) => `#/configs/${id}` };

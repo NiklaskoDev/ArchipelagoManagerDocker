@@ -10,7 +10,7 @@ from collections.abc import Iterable, Iterator
 
 from .config import CONFIG
 
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 14
 
 # Added in schema version 3
 _SIGNUPS = """
@@ -226,6 +226,9 @@ CREATE TABLE game_slots (
     player_status  TEXT,
     status_note    TEXT,
     status_at      REAL,
+    handover_at    REAL,
+    handover_to    INTEGER,
+    handover_note  TEXT,
     PRIMARY KEY (game_id, slot)
 );
 
@@ -305,6 +308,9 @@ MIGRATIONS: dict[int, str] = {
     # the summary for players coming back to a game; what a player says about their slot (stuck, on a break, ...)
     13: _VISITS + "ALTER TABLE game_slots ADD COLUMN player_status TEXT; ALTER TABLE game_slots ADD COLUMN status_note TEXT; "
         "ALTER TABLE game_slots ADD COLUMN status_at REAL;",
+    # a player handing their slot over (routes/games.py): since when, to whom (NULL: whoever takes it), and a note
+    14: "ALTER TABLE game_slots ADD COLUMN handover_at REAL; ALTER TABLE game_slots ADD COLUMN handover_to INTEGER; "
+        "ALTER TABLE game_slots ADD COLUMN handover_note TEXT;",
 }
 
 

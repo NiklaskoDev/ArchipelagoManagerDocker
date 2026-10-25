@@ -26,7 +26,7 @@ players log in to keep their YAML configs, see their games and download their pa
   spot. A test generation before the deadline shows whether the entries generate together. When the deadline passes the
   game is generated from all entries and everyone is added to it.
 - **Posts to Discord.** A webhook message when a game goes online or crashes, a player reaches their goal or says they
-  are stuck, a hinted item is found, a game is generated, sign-ups open or close, a custom game waits for approval, or a
+  are stuck, a slot is handed over, a hinted item is found, a game is generated, sign-ups open or close, a custom game waits for approval, or a
   new Archipelago version is out. A game can post to a channel of its own, and players can ask to be mentioned.
 - **Keeps custom games.** `.apworld` files are stored. If a config or a seed needs a game the server does not have, the
   UI says so and offers to add it. Regular users can *submit* an APWorld; an admin approves it.
@@ -133,11 +133,18 @@ by your players:
    game sees it in the slot table and in the activity, and the Discord channel hears when someone is stuck, with where
    the items hinted for them are, so whoever holds one knows (one message per player in ten minutes). Once you reach
    your goal it is no longer shown; giving up the slot clears it.
-9. **Progress over time** on the game page charts every player's share of their locations checked, from the first
-   check on, with a dot where someone reached their goal. Point at the chart (or focus it and use the arrow keys) for
-   everyone's numbers at that moment; pressing a name in the legend brings that player to the front. With more than
-   eight players, your own slots are in color and the others gray. The table below lists the standings: who reached
-   their goal first, and after how long, then who got furthest.
+9. **Handing your slot over:** no time to finish? *Hand over* next to your name in the slot table offers your slot to
+   a user you name, or to whoever takes it (everyone who can see the game: its players, or every user if the game is
+   visible to all). Whoever *takes it over* becomes the slot's player with everything found so far: its files, its YAML
+   (copied into their configs) and its progress, and plays on with the same slot name. Until then the slot stays
+   yours, and *Take back* ends the offer. A user it is offered to sees the game on their dashboard (*Slots looking for
+   a player*) even if they are not in it yet, and can say *No, thanks*. With *only one slot each*, someone who already
+   has a slot cannot take another one. The activity and the Discord channel hear about the offer and the takeover.
+10. **Progress over time** on the game page charts every player's share of their locations checked, from the first
+    check on, with a dot where someone reached their goal. Point at the chart (or focus it and use the arrow keys) for
+    everyone's numbers at that moment; pressing a name in the legend brings that player to the front. With more than
+    eight players, your own slots are in color and the others gray. The table below lists the standings: who reached
+    their goal first, and after how long, then who got furthest.
 
 **Sharing configs:** *Share* next to one of your configs offers it to everyone on the server; *Stop sharing* takes it
 back. Configs others share are listed under **Shared by players** on **My configs** (also reachable from *New config*):
@@ -175,7 +182,8 @@ itself. Both edit the same file, so switch whenever you like.
 - **Add a pregenerated game:** *Games → Add a game*, drop the zip. The slots are matched to users whose config has the
   same player name (case-insensitive) and game. If the zip contains the players' YAMLs, a user whose config is one of
   them wins over others with the same name. If it is still ambiguous the slot is left unassigned rather than guessed;
-  assign it from the slot's *Owner* drop-down. Turning on *claimable* in the game's settings lets players pick their own;
+  assign it from the slot's *Owner* drop-down (which also ends an offer to hand the slot over; you can take one back
+  under the drop-down too). Turning on *claimable* in the game's settings lets players pick their own;
   add *only one slot each* so nobody can take more than one (you can still assign extra slots by hand).
 - **Generate a game:** *Generate*, tick the configs, set the options, *Generate*. Slot owners are taken from the configs.
   If a generation fails, the job page marks the configs the generator complained about and says what is wrong with them.
@@ -202,7 +210,7 @@ itself. Both edit the same file, so switch whenever you like.
   Players who linked their Discord account (see below) can have these messages mention them, so Discord notifies them:
   in the user menu, *Discord mentions…*, they tick what they want to hear about: a new game they play in is ready,
   a game they play in is online, someone found an item hinted for them, someone in a game they play in is stuck,
-  sign-ups open, or sign-ups close soon and they have not entered yet. Nobody is mentioned unless they asked for it,
+  a slot is offered to them (or, in a game they can see, to whoever takes it), sign-ups open, or sign-ups close soon and they have not entered yet. Nobody is mentioned unless they asked for it,
   and only in messages you have switched on; untick *Let players be mentioned* to keep every message silent.
 
   A game can post to a channel of its own: paste another webhook under *Settings → Discord* on the game page (and

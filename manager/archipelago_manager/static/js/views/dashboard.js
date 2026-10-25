@@ -29,6 +29,15 @@ export default async function render({ root, cleanup, isCurrent }) {
     const others = list.filter((g) => !g.my_slots.length);
     const onUpdate = () => load();
     clear(gridHost);
+    const offered = list.flatMap((g) => g.offered_slots.map((o) => ({ ...o, gameId: g.id, gameName: g.name })));
+    if (offered.length) {
+      gridHost.append(h("div", { class: "section" }, h("div", { class: "section-head" }, h("h2", {}, t("Slots looking for a player"))),
+        h("div", { class: "card stack tight" }, offered.map((o) => h("div", { class: "row spread" },
+          h("div", {}, h("span", { class: "slot-name" }, o.name), h("span", { class: "muted" }, ` · ${o.game} · ${o.gameName}`),
+            h("div", { class: "muted small" }, o.to_me ? t("{owner} wants to hand it over to you", { owner: o.from })
+              : t("{owner} hands it over to whoever takes it", { owner: o.from }), o.note ? ` · “${o.note}”` : "")),
+          h("a", { class: "btn sm primary", href: `#/games/${o.gameId}` }, t("Have a look")))))));
+    }
     if (!all.length) {
       gridHost.append(empty(t("No games yet"),
         admin ? t("Upload a pregenerated multiworld or generate a new one.") : t("When an administrator adds you to a game, it shows up here."),
