@@ -16,7 +16,7 @@ from .generation import GENERATION
 from .rooms import ROOMS
 from .textclient import TEXT_CLIENTS
 from .routes import admin, apworlds, auth, configs, games, jobs, roms
-from .routes import tokens, versions as version_routes
+from .routes import presets as preset_routes, tokens, versions as version_routes
 from .routes import signups as signup_routes
 from .routes import sources as source_routes
 from .security import CSRF_HEADER, CSRF_VALUE, SAFE_METHODS, bearer_token, token_for_request, user_for_request
@@ -244,7 +244,8 @@ def health() -> dict:
             "ready": apbridge.STATE.info is not None, "archipelago_error": apbridge.STATE.error}
 
 
-for module in (auth, configs, apworlds, source_routes, games, jobs, signup_routes, admin, roms, version_routes, tokens):
+for module in (auth, configs, apworlds, source_routes, games, jobs, signup_routes, admin, roms, version_routes, tokens,
+               preset_routes):
     app.include_router(module.router)
 
 app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")

@@ -13,7 +13,7 @@ from .config import CONFIG
 
 log = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 18
+SCHEMA_VERSION = 19
 
 # Added in schema version 3
 _SIGNUPS = """
@@ -186,6 +186,22 @@ _SPECTATE_REMINDERS = (
 # Added in schema version 18: a mystery round (mystery.py), whose players all get what one file of weights rolls
 _MYSTERY = "ALTER TABLE signups ADD COLUMN mystery INTEGER NOT NULL DEFAULT 0;"
 
+# Added in schema version 19
+_PRESETS = """
+-- Templates of generation options (presets.py): a user's own, or shared with everyone who generates. Shared ones stay
+-- when their maker is deleted; the others go with them (routes/auth.py).
+CREATE TABLE generation_presets (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    name       TEXT NOT NULL,
+    options    TEXT NOT NULL,
+    shared     INTEGER NOT NULL DEFAULT 0,
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL
+);
+CREATE INDEX generation_presets_user ON generation_presets(user_id);
+"""
+
 SCHEMA = _USERS + _USERS_INDEX + """
 CREATE TABLE sessions (
     token_hash TEXT PRIMARY KEY,
@@ -325,7 +341,7 @@ CREATE TABLE job_players (
 );
 CREATE INDEX job_players_job ON job_players(job_id);
 """ + _SIGNUPS + _SOURCES + "ALTER TABLE apworld_sources ADD COLUMN latest_asset TEXT; " + \
-    "ALTER TABLE signups ADD COLUMN test_job_id INTEGER;" + _PROGRESS + _AUDIT + _VISITS + _AP_VERSIONS + _API_TOKENS + _SPECTATE_REMINDERS + _MYSTERY
+    "ALTER TABLE signups ADD COLUMN test_job_id INTEGER;" + _PROGRESS + _AUDIT + _VISITS + _AP_VERSIONS + _API_TOKENS + _SPECTATE_REMINDERS + _MYSTERY + _PRESETS
 
 
 # Upgrades for databases created by older versions: MIGRATIONS[n] turns schema n - 1 into schema n. New databases get
@@ -380,6 +396,7 @@ MIGRATIONS: dict[int, str] = {
           "DROP TABLE users; ALTER TABLE users_new RENAME TO users; "
         + _USERS_INDEX + _SPECTATE_REMINDERS,
     18: _MYSTERY,
+    19: _PRESETS,
 }
 
 

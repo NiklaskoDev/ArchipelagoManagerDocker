@@ -131,9 +131,10 @@ def clean_meta(meta: str | None) -> str | None:
 
 def create_job(user: sqlite3.Row, players: list[PreparedPlayer], *, name: str | None, spoiler: int, race: bool,
                seed: int | None, skip_prog_balancing: bool, plando: list[str], meta: str | None,
-               host_after: bool, test: bool = False, ap_version: str | None = None) -> int:
+               host_after: bool, test: bool = False, ap_version: str | None = None,
+               server_options: dict | None = None) -> int:
     """Queues a generation. A test generation only finds out whether the players generate together: its result is
-    thrown away instead of becoming a game."""
+    thrown away instead of becoming a game. `server_options` (cleaned) are the new game's instead of the defaults."""
     if spoiler not in (0, 1, 2, 3):
         raise JobRequestError("Spoiler level must be between 0 and 3")
     if seed is not None and not (0 <= seed < 10 ** 18):
@@ -145,6 +146,8 @@ def create_job(user: sqlite3.Row, players: list[PreparedPlayer], *, name: str | 
                "plando": plando, "has_meta": meta is not None}
     if ap_version:  # the Archipelago version that generates, and that the game runs on (versions.py)
         options["ap_version"] = ap_version
+    if server_options:
+        options["server_options"] = server_options
     if test:
         options["test"] = True
     job_id = db.execute(
@@ -426,7 +429,8 @@ class GenerationManager:
         try:
             game_id = await gamestore.import_game(
                 archives[-1], job["name"] or "", name=job["name"], created_by=job["created_by"],
-                source="generated", job_id=job_id, owners=owners, ap_version=version)
+                source="generated", job_id=job_id, owners=owners, ap_version=version,
+                server_options=opts.get("server_options"))
         except gamestore.GameImportError as e:
             self._finish(job_id, "failed", f"Generated, but importing the result failed: {e}")
             return

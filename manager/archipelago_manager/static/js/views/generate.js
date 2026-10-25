@@ -1,6 +1,7 @@
 import { h, clear, icon, toast, action, fmtAgo, fmtDuration } from "../util.js";
-import { api, get, isAdmin, state } from "../api.js";
-import { pageHeader, chips, banner, badge, field, checkbox, select, jobBadge, missingGamesPanel, missingRomsPanel, promptMissingGames, empty, apVersionField } from "../components.js";
+import { api, get, isAdmin, isOrganizer, state } from "../api.js";
+import { pageHeader, chips, banner, badge, field, checkbox, select, jobBadge, missingGamesPanel, missingRomsPanel, promptMissingGames, empty, apVersionField,
+  presetBar, gameSettingsSection } from "../components.js";
 import { t, tServer } from "../i18n.js";
 
 const SPOILER_CHOICES = [[1, t("Basic spoiler log")], [0, t("No spoiler log")], [2, t("With playthrough")], [3, t("Playthrough and paths")]];
@@ -8,7 +9,9 @@ const PLANDO = [["bosses", t("Bosses")], ["connections", t("Connections")], ["te
 
 export default async function render({ root, cleanup, isCurrent, query }) {
   const admin = isAdmin();
-  const [configs, jobs, apVersions] = await Promise.all([get(`/api/configs${admin ? "?all=true" : ""}`), get("/api/jobs"), get("/api/ap-versions")]);
+  const presets = presetBar({ read: readOptions, apply: applyOptions });
+  const [configs, jobs, apVersions, presetData] = await Promise.all([get(`/api/configs${admin ? "?all=true" : ""}`), get("/api/jobs"),
+    get("/api/ap-versions"), presets.load()]);
   const selected = new Set(query.getAll("config").map(Number));
 
   // ?from=<job>: generate again with the configs and options of an earlier job
@@ -74,7 +77,34 @@ export default async function render({ root, cleanup, isCurrent, query }) {
   const plando = PLANDO.map(([key, label]) => ({ key, box: checkbox(label, (opts.plando || ["bosses", "connections", "texts"]).includes(key)) }));
   const meta = h("textarea", { class: "input", rows: 8, placeholder: t("meta_description: My meta file\nnull:\n  progression_balancing: 50"), spellcheck: false, value: source?.meta || "" });
   const version = apVersionField(apVersions, opts.ap_version || "");
+  const metaDetails = h("details", { open: !!source?.meta }, h("summary", { class: "muted" }, t("Advanced: meta.yaml")),
+    h("div", { class: "stack", style: { marginTop: "10px" } },
+      h("p", { class: "muted small" }, t("A meta file can override player options for everyone. It must contain a meta_description.")), meta));
   const hostAfter = checkbox(t("Start the server when generation finishes"), source && !source.test ? source.host_after : true);
+  // organizers and administrators set up the game it makes; a player who generates does not run it
+  const gameSettings = isOrganizer() ? gameSettingsSection(opts.server_options, presetData.server_defaults) : null;
+
+  // what a template (presets.py) holds: everything but the name, the seed and the players
+  function readOptions() {
+    return { spoiler: Number(spoiler.value), race: race.input.checked, skip_prog_balancing: skipBalance.input.checked,
+      plando: plando.filter((p) => p.box.input.checked).map((p) => p.key), host_after: hostAfter.input.checked,
+      meta: meta.value.trim() || null, ap_version: version ? version.read() || null : null,
+      server_options: gameSettings ? gameSettings.read() : null };
+  }
+  function applyOptions(o) {
+    spoiler.value = String(o.spoiler);
+    race.input.checked = o.race;
+    skipBalance.input.checked = o.skip_prog_balancing;
+    for (const p of plando) p.box.input.checked = o.plando.includes(p.key);
+    hostAfter.input.checked = o.host_after;
+    meta.value = o.meta || "";
+    if (o.meta) metaDetails.open = true;
+    const left = [];
+    if (version ? !version.set(o.ap_version) : o.ap_version) left.push(t("Archipelago {version} is not installed here, so this server's version is used.", { version: o.ap_version }));
+    if (gameSettings) gameSettings.apply(o.server_options);
+    else if (o.server_options) left.push(t("Its settings for the new game apply only when an organizer generates."));
+    return left.join(" ");
+  }
   const errorHost = h("div");
   const submit = h("button", { class: "btn primary", type: "button" }, icon("zap", 14), t("Generate"));
   submit.onclick = action(async () => {
@@ -87,6 +117,7 @@ export default async function render({ root, cleanup, isCurrent, query }) {
         seed: seed.value.trim() ? Number(seed.value.trim()) : null, skip_prog_balancing: skipBalance.input.checked,
         plando: plando.filter((p) => p.box.input.checked).map((p) => p.key), meta: meta.value.trim() || null,
         host_after: hostAfter.input.checked, ap_version: version ? version.read() || null : null,
+        ...(gameSettings ? { server_options: gameSettings.read() } : {}),
       });
       location.hash = `#/jobs/${job.id}`;
     } catch (err) {
@@ -146,13 +177,12 @@ export default async function render({ root, cleanup, isCurrent, query }) {
           tbody))),
       h("div", { class: "card stack section" },
         h("h2", {}, t("Options")),
+        presets.node,
         h("div", { class: "form-grid" }, field(t("Name"), name, t("Shown in the games list")), field(t("Spoiler log"), spoiler), field(t("Seed"), seed, t("Leave empty for a random seed")),
           version?.node),
         h("div", { class: "stack tight" }, race, skipBalance, hostAfter),
         h("div", { class: "stack tight" }, h("span", { class: "field-label" }, t("Allowed plando")), h("div", { class: "row" }, plando.map((p) => p.box))),
-        h("details", {}, h("summary", { class: "muted" }, t("Advanced: meta.yaml")),
-          h("div", { class: "stack", style: { marginTop: "10px" } },
-            h("p", { class: "muted small" }, t("A meta file can override player options for everyone. It must contain a meta_description.")), meta)),
+        metaDetails, gameSettings?.node,
         errorHost, h("div", { class: "row" }, submit)),
       h("div", { class: "section" }, h("div", { class: "section-head" }, h("h2", {}, t("Recent jobs"))), jobsHost));
     drawRows();

@@ -59,6 +59,8 @@ class JobCreate(BaseModel):
     meta: str | None = Field(default=None, max_length=65536)
     host_after: bool = True
     ap_version: str | None = Field(default=None, max_length=20)  # None or "": the image's
+    # the new game's server settings instead of the defaults: organizers and administrators only (presets.py)
+    server_options: dict | None = None
 
 
 @router.post("/jobs")
@@ -66,6 +68,15 @@ async def start_job(body: JobCreate, request: Request, user: sqlite3.Row = Depen
     admin = is_admin(user)
     if not is_organizer(user) and not app_settings.get_setting("users_can_generate"):
         raise HTTPException(403, "Only administrators can generate games on this server")
+    server_options = None
+    if body.server_options is not None:
+        if not is_organizer(user):
+            raise HTTPException(403, "Only organizers and administrators set up the games they generate")
+        try:
+            server_options = app_settings.clean_server_options(
+                body.server_options, base=app_settings.get_setting("default_server_options"))
+        except app_settings.SettingsError as e:
+            raise HTTPException(400, str(e)) from None
     try:
         version = versions.check_choice(body.ap_version)
         if version:  # its games, to check the players' against
@@ -78,7 +89,7 @@ async def start_job(body: JobCreate, request: Request, user: sqlite3.Row = Depen
         players = prepare_players(body.config_ids, user, is_admin=admin, version=version)
         job_id = create_job(user, players, name=body.name, spoiler=body.spoiler, race=body.race, seed=body.seed,
                             skip_prog_balancing=body.skip_prog_balancing, plando=body.plando, meta=body.meta,
-                            host_after=body.host_after, ap_version=version)
+                            host_after=body.host_after, ap_version=version, server_options=server_options)
     except JobRequestError as e:
         return JSONResponse(status_code=e.status, content={"detail": e.message, "missing_games": e.missing_games})
     GENERATION.enqueue(job_id)

@@ -1,6 +1,6 @@
 // Reusable pieces shared by several views.
 import { h, clear, icon, copyText, openModal, toast, action, confirmDialog, fmtBytes, fmtAgo, fmtDate, fmtUntil, withNodes } from "./util.js";
-import { api, get, post, del, state, isAdmin } from "./api.js";
+import { api, get, post, put, del, state, isAdmin, isOrganizer } from "./api.js";
 import { t, tServer, plural } from "./i18n.js";
 
 const STATE_LABELS = {
@@ -391,7 +391,13 @@ export function apVersionField(listing, value = "") {
   if (!installed.length) return null;
   const choice = select([["", t("This server's ({version})", { version: listing.default || "?" })],
     ...installed.map((v) => [v.version, v.version])], installed.some((v) => v.version === value) ? value : "");
-  return { node: field(t("Archipelago version"), choice, t("The game runs on it, and players need a client of it.")), read: () => choice.value };
+  // set(version): picks it if it is installed; returns whether it is
+  const set = (version) => {
+    const ok = !version || installed.some((v) => v.version === version);
+    choice.value = ok ? version || "" : "";
+    return ok;
+  };
+  return { node: field(t("Archipelago version"), choice, t("The game runs on it, and players need a client of it.")), read: () => choice.value, set };
 }
 
 export function gameCard(game, onUpdate) {
@@ -466,6 +472,109 @@ export function serverOptionsForm(opts) {
     disable_item_cheat: noCheat.input.checked, use_embedded_options: embedded.input.checked, tls: tls.input.checked,
   });
   return { node, read };
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// templates of generation options (presets.py)
+// ---------------------------------------------------------------------------------------------------------------------
+// The server settings of the game a generation makes, for organizers and administrators: the defaults for new games,
+// or its own. `defaults` are the server's defaults (from /api/presets).
+export function gameSettingsSection(own, defaults) {
+  const formHost = h("div");
+  let form = null;
+  const ownBox = checkbox(t("Own settings for this game"), !!own, t("Otherwise it gets the defaults for new games, as set under Admin → Settings."));
+  const draw = (opts) => {
+    form = serverOptionsForm({ ...defaults, ...(opts || {}) });
+    clear(formHost).append(form.node);
+  };
+  const sync = () => { formHost.hidden = !ownBox.input.checked; };
+  ownBox.input.onchange = sync;
+  draw(own);
+  sync();
+  const node = h("details", { open: !!own }, h("summary", { class: "muted" }, t("Settings for the new game")),
+    h("div", { class: "stack", style: { marginTop: "10px" } }, ownBox, formHost));
+  return {
+    node,
+    read: () => (ownBox.input.checked ? form.read() : null),
+    apply: (opts) => { ownBox.input.checked = !!opts; draw(opts); sync(); if (opts) node.open = true; },
+  };
+}
+
+// Pick a template to fill a form in, or save what the form holds as one. `read()` returns the form's options as a
+// template has them; `apply(options)` fills the form in and returns what it had to leave out, as text, or nothing.
+export function presetBar({ read, apply }) {
+  const choice = h("select", { class: "input", "aria-label": t("Template") });
+  const save = h("button", { class: "btn sm", type: "button" }, icon("plus", 14), t("Save as template"));
+  const update = h("button", { class: "btn sm", type: "button", title: t("Save the options in the form into this template") }, t("Update"));
+  const remove = h("button", { class: "btn sm ghost icon-only", type: "button", title: t("Delete template"), "aria-label": t("Delete template") }, icon("trash", 14));
+  let list = [];
+  const current = () => list.find((p) => String(p.id) === choice.value);
+  const sync = () => { update.hidden = remove.hidden = !current()?.can_edit; };
+  const label = (p) => p.name + (p.shared ? ` · ${p.mine ? t("shared") : t("from {owner}", { owner: p.owner || "—" })}` : "");
+  const draw = (selected = "") => {
+    clear(choice).append(h("option", { value: "" }, t("Fill in from a template…")),
+      list.map((p) => h("option", { value: String(p.id), selected: String(p.id) === String(selected) }, label(p))));
+    sync();
+  };
+  const store = (saved) => {
+    list = [...list.filter((p) => p.id !== saved.id), saved].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+    draw(saved.id);
+  };
+
+  choice.onchange = () => {
+    sync();
+    const preset = current();
+    if (!preset) return;
+    const leftOut = apply(preset.options);
+    toast(leftOut ? `${t("Filled in from {name}.", { name: preset.name })} ${leftOut}` : t("Filled in from {name}.", { name: preset.name }),
+      leftOut ? "info" : "success", leftOut ? 8000 : 4500);
+  };
+  update.onclick = action(async () => {
+    const preset = current();
+    if (!(await confirmDialog(t("The options in the form replace the ones saved in it."), { title: t("Update {name}?", { name: preset.name }), confirmText: t("Update") }))) return;
+    store(await put(`/api/presets/${preset.id}`, { options: read() }));
+    toast(t("Template {name} updated", { name: preset.name }), "success");
+  });
+  remove.onclick = action(async () => {
+    const preset = current();
+    if (!(await confirmDialog(preset.shared ? t("Nobody can fill a form in from it any more.") : t("It cannot be brought back."),
+      { title: t("Delete {name}?", { name: preset.name }), danger: true, confirmText: t("Delete") }))) return;
+    await del(`/api/presets/${preset.id}`);
+    list = list.filter((p) => p.id !== preset.id);
+    draw();
+    toast(t("Template {name} deleted", { name: preset.name }), "success");
+  });
+  save.onclick = () => {
+    const name = h("input", { class: "input", maxLength: 60, placeholder: t("e.g. Race or Async"), value: current()?.mine ? current().name : "" });
+    const shared = isOrganizer() ? checkbox(t("Share with everyone who generates"), !!current()?.shared,
+      t("They can fill their forms in from it; only you and administrators change it.")) : null;
+    const submit = h("button", { class: "btn primary", type: "button" }, t("Save"));
+    const modal = openModal({ title: t("Save as template"),
+      body: h("div", { class: "stack" },
+        h("p", { class: "muted small" }, t("Saves the options in this form under a name, to fill them in again later. The players and the seed are not part of it.")),
+        field(t("Name"), name), shared),
+      actions: [h("button", { class: "btn", type: "button", onclick: () => modal.close() }, t("Cancel")), submit] });
+    submit.onclick = action(async () => {
+      const mine = list.find((p) => p.mine && p.name.toLowerCase() === name.value.trim().toLowerCase());
+      if (mine && !(await confirmDialog(t("You already have a template called {name}. Replace its options?", { name: mine.name }),
+        { title: t("Replace {name}?", { name: mine.name }), confirmText: t("Replace") }))) return;
+      const body = { name: name.value, options: read(), ...(shared ? { shared: shared.input.checked } : {}) };
+      store(mine ? await put(`/api/presets/${mine.id}`, body) : await post("/api/presets", body));
+      modal.close();
+      toast(t("Template {name} saved", { name: name.value.trim() }), "success");
+    });
+    name.onkeydown = (e) => { if (e.key === "Enter") submit.click(); };
+  };
+
+  const node = h("div", { class: "row" }, h("div", { class: "grow" }, choice), update, remove, save);
+  // load(): the templates, and the server's defaults for new games (organizers only)
+  const load = async () => {
+    const data = await get("/api/presets");
+    list = data.presets;
+    draw();
+    return data;
+  };
+  return { node, load };
 }
 
 // What admins must know about the certificate for encrypted game connections (tls.py), or null if all is well
