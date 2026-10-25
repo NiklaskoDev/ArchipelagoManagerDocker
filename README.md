@@ -30,6 +30,9 @@ players log in to keep their YAML configs, see their games and download their pa
   new Archipelago version is out. A game can post to a channel of its own, and players can ask to be mentioned.
 - **Keeps custom games.** `.apworld` files are stored. If a config or a seed needs a game the server does not have, the
   UI says so and offers to add it. Regular users can *submit* an APWorld; an admin approves it.
+- **Runs every game on the Archipelago version it needs.** Besides the version in the image, admins can install
+  further Archipelago releases from the web UI. Each game runs, and each generation generates, on the version chosen for
+  it, so an old seed or a custom game that needs another version keeps working next to the rest.
 - **One UI for admins and players.** Players see only their games, can start and stop them (if allowed) and download
   their files. Admins also get the live console, file management, per-game settings and user management.
 - **A text client in the browser.** Players chat with the multiworld and use the server's commands (`!hint`,
@@ -229,6 +232,23 @@ itself. Both edit the same file, so switch whenever you like.
   *Create an account…* to let people without an account sign up through Discord (they can set a password later in the
   user menu), and enter a Discord server ID to admit only members of that server. Accounts are matched by Discord's
   account ID only, never by name; admins see who is linked under *Admin → Users* and can unlink an account there.
+- **Archipelago versions:** *Admin → Settings → Archipelago versions*, type a release number (such as `0.6.2`) and
+  *Install*. The manager downloads that release's source from GitHub, makes a Python environment for it with
+  Archipelago's requirements and those of its worlds (as the image does for its own version), and checks that it
+  loads; the log shows each step. It takes a few minutes and some hundred megabytes in the data folder
+  (`ap-versions/`), and needs internet access while it runs. Worlds whose requirements need a C compiler do not load in
+  a further version (the image has none); the card lists them. Then pick the version:
+  - for a game: *Settings → Archipelago version* on the game page (the server needs a restart to switch). The *Connect*
+    box tells players which version the game runs on, so they use a client of it. Tracker, progress, text client and
+    Discord messages read the game with its own version;
+  - for a generation: *Archipelago version* on *Generate* (also offered to players who may generate); the game it makes
+    runs on the same version;
+  - for an upload: *Archipelago version* in *Add a game*.
+
+  Custom games (APWorlds) are added to every installed version they say they work with (`minimum_ap_version` and
+  `maximum_ap_version` in their manifest), and the base ROMs of the image's version are shared with the others. Each
+  further version has its own `host.yaml` in its folder. A version can be removed once no game uses it. Sign-up rounds
+  always generate with the image's version.
 - **Run a game:** *Start / Stop / Restart* on the game page. *Settings* holds the room password, the remote-admin
   password, hint cost, `!release`/`!collect`/`!remaining` rules and when the game falls asleep. Passwords and rules apply
   to a running server immediately; the port and a few startup options need a restart (the UI tells you).
@@ -357,6 +377,7 @@ Everything is optional except the volume. Set these as environment variables (Un
 | `MAX_EXTRACT_MB` | `2048` | Largest total size a game archive may unpack to. |
 | `GENERATION_TIMEOUT` | `3600` | Seconds before a generation is stopped. |
 | `TZ` | *(empty)* | Time zone for logs. |
+| `AP_SOURCE_URL` | GitHub | Where further Archipelago versions are downloaded from; `{version}` stands for the release number. Default `https://github.com/ArchipelagoMW/Archipelago/archive/refs/tags/{version}.tar.gz`. |
 | `UPDATE_CHECK` | `true` | Ask GitHub for new releases of Archipelago and of custom games added from GitHub, and show them to admins. `false` stops all requests the manager makes to GitHub on its own. |
 
 ## Data and backups
@@ -373,11 +394,12 @@ Everything lives in the `/config` volume:
 | `jobs/` | Generation inputs and logs (older ones are pruned at startup, keeping the latest 50) |
 | `signups/<id>/` | The YAMLs entered in a sign-up round |
 | `ap-data/Archipelago/` | Archipelago's `host.yaml`, logs and the custom worlds folder |
+| `ap-versions/<version>/` | A further Archipelago version: its source with its own `host.yaml` and custom worlds, and its Python environment |
 
 Back up the whole folder. Game saves are written every minute and when a server stops, so stopping the container
 (`docker stop`, allow 30 s) saves everything. Without stopping anything, *Admin → Settings → Backup of everything*
-downloads the folder as one zip, with a consistent copy of the database (`tmp/` and the generated templates are left
-out). To restore it, stop the container, put the zip's contents into an empty data folder, and start the container.
+downloads the folder as one zip, with a consistent copy of the database (`tmp/`, the generated templates and the
+further Archipelago versions are left out: after a restore, *Install again* brings a version back). To restore it, stop the container, put the zip's contents into an empty data folder, and start the container.
 The zip holds the password hashes, the Discord client secret and the webhook addresses: keep it as safe as the folder
 itself. The copies under `games/<id>/backups/` protect against mistakes inside
 the manager (a reset, a restore); they live in the same folder, so they are no replacement for backing it up.
@@ -388,8 +410,9 @@ The image bundles one Archipelago release (shown under Admin → Settings → Sy
 version it needs; if the bundled Archipelago is older than that, the UI refuses the upload with a clear message
 instead of failing later.
 
-Archipelago is part of the image, so a new Archipelago version arrives as a new image. Nothing is installed inside a
-running container.
+Archipelago is part of the image, so a new version of the image's Archipelago arrives as a new image. Games that should
+stay on an older (or try a newer) Archipelago can run on a further version installed from the web UI (see
+*Archipelago versions* above); those stay as they are when the image is updated.
 
 **On the server:** when a newer Archipelago release exists, admins see a notice on the dashboard and under
 *Admin → Settings → System* (the manager asks GitHub once at start and then twice a day; `UPDATE_CHECK=false` turns

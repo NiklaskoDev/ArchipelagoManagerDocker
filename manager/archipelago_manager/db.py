@@ -10,7 +10,7 @@ from collections.abc import Iterable, Iterator
 
 from .config import CONFIG
 
-SCHEMA_VERSION = 14
+SCHEMA_VERSION = 15
 
 # Added in schema version 3
 _SIGNUPS = """
@@ -118,6 +118,20 @@ CREATE TABLE game_visits (
 );
 """
 
+# Added in schema version 15
+_AP_VERSIONS = """
+-- Archipelago versions installed besides the one in the image (versions.py), each in its own folder of the data folder.
+-- A game runs on one of them when games.ap_version names it, on the image's otherwise.
+CREATE TABLE ap_versions (
+    version       TEXT PRIMARY KEY,
+    status        TEXT NOT NULL CHECK (status IN ('installing', 'installed', 'failed')),
+    created_at    REAL NOT NULL,
+    installed_at  REAL,
+    size          INTEGER,
+    error         TEXT
+);
+"""
+
 SCHEMA = """
 CREATE TABLE users (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -209,7 +223,8 @@ CREATE TABLE games (
     start_countdown   INTEGER NOT NULL DEFAULT 1,
     start_stage       TEXT,
     stopped_at        REAL,
-    asleep            INTEGER NOT NULL DEFAULT 0
+    asleep            INTEGER NOT NULL DEFAULT 0,
+    ap_version        TEXT
 );
 CREATE UNIQUE INDEX games_port ON games(port) WHERE port IS NOT NULL;
 
@@ -270,7 +285,7 @@ CREATE TABLE job_players (
 );
 CREATE INDEX job_players_job ON job_players(job_id);
 """ + _SIGNUPS + _SOURCES + "ALTER TABLE apworld_sources ADD COLUMN latest_asset TEXT; " + \
-    "ALTER TABLE signups ADD COLUMN test_job_id INTEGER;" + _PROGRESS + _AUDIT + _VISITS
+    "ALTER TABLE signups ADD COLUMN test_job_id INTEGER;" + _PROGRESS + _AUDIT + _VISITS + _AP_VERSIONS
 
 
 # Upgrades for databases created by older versions: MIGRATIONS[n] turns schema n - 1 into schema n. New databases get
@@ -311,6 +326,8 @@ MIGRATIONS: dict[int, str] = {
     # a player handing their slot over (routes/games.py): since when, to whom (NULL: whoever takes it), and a note
     14: "ALTER TABLE game_slots ADD COLUMN handover_at REAL; ALTER TABLE game_slots ADD COLUMN handover_to INTEGER; "
         "ALTER TABLE game_slots ADD COLUMN handover_note TEXT;",
+    # further Archipelago versions, and the one a game runs on (NULL: the image's)
+    15: _AP_VERSIONS + "ALTER TABLE games ADD COLUMN ap_version TEXT;",
 }
 
 

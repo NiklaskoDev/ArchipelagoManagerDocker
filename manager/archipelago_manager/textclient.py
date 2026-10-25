@@ -288,11 +288,11 @@ class TextClients:
             attempt += 1
 
     async def _connect(self, session: Session) -> None:
-        game = db.query_one("SELECT port, password FROM games WHERE id = ?", (session.game_id,))
+        game = db.query_one("SELECT port, password, ap_version FROM games WHERE id = ?", (session.game_id,))
         row = db.query_one("SELECT name FROM game_slots WHERE game_id = ? AND slot = ?", (session.game_id, session.slot))
         if not game or not row or not game["port"]:
             raise Refused("The game or the slot no longer exists")
-        version = (apbridge.version_tuple() or (0, 6, 0)) + (0, 0, 0)
+        version = (apbridge.version_tuple(game["ap_version"]) or (0, 6, 0)) + (0, 0, 0)
         # The server is in the same container; no proxy from the environment may come between
         async with connect(f"ws://127.0.0.1:{game['port']}", proxy=None, max_size=MAX_PACKET, open_timeout=15) as ws:
             session.ws = ws

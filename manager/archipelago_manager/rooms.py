@@ -19,7 +19,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from . import activity, apbridge, backups, db, gamepaths, history, notify, settings as app_settings
+from . import activity, apbridge, backups, db, gamepaths, history, notify, settings as app_settings, versions
 from .config import CONFIG
 from .history import STATUS_GOAL
 
@@ -157,6 +157,7 @@ def build_command(game: Any) -> list[str]:
         "--auto_shutdown", "0",  # the manager puts the server to sleep itself (watch_idle), also over host.yaml
         "--compatibility", str(opts["compatibility"]),
         "--loglevel", opts["loglevel"],
+        version=game["ap_version"],
     )
     if opts["disable_item_cheat"]:
         cmd.append("--disable_item_cheat")
@@ -316,6 +317,8 @@ class RoomManager:
             raise RoomError("No such game")
         if not gamepaths.multidata_path(room.game_id).is_file():
             raise RoomError("The multiworld data file is missing from disk")
+        if game["ap_version"] and not versions.available(game["ap_version"]):
+            raise RoomError(versions.unavailable_text(game["ap_version"]))
         if game["port"] is None:
             port = allocate_port(room.game_id) or self._take_port(room.game_id)
             if port is None:
@@ -336,7 +339,7 @@ class RoomManager:
             room.proc = await asyncio.create_subprocess_exec(
                 *build_command(game),
                 stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
-                cwd=str(CONFIG.ap_dir), env=apbridge.ap_env(), start_new_session=True)
+                cwd=str(apbridge.ap_dir(game["ap_version"])), env=apbridge.ap_env(), start_new_session=True)
         except OSError as e:
             room.state, room.error = "crashed", f"Could not start the server process: {e}"
             self._append_log(room, room.error)
@@ -634,7 +637,8 @@ class RoomManager:
         if cached and cached[0] == key:
             return cached[1]
         try:
-            result = await apbridge.run_helper("progress", str(path), timeout=60)
+            result = await apbridge.run_helper("progress", str(path), timeout=60,
+                                               version=apbridge.game_version(game_id))
         except apbridge.APBridgeError as e:
             log.warning("Could not read progress of game %s: %s", game_id, e)
             return None
@@ -669,7 +673,7 @@ class RoomManager:
         if cached and cached[0] == key:
             return cached[1]
         data = await apbridge.run_helper("tracker", str(gamepaths.multidata_path(game_id)), str(path), str(slot),
-                                         timeout=60)
+                                         timeout=60, version=apbridge.game_version(game_id))
         data.pop("ok", None)
         self._trackers[game_id, slot] = (key, data)
         return data
@@ -780,7 +784,7 @@ class RoomManager:
         request = {"items": [[h[0], h[3]] for h in found], "locations": [[h[1], h[2]] for h in found]}
         try:
             names = await apbridge.run_helper("names", str(gamepaths.multidata_path(game_id)), json.dumps(request),
-                                              timeout=60)
+                                              timeout=60, version=apbridge.game_version(game_id))
         except apbridge.APBridgeError as e:
             log.warning("Could not look up the names of found hints in game %s: %s", game_id, e)
             return

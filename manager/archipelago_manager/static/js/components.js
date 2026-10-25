@@ -385,6 +385,15 @@ export function controlButtons(game, onUpdate) {
     : [run(t("Start"), "play", "start", "primary")];
 }
 
+// Which Archipelago version generates or hosts a game (GET /api/ap-versions): null when there is only the server's own
+export function apVersionField(listing, value = "") {
+  const installed = (listing?.versions || []).filter((v) => v.status === "installed");
+  if (!installed.length) return null;
+  const choice = select([["", t("This server's ({version})", { version: listing.default || "?" })],
+    ...installed.map((v) => [v.version, v.version])], installed.some((v) => v.version === value) ? value : "");
+  return { node: field(t("Archipelago version"), choice, t("The game runs on it, and players need a client of it.")), read: () => choice.value };
+}
+
 export function gameCard(game, onUpdate) {
   return h("div", { class: "card game-card" },
     h("div", { class: "card-head" },

@@ -1,7 +1,12 @@
-"""Talks to the Archipelago installation: runs ap_helper.py in AP's environment and keeps a cache of what it learned."""
+"""Talks to the Archipelago installation: runs ap_helper.py in AP's environment and keeps a cache of what it learned.
+
+Besides the version in the image (CONFIG.ap_dir), further versions can be installed (versions.py). Functions that take
+a `version` work on that one; None is the image's.
+"""
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import json
 import logging
@@ -33,8 +38,32 @@ def ap_env() -> dict[str, str]:
     return env
 
 
-def ap_command(script: str, *args: str) -> list[str]:
-    return [CONFIG.ap_python, str(CONFIG.ap_dir / script), *args]
+def version_dir(version: str) -> Path:
+    """Where a further version lives: its source in archipelago/, its Python environment in venv/."""
+    return CONFIG.data_dir / "ap-versions" / version
+
+
+def install_of(version: str | None) -> tuple[Path, str]:
+    """The source folder and the Python of an Archipelago version (None: the image's)."""
+    if not version:
+        return CONFIG.ap_dir, CONFIG.ap_python
+    folder = version_dir(version)
+    return folder / "archipelago", str(folder / "venv" / "bin" / "python")
+
+
+def ap_dir(version: str | None = None) -> Path:
+    return install_of(version)[0]
+
+
+def ap_command(script: str, *args: str, version: str | None = None) -> list[str]:
+    folder, python = install_of(version)
+    return [python, str(folder / script), *args]
+
+
+def game_version(game_id: int) -> str | None:
+    """The Archipelago version a game runs on (None: the image's)."""
+    row = db.query_one("SELECT ap_version FROM games WHERE id = ?", (game_id,))
+    return row["ap_version"] if row else None
 
 
 def _parse_result(stdout: str) -> dict[str, Any]:
@@ -49,14 +78,17 @@ def _parse_result(stdout: str) -> dict[str, Any]:
 _HELPERS = asyncio.Semaphore(4)
 
 
-async def run_helper(*args: str, timeout: float = 180) -> dict[str, Any]:
-    if not (CONFIG.ap_dir / "Utils.py").is_file():
+async def run_helper(*args: str, timeout: float = 180, version: str | None = None) -> dict[str, Any]:
+    folder, python = install_of(version)
+    if not (folder / "Utils.py").is_file():
+        if version:
+            raise APBridgeError(f"Archipelago {version} is not installed on this server")
         raise APBridgeError(f"Archipelago is not installed at {CONFIG.ap_dir}")
     async with _HELPERS:
         proc = await asyncio.create_subprocess_exec(
-            CONFIG.ap_python, str(CONFIG.helper), "--ap-dir", str(CONFIG.ap_dir), *args,
+            python, str(CONFIG.helper), "--ap-dir", str(folder), *args,
             stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-            env=ap_env(), cwd=str(CONFIG.ap_dir))
+            env=ap_env(), cwd=str(folder))
         try:
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout)
         except TimeoutError:
@@ -88,6 +120,10 @@ class _State:
 
 
 STATE = _State()
+# What each further version reported about itself (its "games"), loaded when first needed; dropped when its custom
+# games change
+EXTRA: dict[str, dict[str, Any]] = {}
+_EXTRA_LOCKS: dict[str, asyncio.Lock] = {}
 
 
 def _lock() -> asyncio.Lock:
@@ -122,19 +158,36 @@ async def refresh_info() -> dict[str, Any] | None:
         return STATE.info
 
 
-def ap_version() -> str | None:
+async def extra_info(version: str) -> dict[str, Any]:
+    """What a further version reports about itself: its games. Raises APBridgeError when it cannot be loaded."""
+    async with _EXTRA_LOCKS.setdefault(version, asyncio.Lock()):
+        if version not in EXTRA:
+            EXTRA[version] = await run_helper("games", timeout=300, version=version)
+        return EXTRA[version]
+
+
+def info_of(version: str | None) -> dict[str, Any] | None:
+    return EXTRA.get(version) if version else STATE.info
+
+
+def ap_version(version: str | None = None) -> str | None:
+    if version:
+        return version
     return (STATE.info or STATE.where or {}).get("version")
 
 
-def version_tuple() -> tuple[int, ...] | None:
+def version_tuple(version: str | None = None) -> tuple[int, ...] | None:
+    if version:  # further versions are named by their number (versions.VERSION)
+        return parse_version(version)
     value = (STATE.info or STATE.where or {}).get("version_tuple")
     return tuple(value) if value else None
 
 
-def installed_games(*, include_hidden: bool = False) -> dict[str, dict[str, Any]]:
-    if not STATE.info:
+def installed_games(*, include_hidden: bool = False, version: str | None = None) -> dict[str, dict[str, Any]]:
+    info = info_of(version)
+    if not info:
         return {}
-    return {g["name"]: g for g in STATE.info["games"] if include_hidden or not g["hidden"]}
+    return {g["name"]: g for g in info["games"] if include_hidden or not g["hidden"]}
 
 
 def describe_file(path: str | Path) -> dict[str, Any]:
@@ -201,11 +254,12 @@ def missing_file_text(item: dict[str, Any]) -> str:
     return f"{item['game']} needs its base ROM on the server to generate: put {file_location_text(item)}."
 
 
-def missing_games(games: list[str] | set[str]) -> list[str]:
-    """Games that are not installed. Empty if we cannot tell (Archipelago unavailable)."""
-    if not STATE.info:
+def missing_games(games: list[str] | set[str], version: str | None = None) -> list[str]:
+    """Games that are not installed (in that version). Empty if we cannot tell (Archipelago unavailable)."""
+    info = info_of(version)
+    if not info:
         return []
-    known = {g["name"] for g in STATE.info["games"]}
+    known = {g["name"] for g in info["games"]}
     return sorted({g for g in games if g and g not in known and g != "Archipelago"})
 
 
@@ -217,7 +271,7 @@ def apworld_library_path(apworld_id: int) -> Path:
 
 
 async def sync_apworlds() -> None:
-    """Makes AP's worlds folder match the installed custom worlds in the database."""
+    """Makes AP's worlds folder match the installed custom worlds in the database, in every version."""
     where = await get_where()
     folder = Path(where["worlds_folder"])
     folder.mkdir(parents=True, exist_ok=True)
@@ -230,6 +284,63 @@ async def sync_apworlds() -> None:
         if not target.is_file() or target.stat().st_size != source.stat().st_size \
                 or _sha256(target) != _sha256(source):
             shutil.copyfile(source, target)
+    for row in db.query("SELECT version FROM ap_versions WHERE status = 'installed'"):
+        if (ap_dir(row["version"]) / "Utils.py").is_file():
+            sync_version_apworlds(row["version"])
+
+
+def parse_version(text: Any) -> tuple[int, ...] | None:
+    """(0, 6, 2) for "0.6.2"; None for nothing or something else."""
+    if not str(text).strip():
+        return None
+    try:
+        return tuple(int(part) for part in str(text).strip().lstrip("v").split("."))
+    except ValueError:
+        return None
+
+
+def works_with(manifest: dict, version: tuple[int, ...] | None) -> bool:
+    """Whether a custom world says it works with this Archipelago version (it does if it says nothing)."""
+    if not version:
+        return True
+    low = parse_version(manifest.get("minimum_ap_version") or "")
+    high = parse_version(manifest.get("maximum_ap_version") or "")
+    return not (low and version < low) and not (high and version > high)
+
+
+def sync_version_apworlds(version: str) -> None:
+    """Makes a further version's custom_worlds folder hold exactly the custom worlds that work with it. The folder is
+    the manager's alone: Archipelago uses its own folder when it can write to it."""
+    folder = ap_dir(version) / "custom_worlds"
+    folder.mkdir(parents=True, exist_ok=True)
+    wanted: dict[str, Path] = {}
+    for row in db.query("SELECT id, module, manifest FROM apworlds WHERE status = 'installed'"):
+        source = apworld_library_path(row["id"])
+        if source.is_file() and works_with(db.jloads(row["manifest"], {}) or {}, version_tuple(version)):
+            wanted[f"{row['module']}.apworld"] = source
+    changed = False
+    for present in folder.glob("*.apworld"):
+        if present.name not in wanted:
+            present.unlink()
+            changed = True
+    for name, source in wanted.items():
+        target = folder / name
+        if not target.is_file() or target.stat().st_size != source.stat().st_size or _sha256(target) != _sha256(source):
+            shutil.copyfile(source, target)
+            changed = True
+    if changed:
+        EXTRA.pop(version, None)
+
+
+def link_roms(version: str) -> None:
+    """Lets a further version find the base ROMs the image's version has: a link in its own folder, under the name
+    the file has there (Archipelago looks for them in its user folder, which for a further version is its own)."""
+    for rom in roms():
+        source = Path(rom["path"])
+        target = ap_dir(version) / source.name
+        if rom["exists"] and source.is_file() and not target.exists():
+            with contextlib.suppress(OSError):
+                target.symlink_to(source)
 
 
 def _sha256(path: Path) -> str:
@@ -247,6 +358,11 @@ async def remove_apworld_file(module: str) -> None:
         target.unlink()
     except FileNotFoundError:
         pass
+    for row in db.query("SELECT version FROM ap_versions"):
+        extra = ap_dir(row["version"]) / "custom_worlds" / f"{module}.apworld"
+        if extra.is_file():
+            extra.unlink()
+            EXTRA.pop(row["version"], None)
 
 
 # ------------------------------------------------------------------------------------------------------------------

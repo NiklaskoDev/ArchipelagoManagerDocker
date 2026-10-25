@@ -99,8 +99,10 @@ def _version_text(parts: list[int]) -> str:
 
 async def import_game(src: Path, original_name: str, *, name: str | None = None, created_by: int | None = None,
                       source: str = "upload", job_id: int | None = None,
-                      owners: dict[str, int] | None = None) -> int:
+                      owners: dict[str, int] | None = None, ap_version: str | None = None) -> int:
     """Turns an uploaded zip or .archipelago file into a hosted-ready game. Returns the new game id.
+
+    `ap_version` is the Archipelago version the game is to run on (None: the image's); it reads the file, too.
 
     `owners` maps lower-cased slot names to user ids. Without it, slots are matched against everybody's configs.
     """
@@ -118,15 +120,15 @@ async def import_game(src: Path, original_name: str, *, name: str | None = None,
             raise GameImportError("No .archipelago multiworld file found. Upload the zip created by the generator "
                                   "or the .archipelago file itself.")
         try:
-            meta = await apbridge.run_helper("multidata", str(multidata), timeout=120)
+            meta = await apbridge.run_helper("multidata", str(multidata), timeout=120, version=ap_version)
         except apbridge.APBridgeError as e:
             raise GameImportError(f"Could not read the multiworld data: {e}") from None
 
-        current = apbridge.version_tuple()
+        current = apbridge.version_tuple(ap_version)
         needed = tuple(meta["minimum_server_version"])
         if current and needed and needed > current:
             raise GameImportError(f"This multiworld needs Archipelago {_version_text(list(needed))} or newer, "
-                                  f"but this server runs {apbridge.ap_version()}.")
+                                  f"but it would run on {apbridge.ap_version(ap_version)}.")
 
         stem = Path(original_name).stem
         display = (name or "").strip() or (stem if stem and not stem.startswith("AP_") else f"Seed {meta['seed_name']}")
@@ -138,11 +140,12 @@ async def import_game(src: Path, original_name: str, *, name: str | None = None,
                 with db.connection() as conn:
                     game_id = conn.execute(
                         "INSERT INTO games(name, seed_name, source, created_at, created_by, job_id, "
-                        "generator_version, min_server_version, race_mode, games, port, options) "
-                        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                        "generator_version, min_server_version, race_mode, games, port, options, ap_version) "
+                        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                         (display[:120], meta["seed_name"], source, db.now(), created_by, job_id,
                          _version_text(meta["generator_version"]), _version_text(needed) if needed else None,
-                         int(meta["race_mode"]), db.jdumps(meta["games"]), port, db.jdumps(options))).lastrowid
+                         int(meta["race_mode"]), db.jdumps(meta["games"]), port, db.jdumps(options),
+                         ap_version)).lastrowid
                     for slot in meta["slots"]:
                         conn.execute("INSERT INTO game_slots(game_id, slot, name, game, type, locations) "
                                      "VALUES (?,?,?,?,?,?)",

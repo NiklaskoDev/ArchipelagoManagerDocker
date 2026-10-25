@@ -13,8 +13,8 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPExcepti
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from .. import (activity, apbridge, audit, backups, db, gamepaths, gamestore, history, notify, schedule, visits,
-               settings as app_settings, textclient)
+from .. import (activity, apbridge, audit, backups, db, gamepaths, gamestore, history, notify, schedule, versions,
+               visits, settings as app_settings, textclient)
 from ..config import CONFIG
 from ..rooms import ROOMS, STATUS_GOAL, RoomError, mask_secrets, sleep_minutes, slot_rules, valid_password
 from ..security import admin_user, current_user, is_admin
@@ -113,7 +113,10 @@ def game_summary(row: sqlite3.Row, slots: list[sqlite3.Row], user: sqlite3.Row, 
         "sleep_minutes": sleep_minutes(row),  # 0: never falls asleep
         "port": row["port"], "address": f"{host}:{row['port']}" if row["port"] else None,
         "has_password": bool(row["password"]),
-        "games": games, "missing_games": apbridge.missing_games(games),
+        "games": games, "missing_games": apbridge.missing_games(games, row["ap_version"]),
+        # the Archipelago version the server runs (players need a client that goes with it); own: not the image's
+        "ap_version": apbridge.ap_version(row["ap_version"]), "ap_version_own": row["ap_version"],
+        "ap_version_missing": bool(row["ap_version"] and not versions.available(row["ap_version"])),
         "player_count": len(players), "claimed_count": sum(1 for s in players if s["user_id"] is not None),
         "visibility": row["visibility"], "claimable": bool(row["claimable"]),
         "single_claim": bool(row["single_claim"]),
@@ -159,7 +162,12 @@ def list_games(request: Request, user: sqlite3.Row = Depends(current_user)) -> l
 
 @router.post("/games")
 async def upload_game(request: Request, file: UploadFile = File(...), name: str = Form(""),
-                      start: bool = Form(False), user: sqlite3.Row = Depends(admin_user)) -> dict:
+                      start: bool = Form(False), ap_version: str = Form(""),
+                      user: sqlite3.Row = Depends(admin_user)) -> dict:
+    try:
+        version = versions.check_choice(ap_version)
+    except versions.VersionError as e:
+        raise HTTPException(e.status, e.message) from None
     tmp = CONFIG.tmp_dir / f"upload-{db.now():.6f}-{user['id']}.bin"
     size = 0
     try:
@@ -170,7 +178,8 @@ async def upload_game(request: Request, file: UploadFile = File(...), name: str 
                     raise HTTPException(413, "File is too large")
                 out.write(chunk)
         try:
-            game_id = await gamestore.import_game(tmp, file.filename or "", name=name, created_by=user["id"])
+            game_id = await gamestore.import_game(tmp, file.filename or "", name=name, created_by=user["id"],
+                                                  ap_version=version)
         except gamestore.GameImportError as e:
             raise HTTPException(400, str(e)) from None
     finally:
@@ -237,7 +246,6 @@ async def _detail(game_id: int, user: sqlite3.Row, request: Request) -> dict:
         "notes": row["notes"], "job_id": row["job_id"],
         "job_available": bool(job and (admin or job["created_by"] == user["id"])),
         "share_spoiler_when_done": bool(row["share_spoiler_when_done"]),
-        "ap_version": apbridge.ap_version(),
     }
     if admin:
         detail["server_password"] = row["server_password"]
@@ -277,6 +285,7 @@ class GamePatch(BaseModel):
     start_at: float | None = None  # null takes a planned start back
     start_open_minutes: int | None = None
     start_countdown: bool | None = None
+    ap_version: str | None = Field(default=None, max_length=20)  # "": the image's
 
 
 @router.patch("/games/{game_id}")
@@ -341,6 +350,17 @@ async def patch_game(game_id: int, body: GamePatch, request: Request, user: sqli
         changes["start_open_minutes"] = body.start_open_minutes
     if "start_countdown" in given and body.start_countdown is not None:
         changes["start_countdown"] = int(body.start_countdown)
+    if "ap_version" in given and body.ap_version is not None:
+        try:
+            version = versions.check_choice(body.ap_version)
+        except versions.VersionError as e:
+            raise HTTPException(e.status, e.message) from None
+        needed = apbridge.parse_version(row["min_server_version"] or "")
+        if needed and (apbridge.version_tuple(version) or needed) < needed:
+            raise HTTPException(400, f"This multiworld needs Archipelago {row['min_server_version']} or newer")
+        if version != row["ap_version"]:
+            changes["ap_version"] = version
+            restart_required = restart_required or ROOMS.is_active(game_id)
     if "discord_webhook_url" in given and body.discord_webhook_url is not None:
         webhook = body.discord_webhook_url.strip()
         if webhook and not app_settings.valid_url(webhook):

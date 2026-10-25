@@ -10,12 +10,13 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import __version__, apbridge, audit, db, notify, schedule, signups, sources, updates
+from . import __version__, apbridge, audit, db, notify, schedule, signups, sources, updates, versions
 from .config import CONFIG
 from .generation import GENERATION
 from .rooms import ROOMS
 from .textclient import TEXT_CLIENTS
 from .routes import admin, apworlds, auth, configs, games, jobs, roms
+from .routes import versions as version_routes
 from .routes import signups as signup_routes
 from .routes import sources as source_routes
 from .security import CSRF_HEADER, CSRF_VALUE, user_for_request
@@ -43,12 +44,19 @@ async def init_archipelago() -> None:
     await ROOMS.catch_up_history()
     log.info("Archipelago %s ready, %d games available", apbridge.ap_version(),
              len(apbridge.installed_games(include_hidden=True)))
+    for row in db.query("SELECT version FROM ap_versions WHERE status = 'installed'"):
+        if versions.present(row["version"]):  # what the further versions offer, for checks and the settings page
+            try:
+                await apbridge.extra_info(row["version"])
+            except apbridge.APBridgeError as e:
+                log.error("Archipelago %s is not usable: %s", row["version"], e)
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     db.init_db()
+    versions.reset()
     audit.prune()
     auth.bootstrap_admin()
     ROOMS.reset()
@@ -63,8 +71,9 @@ async def lifespan(_app: FastAPI):
         tasks.append(asyncio.create_task(sources.run_periodically()))
     log.info("Archipelago Manager %s listening, data in %s", __version__, CONFIG.data_dir)
     yield
-    for task in tasks:
-        task.cancel()
+    for task in [*tasks, versions.STATE.task]:
+        if task:
+            task.cancel()
     await GENERATION.stop()
     await TEXT_CLIENTS.shutdown()
     await ROOMS.shutdown()
@@ -213,7 +222,7 @@ def health() -> dict:
             "ready": apbridge.STATE.info is not None, "archipelago_error": apbridge.STATE.error}
 
 
-for module in (auth, configs, apworlds, source_routes, games, jobs, signup_routes, admin, roms):
+for module in (auth, configs, apworlds, source_routes, games, jobs, signup_routes, admin, roms, version_routes):
     app.include_router(module.router)
 
 app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")

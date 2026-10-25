@@ -21,6 +21,7 @@ export default async function render({ root, params, cleanup, isCurrent, query }
   const admin = isAdmin();
   let game = await get(`/api/games/${id}`);
   const users = admin ? await get("/api/users") : [];
+  const apVersions = admin ? await get("/api/ap-versions") : null;
 
   const headerHost = h("div");
   // what happened while the player was away, for players of the game
@@ -58,6 +59,10 @@ export default async function render({ root, params, cleanup, isCurrent, query }
       offersBanner(),
       game.state === "crashed" ? banner("error", icon("alert", 18), h("div", { class: "grow" },
         h("strong", {}, t("The server stopped unexpectedly.")), " ", game.error ? tServer(game.error) : t("See the console for details."))) : null,
+      game.ap_version_missing ? banner("error", icon("alert", 18), h("div", { class: "grow" },
+        h("strong", {}, t("Archipelago {version} is not installed on this server.", { version: game.ap_version })), " ",
+        admin ? t("This game runs on it. Install it again under Admin → Settings, or choose another version in the game's settings.")
+          : t("This game runs on it, so it cannot start until an administrator installs it again."))) : null,
       game.missing_games.length ? missingGamesPanel(game.missing_games.map((g) => ({ game: g, configs: [], games: [{ id, name: game.name }], pending: [] })),
         refresh) : null);
   }
@@ -198,6 +203,8 @@ export default async function render({ root, params, cleanup, isCurrent, query }
         game.my_slots.length ? [h("dt", {}, plural(game.my_slots.length, "Your slot", "Your slots")),
           h("dd", { class: "stack tight" }, game.my_slots.map((s) => h("div", { class: "row" },
             copyField(s.name), h("span", { class: "muted" }, s.game))))] : null,
+        h("dt", {}, "Archipelago"), h("dd", {}, game.ap_version || "—",
+          game.ap_version_own ? h("span", { class: "muted small" }, " ", t("(use a client of this version)")) : null),
         h("dt", {}, t("Progress")), h("dd", {}, progressBar(game.progress.checked, game.progress.total))),
       h("p", { class: "muted small" }, game.password
         ? t("In your Archipelago client, enter the server address, your slot name and the password.")
@@ -588,6 +595,14 @@ export default async function render({ root, params, cleanup, isCurrent, query }
     const shareSpoiler = checkbox(t("Share the spoiler log with the players when everyone has finished"), game.share_spoiler_when_done,
       t("When every player has reached their goal (or you move the game to the archive), the spoiler log becomes visible to every player in the game."));
     const rules = serverOptionsForm(opts);
+    // the Archipelago version the server runs on: the server's own, or one installed besides it
+    const versionChoices = [["", t("This server's ({version})", { version: apVersions.default || "?" })],
+      ...apVersions.versions.filter((v) => v.status === "installed" || v.version === game.ap_version_own)
+        .map((v) => [v.version, v.status === "installed" ? v.version : t("{version} (not installed)", { version: v.version })])];
+    if (game.ap_version_own && !versionChoices.some(([value]) => value === game.ap_version_own)) {
+      versionChoices.push([game.ap_version_own, t("{version} (not installed)", { version: game.ap_version_own })]);
+    }
+    const apVersion = select(versionChoices, game.ap_version_own || "");
     // a planned start; the field holds minutes, so an unchanged value is not sent back
     let plannedValue = toLocalInput(game.start?.at);
     const startAt = h("input", { class: "input", type: "datetime-local", value: plannedValue });
@@ -612,14 +627,14 @@ export default async function render({ root, params, cleanup, isCurrent, query }
       const body = { name: name.value, password: password.value, server_password: adminPassword.value, options,
         visibility: visibility.value, claimable: claimable.input.checked, single_claim: singleClaim.input.checked,
         notes: notes.value, share_spoiler_when_done: shareSpoiler.input.checked, discord_webhook_url: webhook.value.trim(),
-        start_open_minutes: Number(openMinutes.value || 0), start_countdown: countdown.input.checked };
+        start_open_minutes: Number(openMinutes.value || 0), start_countdown: countdown.input.checked, ap_version: apVersion.value };
       if (startAt.value !== plannedValue) body.start_at = fromLocalInput(startAt.value);
       if (port.value) body.port = Number(port.value);
       const result = await patch(`/api/games/${id}`, body);
       game = result;
       plannedValue = toLocalInput(game.start?.at);
       drawLive();
-      toast(result.restart_required ? t("Saved. Restart the server to apply the port or startup options.") : t("Settings saved"), "success");
+      toast(result.restart_required ? t("Saved. Restart the server for the changes to take effect.") : t("Settings saved"), "success");
     });
     return h("details", { class: "card" }, h("summary", {}, t("Settings")),
       h("div", { class: "stack" },
@@ -627,7 +642,8 @@ export default async function render({ root, params, cleanup, isCurrent, query }
           field(t("Name"), name), field(t("Port"), port, t("Must be mapped in Docker. Takes effect after a restart.")),
           field(t("Room password"), password, t("Players need it to connect")),
           field(t("Remote admin password"), adminPassword, t("Lets clients use !admin; leave empty to disable")),
-          field(t("Who can see this game"), visibility)),
+          field(t("Who can see this game"), visibility),
+          field(t("Archipelago version"), apVersion, t("What the server runs, and what players need a client of. Further versions are installed under Admin → Settings."))),
         claimable, singleClaim, shareSpoiler, field(t("Notes"), notes),
         h("h3", {}, t("Planned start")),
         h("p", { class: "muted small" }, t("The server opens by itself before the start and is announced on Discord; until then only administrators can start it. The results time every goal from the start, to the second.")),

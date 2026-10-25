@@ -1,6 +1,6 @@
 import { h, clear, icon, openModal, toast, action, fmtDate, fmtSpan } from "../util.js";
 import { api, get, isAdmin } from "../api.js";
-import { pageHeader, empty, stateBadge, chips, badge, controlButtons, copyField, checkbox, field, promptMissingGames } from "../components.js";
+import { pageHeader, empty, stateBadge, chips, badge, controlButtons, copyField, checkbox, field, promptMissingGames, apVersionField } from "../components.js";
 import { t, tServer } from "../i18n.js";
 
 export default async function render({ root, cleanup, isCurrent }) {
@@ -23,7 +23,7 @@ export default async function render({ root, cleanup, isCurrent }) {
       host.append(empty(t("No games here yet"),
         admin ? t("Upload the zip of a pregenerated multiworld, or generate one from player configs.")
               : t("You will see a game here once an administrator adds you to one."),
-        admin ? h("button", { class: "btn primary", type: "button", onclick: uploadDialog }, icon("upload", 14), t("Add a game")) : null,
+        admin ? h("button", { class: "btn primary", type: "button", onclick: action(uploadDialog) }, icon("upload", 14), t("Add a game")) : null,
         admin ? h("a", { class: "btn", href: "#/generate" }, icon("zap", 14), t("Generate")) : null));
       return;
     }
@@ -67,7 +67,8 @@ export default async function render({ root, cleanup, isCurrent }) {
         h("td", { class: "actions" }, h("a", { class: "btn sm", href: `#/games/${g.id}` }, t("Results"))))))));
   }
 
-  function uploadDialog() {
+  async function uploadDialog() {
+    const version = apVersionField(await get("/api/ap-versions"));
     const input = h("input", { type: "file", accept: ".zip,.archipelago", class: "input" });
     const name = h("input", { class: "input", placeholder: t("Defaults to the file name") });
     const start = checkbox(t("Start the server right away"), true);
@@ -93,6 +94,7 @@ export default async function render({ root, cleanup, isCurrent }) {
       form.append("file", input.files[0]);
       form.append("name", name.value);
       form.append("start", start.input.checked ? "true" : "false");
+      if (version) form.append("ap_version", version.read());
       note.textContent = t("Uploading and reading the multiworld… large files can take a moment.");
       try {
         const game = await api("POST", "/api/games", form);
@@ -109,14 +111,14 @@ export default async function render({ root, cleanup, isCurrent }) {
       title: t("Add a pregenerated game"),
       body: h("div", { class: "stack" }, drop, input,
         h("p", { class: "muted small" }, t("Files for each player are extracted and linked to users whose YAML player name matches the slot name. You can also assign slots by hand afterwards.")),
-        field(t("Name"), name), start, note),
+        field(t("Name"), name), version?.node, start, note),
       actions: [h("button", { class: "btn", type: "button", onclick: () => modal.close() }, t("Cancel")), submit],
     });
   }
 
   root.append(
     pageHeader(t("Games"), admin ? t("Every hosted multiworld on this server.") : t("Multiworlds you are part of."),
-      admin ? h("button", { class: "btn primary", type: "button", onclick: uploadDialog }, icon("upload", 14), t("Add a game")) : null,
+      admin ? h("button", { class: "btn primary", type: "button", onclick: action(uploadDialog) }, icon("upload", 14), t("Add a game")) : null,
       admin ? h("a", { class: "btn", href: "#/generate" }, icon("zap", 14), t("Generate")) : null),
     host);
   await load(true);

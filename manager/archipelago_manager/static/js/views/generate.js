@@ -1,6 +1,6 @@
 import { h, clear, icon, toast, action, fmtAgo, fmtDuration } from "../util.js";
 import { api, get, isAdmin, state } from "../api.js";
-import { pageHeader, chips, banner, badge, field, checkbox, select, jobBadge, missingGamesPanel, missingRomsPanel, promptMissingGames, empty } from "../components.js";
+import { pageHeader, chips, banner, badge, field, checkbox, select, jobBadge, missingGamesPanel, missingRomsPanel, promptMissingGames, empty, apVersionField } from "../components.js";
 import { t, tServer } from "../i18n.js";
 
 const SPOILER_CHOICES = [[1, t("Basic spoiler log")], [0, t("No spoiler log")], [2, t("With playthrough")], [3, t("Playthrough and paths")]];
@@ -8,7 +8,7 @@ const PLANDO = [["bosses", t("Bosses")], ["connections", t("Connections")], ["te
 
 export default async function render({ root, cleanup, isCurrent, query }) {
   const admin = isAdmin();
-  const [configs, jobs] = await Promise.all([get(`/api/configs${admin ? "?all=true" : ""}`), get("/api/jobs")]);
+  const [configs, jobs, apVersions] = await Promise.all([get(`/api/configs${admin ? "?all=true" : ""}`), get("/api/jobs"), get("/api/ap-versions")]);
   const selected = new Set(query.getAll("config").map(Number));
 
   // ?from=<job>: generate again with the configs and options of an earlier job
@@ -73,6 +73,7 @@ export default async function render({ root, cleanup, isCurrent, query }) {
   const skipBalance = checkbox(t("Skip progression balancing"), !!opts.skip_prog_balancing);
   const plando = PLANDO.map(([key, label]) => ({ key, box: checkbox(label, (opts.plando || ["bosses", "connections", "texts"]).includes(key)) }));
   const meta = h("textarea", { class: "input", rows: 8, placeholder: t("meta_description: My meta file\nnull:\n  progression_balancing: 50"), spellcheck: false, value: source?.meta || "" });
+  const version = apVersionField(apVersions, opts.ap_version || "");
   const hostAfter = checkbox(t("Start the server when generation finishes"), source && !source.test ? source.host_after : true);
   const errorHost = h("div");
   const submit = h("button", { class: "btn primary", type: "button" }, icon("zap", 14), t("Generate"));
@@ -85,7 +86,7 @@ export default async function render({ root, cleanup, isCurrent, query }) {
         config_ids: [...selected], name: name.value || null, spoiler: Number(spoiler.value), race: race.input.checked,
         seed: seed.value.trim() ? Number(seed.value.trim()) : null, skip_prog_balancing: skipBalance.input.checked,
         plando: plando.filter((p) => p.box.input.checked).map((p) => p.key), meta: meta.value.trim() || null,
-        host_after: hostAfter.input.checked,
+        host_after: hostAfter.input.checked, ap_version: version ? version.read() || null : null,
       });
       location.hash = `#/jobs/${job.id}`;
     } catch (err) {
@@ -145,7 +146,8 @@ export default async function render({ root, cleanup, isCurrent, query }) {
           tbody))),
       h("div", { class: "card stack section" },
         h("h2", {}, t("Options")),
-        h("div", { class: "form-grid" }, field(t("Name"), name, t("Shown in the games list")), field(t("Spoiler log"), spoiler), field(t("Seed"), seed, t("Leave empty for a random seed"))),
+        h("div", { class: "form-grid" }, field(t("Name"), name, t("Shown in the games list")), field(t("Spoiler log"), spoiler), field(t("Seed"), seed, t("Leave empty for a random seed")),
+          version?.node),
         h("div", { class: "stack tight" }, race, skipBalance, hostAfter),
         h("div", { class: "stack tight" }, h("span", { class: "field-label" }, t("Allowed plando")), h("div", { class: "row" }, plando.map((p) => p.box))),
         h("details", {}, h("summary", { class: "muted" }, t("Advanced: meta.yaml")),
