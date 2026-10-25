@@ -228,6 +228,7 @@ def test_a_database_from_the_first_version_is_upgraded(tmp_path):
     for column in ("player_status", "status_note", "status_at", "handover_at", "handover_to", "handover_note"):
         conn.execute(f"ALTER TABLE game_slots DROP COLUMN {column}")
     conn.execute("DROP TABLE api_tokens")
+    conn.execute("DROP TABLE generation_presets")
     conn.execute("DROP TABLE ap_versions")
     conn.execute("ALTER TABLE games DROP COLUMN ap_version")
     conn.execute("ALTER TABLE games DROP COLUMN stopped_at")
@@ -253,7 +254,7 @@ def test_a_database_from_the_first_version_is_upgraded(tmp_path):
         games = admin.get("/api/games").json()
         assert [(g["name"], g["single_claim"], g["finished_at"]) for g in games] == [("Old game", False, None)]
         conn = sqlite3.connect(db_path)
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 18
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 19
         conn.close()
         # tables added since then exist and work
         r = admin.post("/api/signups", json={"name": "After the upgrade"})
@@ -269,6 +270,7 @@ def test_a_database_from_the_first_version_is_upgraded(tmp_path):
         assert admin.get("/api/users").json()[0]["discord_name"] is None
         assert admin.get("/api/users").json()[0]["discord_pings"] == []
         assert admin.get("/api/configs/shared").json() == []
+        assert admin.get("/api/presets").json()["presets"] == []
         # the users table was built anew for the organizer role, with everything that refers to it
         boss = admin.get("/api/auth/status").json()["user"]
         assert boss["username"] == "boss" and boss["role"] == "admin"
