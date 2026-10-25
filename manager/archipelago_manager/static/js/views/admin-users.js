@@ -3,7 +3,8 @@ import { get, post, patch, del, state } from "../api.js";
 import { pageHeader, badge, field, select, adminTabs } from "../components.js";
 import { t, plural } from "../i18n.js";
 
-const ROLES = [["user", t("User")], ["admin", t("Administrator")]];
+// Organizers run sign-up rounds and the games they add or generate, without administering the server
+const ROLES = [["user", t("User")], ["organizer", t("Organizer")], ["admin", t("Administrator")]];
 
 export default async function render({ root, isCurrent }) {
   const host = h("div");
@@ -77,7 +78,8 @@ export default async function render({ root, isCurrent }) {
     });
     const modal = openModal({ title: t("Add a user"),
       body: h("div", { class: "stack" }, field(t("Username"), username),
-        field(t("Password"), pw, t("At least 8 characters. Share it with the user; they can change it after signing in.")), field(t("Role"), role)),
+        field(t("Password"), pw, t("At least 8 characters. Share it with the user; they can change it after signing in.")),
+        field(t("Role"), role, t("Organizers add games, generate and open sign-up rounds, and run those. Users, settings, custom games and ROMs stay with the administrators."))),
       actions: [h("button", { class: "btn", type: "button", onclick: () => modal.close() }, t("Cancel")), save] });
   }
 

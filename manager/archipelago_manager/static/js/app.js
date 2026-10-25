@@ -1,5 +1,5 @@
 import { h, clear, icon, toast, openModal, action, confirmDialog } from "./util.js";
-import { api, state, refreshStatus, setUnauthorizedHandler, isAdmin, post, put, ApiError } from "./api.js";
+import { api, state, refreshStatus, setUnauthorizedHandler, isAdmin, canGenerate, post, put, ApiError } from "./api.js";
 import { banner, loading, field, checkbox } from "./components.js";
 import { t, lang, LANGUAGES, setLanguage } from "./i18n.js";
 
@@ -18,6 +18,7 @@ const ROUTES = [
   [/^\/admin\/users$/, () => import("./views/admin-users.js"), "admin"],
   [/^\/admin\/settings$/, () => import("./views/admin-settings.js"), "admin"],
   [/^\/admin\/log$/, () => import("./views/admin-log.js"), "admin"],
+  [/^\/tokens$/, () => import("./views/tokens.js"), null],
 ];
 
 const app = document.getElementById("app");
@@ -99,19 +100,19 @@ function navLink(href, section, label, iconName) {
 }
 
 function renderShell() {
-  const perms = state.status.permissions;
   const links = [
     navLink("#/", "home", t("Dashboard"), "home"),
     navLink("#/games", "games", t("Games"), "server"),
     navLink("#/configs", "configs", t("My configs"), "file"),
     navLink("#/signups", "signups", t("Sign-ups"), "calendar"),
-    (isAdmin() || perms.generate) ? navLink("#/generate", "generate", t("Generate"), "zap") : null,
+    canGenerate() ? navLink("#/generate", "generate", t("Generate"), "zap") : null,
     navLink("#/worlds", "worlds", t("Custom games"), "package"),
     isAdmin() ? navLink("#/admin/users", "admin", t("Admin"), "settings") : null,
   ];
   view = h("main", { id: "view", class: "view", tabindex: "-1" });
   const userButton = h("button", { class: "btn ghost user-btn", type: "button", "aria-haspopup": "menu" },
-    icon("user", 16), h("span", {}, state.user.username), isAdmin() ? h("span", { class: "badge accent" }, t("admin")) : null);
+    icon("user", 16), h("span", {}, state.user.username), isAdmin() ? h("span", { class: "badge accent" }, t("admin"))
+      : state.user.role === "organizer" ? h("span", { class: "badge accent" }, t("organizer")) : null);
   const menu = h("div", { class: "menu", hidden: true, role: "menu" });
   userButton.onclick = (e) => {
     e.stopPropagation();
@@ -121,7 +122,7 @@ function renderShell() {
   document.addEventListener("click", () => { menu.hidden = true; });
   const topbar = h("header", { class: "topbar" },
       h("div", { class: "topbar-inner" },
-        h("a", { class: "brand", href: "#/" }, h("span", { class: "brand-mark" }, "AP"), h("span", { class: "brand-name" }, "Archipelago Manager")),
+        h("a", { class: "brand", href: "#/" }, h("img", { class: "brand-mark", src: "favicon.svg", alt: "" }), h("span", { class: "brand-name" }, "Archipelago Manager")),
         h("nav", { class: "nav", "aria-label": t("Main") }, links),
         h("div", { class: "user-menu" }, userButton, menu)));
   clear(app).append(topbar, view, h("footer", { class: "footer muted small" }, `Archipelago Manager ${state.status.version}`));
@@ -160,6 +161,7 @@ function drawUserMenu(menu) {
       : state.status.discord_login ? item("link", t("Link Discord"), linkDiscord) : null,
     (user.discord_name || state.status.discord_login) && state.status.ping_kinds.length
       ? item("bell", t("Discord mentions…"), pingsDialog) : null,
+    item("key", t("API tokens"), () => { location.hash = "#/tokens"; }),
     item("globe", LANGUAGES[other], () => {
       if (dirtyCheck?.() && !confirm(t("You have unsaved changes. Leave this page anyway?"))) return;
       setLanguage(other);
@@ -220,6 +222,7 @@ const PING_KINDS = [
   ["game_online", () => t("A game you play in is online")],
   ["hint_found", () => t("Someone found an item that was hinted for you")],
   ["player_stuck", () => t("Someone in a game you play in is stuck")],
+  ["player_inactive", () => t("You have not played a game for a while and the others play on")],
   ["slot_handover", () => t("A slot is offered to you, or looks for a new player")],
   ["signup_open", () => t("Sign-ups open")],
   ["signup_closing", () => t("Sign-ups close soon and you have not entered yet")],
@@ -354,7 +357,7 @@ function renderAuth(notice) {
     error, submit);
     const other = lang === "de" ? "en" : "de";
     clear(card).append(
-      h("div", { class: "auth-brand" }, h("span", { class: "brand-mark large" }, "AP"), h("h1", {}, "Archipelago Manager")),
+      h("div", { class: "auth-brand" }, h("img", { class: "brand-mark large", src: "favicon.svg", alt: "" }), h("h1", {}, "Archipelago Manager")),
       mode === "setup" ? h("p", { class: "muted" }, t("Welcome! Create the administrator account to get started.")) : null,
       form,
       mode !== "setup" && status.discord_login ? [h("div", { class: "auth-or" }, t("or")), discordButton(status)] : null,

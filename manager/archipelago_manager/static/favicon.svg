@@ -1,11 +1,22 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <rect width="64" height="64" rx="14" fill="#0f2a33"/>
-  <g stroke="#3fb7a6" stroke-width="3" stroke-linecap="round">
-    <line x1="18" y1="42" x2="32" y2="20"/>
-    <line x1="32" y1="20" x2="47" y2="42"/>
-    <line x1="18" y1="42" x2="47" y2="42"/>
+  <!-- Archipelago Manager: three islands in one sea, linked like the worlds of a multiworld -->
+  <defs>
+    <linearGradient id="sea" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1b5568"/><stop offset="1" stop-color="#0b1e27"/></linearGradient>
+    <clipPath id="tile"><rect width="64" height="64" rx="14"/></clipPath>
+  </defs>
+  <g clip-path="url(#tile)">
+    <rect width="64" height="64" fill="url(#sea)"/>
+    <path d="M-4 57 q5 -3.5 10 0 t10 0 t10 0 t10 0 t10 0 t10 0 t10 0" fill="none" stroke="#3fb7a6" stroke-width="2.4" stroke-linecap="round" opacity=".45"/>
+    <g fill="none" stroke="#f3f7fb" stroke-width="2.6" stroke-linecap="round" stroke-dasharray="0.1 5" opacity=".9">
+      <path d="M18.5 35 Q20 25 25.5 21.5"/>
+      <path d="M38.5 21.5 Q44 25 45.5 35"/>
+      <path d="M27 46.5 Q32 49 37 46.5"/>
+    </g>
+    <ellipse cx="32" cy="17.5" rx="10" ry="4.2" fill="#ecd9a2"/>
+    <path d="M23.5 17.5 Q32 2 40.5 17.5 Z" fill="#e0a43a"/>
+    <ellipse cx="16" cy="44" rx="11" ry="4.6" fill="#ecd9a2"/>
+    <path d="M6.5 44 Q16 27 25.5 44 Z" fill="#3fb7a6"/>
+    <ellipse cx="48" cy="44" rx="11" ry="4.6" fill="#ecd9a2"/>
+    <path d="M38.5 44 Q48 27 57.5 44 Z" fill="#5aa9ff"/>
   </g>
-  <circle cx="18" cy="42" r="7" fill="#3fb7a6"/>
-  <circle cx="32" cy="20" r="7" fill="#e0a43a"/>
-  <circle cx="47" cy="42" r="7" fill="#5aa9ff"/>
 </svg>

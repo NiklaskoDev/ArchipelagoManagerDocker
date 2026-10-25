@@ -71,9 +71,8 @@ code, .mono { font-family: var(--mono); font-size: .9em; }
 .topbar-inner { max-width: 1180px; margin: 0 auto; padding: 0 16px; display: flex; align-items: center; gap: 20px; min-height: 56px; }
 .brand { display: flex; align-items: center; gap: 10px; color: var(--text); font-weight: 650; white-space: nowrap; }
 .brand:hover { text-decoration: none; }
-.brand-mark { display: inline-grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; background: var(--accent);
-  color: var(--on-accent); font-weight: 800; font-size: .8rem; letter-spacing: .02em; }
-.brand-mark.large { width: 44px; height: 44px; font-size: 1.1rem; border-radius: 12px; }
+.brand-mark { display: block; width: 30px; height: 30px; flex: none; }
+.brand-mark.large { width: 44px; height: 44px; }
 .nav { display: flex; gap: 2px; flex: 1; overflow-x: auto; scrollbar-width: none; }
 .nav::-webkit-scrollbar { display: none; }
 .nav-link { display: inline-flex; align-items: center; gap: 7px; padding: 8px 12px; border-radius: 8px; color: var(--muted);
@@ -355,3 +354,29 @@ input.switch:disabled { opacity: .5; cursor: not-allowed; }
 .away-list { margin: 0; padding-left: 1.2em; display: flex; flex-direction: column; gap: 6px; }
 .away-items { margin: 4px 0 0; padding-left: 1.2em; }
 .slot-said { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px; max-width: 260px; }
+
+/* the spectator page and its overlay for streams (watch.js) */
+.watch-page .page-head { align-items: flex-start; }
+.watch-clock { display: flex; flex-direction: column; align-items: flex-end; }
+.watch-foot { margin-top: 24px; }
+@media (max-width: 720px) { .watch-clock { align-items: flex-start; } }
+.race-clock { font-family: var(--mono); font-size: 2rem; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
+body.overlay { background: transparent; }
+body.overlay #watch { padding: 8px; }
+.ov { --text: #f3f7fb; --muted: #b6c4d4; color: var(--text); background: rgba(9, 15, 24, .78); border-radius: 12px; padding: 12px 14px;
+  display: flex; flex-direction: column; gap: 8px; max-width: 520px; text-shadow: 0 1px 2px rgba(0, 0, 0, .6); }
+.ov-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.ov-name { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ov-clock { display: inline-flex; align-items: baseline; gap: 8px; }
+.ov-clock .race-clock { font-size: 1.5rem; }
+.ov-row { display: grid; grid-template-columns: 1.4em minmax(0, 1.3fr) minmax(60px, 1fr) 4.6em; align-items: center; gap: 10px; }
+.ov-rank { color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
+.ov-player { display: inline-flex; align-items: center; gap: 7px; min-width: 0; }
+.ov-player-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ov .progress { height: 7px; background: rgba(255, 255, 255, .14); border-color: transparent; }
+.ov .progress .bar { background: #52cdbb; }
+.ov .progress .bar.done { background: #3ecf8e; }
+.ov-row.done .ov-value { color: #3ecf8e; }
+.ov-value { text-align: right; font-family: var(--mono); font-weight: 600; font-variant-numeric: tabular-nums; }
+.ov .dot { background: rgba(255, 255, 255, .3); }
+.ov .dot.ok { background: #3ecf8e; box-shadow: none; }

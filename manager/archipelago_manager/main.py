@@ -10,16 +10,16 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import __version__, apbridge, audit, db, notify, schedule, signups, sources, updates, versions
+from . import __version__, apbridge, audit, db, notify, reminders, schedule, signups, sources, updates, versions
 from .config import CONFIG
 from .generation import GENERATION
 from .rooms import ROOMS
 from .textclient import TEXT_CLIENTS
 from .routes import admin, apworlds, auth, configs, games, jobs, roms
-from .routes import versions as version_routes
+from .routes import tokens, versions as version_routes
 from .routes import signups as signup_routes
 from .routes import sources as source_routes
-from .security import CSRF_HEADER, CSRF_VALUE, user_for_request
+from .security import CSRF_HEADER, CSRF_VALUE, SAFE_METHODS, bearer_token, token_for_request, user_for_request
 
 log = logging.getLogger("archipelago_manager")
 
@@ -65,7 +65,7 @@ async def lifespan(_app: FastAPI):
     tasks = [asyncio.create_task(init_archipelago()), asyncio.create_task(ROOMS.watch_progress()),
              asyncio.create_task(ROOMS.watch_idle()),
              asyncio.create_task(signups.run_periodically()), asyncio.create_task(TEXT_CLIENTS.run_periodically()),
-             asyncio.create_task(schedule.run_periodically())]
+             asyncio.create_task(schedule.run_periodically()), asyncio.create_task(reminders.run_periodically())]
     if CONFIG.update_check:  # both talk to GitHub on their own, which UPDATE_CHECK=false rules out
         tasks.append(asyncio.create_task(updates.run_periodically()))
         tasks.append(asyncio.create_task(sources.run_periodically()))
@@ -103,8 +103,11 @@ class BodyLimit:
         admin = user["role"] == "admin"
         if path == "/api/apworlds":
             return upload if admin else min(upload, self.PLAYER_APWORLD_LIMIT)
-        if admin and (path in ("/api/games", "/api/roms") or (path.startswith("/api/games/") and path.endswith("/files"))):
-            return upload  # multiworld zips, extra files of a game, base ROMs
+        if admin and path == "/api/roms":
+            return upload  # base ROMs
+        if user["role"] in ("admin", "organizer") and (
+                path == "/api/games" or (path.startswith("/api/games/") and path.endswith("/files"))):
+            return upload  # multiworld zips, extra files of a game (whose game it is, the route checks)
         return self.SMALL_LIMIT
 
     async def __call__(self, scope, receive, send) -> None:
@@ -171,11 +174,30 @@ def _warn_about_untrusted_proxy(request: Request) -> None:
                 "Set FORWARDED_ALLOW_IPS=%s on the container.", peer, peer, peer)
 
 
+def _token_refusal(request: Request) -> JSONResponse | None:
+    """Why a request with an API token cannot go ahead, if it cannot. Tokens do not manage tokens, passwords, sign-ins
+    or Discord links: a leaked token must not be able to lock its owner out or make itself new tokens."""
+    path = request.url.path
+    if user_for_request(request) is None:
+        return JSONResponse(status_code=401, content={"detail": "This API token is not valid (any more)"})
+    if path.startswith("/api/tokens") or (path.startswith("/api/auth/") and path != "/api/auth/status"):
+        return JSONResponse(status_code=403, content={"detail": "API tokens cannot be used for this. Sign in instead."})
+    if request.method not in SAFE_METHODS and token_for_request(request)["access"] != "write":
+        return JSONResponse(status_code=403, content={"detail": "This API token can only read"})
+    return None
+
+
 @app.middleware("http")
 async def guard(request: Request, call_next):
+    if request.url.path.startswith("/api/") and bearer_token(request) is not None:
+        # A browser cannot send an Authorization header of its own choosing to another site without a CORS preflight,
+        # which we never allow, so a token is no CSRF risk and needs no extra header
+        refusal = _token_refusal(request)
+        if refusal is not None:
+            return refusal
     # Browsers cannot attach a custom header to a cross-site request without a CORS preflight, which we never allow.
     # Requiring it on every state-changing call is therefore a complete CSRF defence next to the SameSite cookie.
-    if (request.method not in ("GET", "HEAD", "OPTIONS") and request.url.path.startswith("/api/")
+    elif (request.method not in SAFE_METHODS and request.url.path.startswith("/api/")
             and request.headers.get(CSRF_HEADER) != CSRF_VALUE):
         return JSONResponse(status_code=403, content={"detail": "Missing request header"})
     _warn_about_untrusted_proxy(request)
@@ -222,7 +244,7 @@ def health() -> dict:
             "ready": apbridge.STATE.info is not None, "archipelago_error": apbridge.STATE.error}
 
 
-for module in (auth, configs, apworlds, source_routes, games, jobs, signup_routes, admin, roms, version_routes):
+for module in (auth, configs, apworlds, source_routes, games, jobs, signup_routes, admin, roms, version_routes, tokens):
     app.include_router(module.router)
 
 app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")

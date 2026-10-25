@@ -619,6 +619,10 @@ class RoomManager:
             return cached[1]["slots"] if cached else {}
         return state["slots"]
 
+    async def save_state(self, game_id: int) -> dict | None:
+        """The server's save as _read_save reads it: progress per slot, hints and checked locations."""
+        return await self._read_save(game_id)
+
     async def _read_save(self, game_id: int) -> dict | None:
         """What the server's save says: progress per slot, the hints and the checked locations per slot. Empty before
         the first save, None if the save could not be read."""

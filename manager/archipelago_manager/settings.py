@@ -12,9 +12,12 @@ REMAINING_MODES = ("enabled", "disabled", "goal")
 COUNTDOWN_MODES = ("enabled", "disabled", "auto")
 LOG_LEVELS = ("debug", "info", "warning", "error", "critical")
 # Kinds of Discord notifications an admin can switch on and off
-NOTIFY_EVENTS = ("game_online", "game_crashed", "player_goal", "player_stuck", "slot_handover", "hint_found", "generation",
-                 "signup", "apworld_pending", "apworld_update", "ap_update")
+NOTIFY_EVENTS = ("game_online", "game_crashed", "player_goal", "player_stuck", "player_inactive", "slot_handover",
+                 "hint_found", "generation", "signup", "apworld_pending", "apworld_update", "ap_update")
 _URL = re.compile(r"^https?://[^\s/?#]+[^\s]*$")
+_DISCORD_WEBHOOK = re.compile(r"^https://(?:(?:ptb|canary)\.)?discord(?:app)?\.com/api/(?:v\d+/)?webhooks/[0-9]+/[\w-]+/?$")
+# Reminding players who stopped playing while the others play on (reminders.py): after how many days, at most
+REMIND_MAX_DAYS = 60
 
 # Per-game options handed to MultiServer.py. auto_shutdown is stored in minutes (the server takes seconds).
 DEFAULT_SERVER_OPTIONS: dict[str, Any] = {
@@ -43,6 +46,7 @@ DEFAULTS: dict[str, Any] = {
     "notify_events": list(NOTIFY_EVENTS),
     "notify_language": "en",
     "notify_mentions": True,  # players who linked Discord may ask to be mentioned (notify.PING_KINDS)
+    "remind_days": 3,  # games that do not say otherwise remind players after this many days without playing; 0: never
     # Address of this web UI as players open it: links in notifications, and where Discord sends people back to
     "site_url": "",
     "discord_login": False,
@@ -98,6 +102,11 @@ def clean_server_options(options: dict[str, Any] | None, *, base: dict[str, Any]
 
 def valid_url(value: str) -> bool:
     return len(value) <= 512 and bool(_URL.match(value))
+
+
+def discord_webhook(value: str) -> bool:
+    """Whether an address is one of Discord's webhooks (what organizers may give their games)."""
+    return len(value) <= 512 and bool(_DISCORD_WEBHOOK.match(value))
 
 
 def get_settings() -> dict[str, Any]:
@@ -160,6 +169,9 @@ def update_settings(patch: dict[str, Any]) -> dict[str, Any]:
         elif key == "discord_client_secret":
             if not isinstance(value, str) or len(value) > 200 or not re.fullmatch(r"[\x21-\x7e]*", value):
                 raise SettingsError("That is not a valid client secret")
+        elif key == "remind_days":
+            if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= REMIND_MAX_DAYS:
+                raise SettingsError(f"Remind players after 0 to {REMIND_MAX_DAYS} days (0: never)")
         elif key == "notify_language":
             if value not in LANGUAGES:
                 raise SettingsError(f"notify_language must be one of: {', '.join(LANGUAGES)}")

@@ -13,11 +13,11 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPExcepti
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from .. import (activity, apbridge, audit, backups, db, gamepaths, gamestore, history, notify, schedule, versions,
-               visits, settings as app_settings, textclient)
+from .. import (activity, apbridge, audit, backups, db, gamepaths, gamestore, history, notify, reminders, schedule,
+               spectate, versions, visits, settings as app_settings, textclient)
 from ..config import CONFIG
 from ..rooms import ROOMS, STATUS_GOAL, RoomError, mask_secrets, sleep_minutes, slot_rules, valid_password
-from ..security import admin_user, current_user, is_admin
+from ..security import current_user, is_admin, manages, organizer_user
 from ..textclient import TEXT_CLIENTS
 
 router = APIRouter(prefix="/api")
@@ -45,19 +45,27 @@ def get_game(game_id: int, user: sqlite3.Row) -> sqlite3.Row:
     row = db.query_one("SELECT * FROM games WHERE id = ?", (game_id,))
     if not row:
         raise HTTPException(404, "No such game")
-    if not (is_admin(user) or row["visibility"] == "all" or is_participant(game_id, user["id"])
+    if not (manages(row, user) or row["visibility"] == "all" or is_participant(game_id, user["id"])
             or is_offered_to(game_id, user["id"])):
         raise HTTPException(404, "No such game")
     return row
 
 
+def managed_game(game_id: int, user: sqlite3.Row) -> sqlite3.Row:
+    """A game this user runs: an administrator, or the organizer who added or generated it."""
+    row = get_game(game_id, user)
+    if not manages(row, user):
+        raise HTTPException(403, "Only the organizer of this game and administrators can do this")
+    return row
+
+
 def can_control(game: sqlite3.Row, user: sqlite3.Row) -> bool:
-    return is_admin(user) or (app_settings.get_setting("users_can_start_rooms")
-                              and is_participant(game["id"], user["id"]))
+    return manages(game, user) or (app_settings.get_setting("users_can_start_rooms")
+                                   and is_participant(game["id"], user["id"]))
 
 
 def file_visible(f: sqlite3.Row, game: sqlite3.Row, user: sqlite3.Row) -> bool:
-    if is_admin(user):
+    if manages(game, user):
         return True
     if f["public"]:
         return True
@@ -126,7 +134,9 @@ def game_summary(row: sqlite3.Row, slots: list[sqlite3.Row], user: sqlite3.Row, 
                   "open_minutes": row["start_open_minutes"], "countdown": bool(row["start_countdown"]),
                   "stage": row["start_stage"] or "planned"} if row["start_at"] else None,
         "goal_count": sum(1 for s in players if s["goal_at"] is not None),
-        "my_slots": [{"slot": s["slot"], "name": s["name"], "game": s["game"]} for s in mine],
+        # with, for a slot whose player was reminded that the others wait (reminders.py), since when they did not play
+        "my_slots": [{"slot": s["slot"], "name": s["name"], "game": s["game"],
+                      "idle_since": reminders.idle_since(row, s) if s["reminders"] else None} for s in mine],
         # slots offered to this user, or to whoever takes them
         "offered_slots": [{"slot": s["slot"], "name": s["name"], "game": s["game"], **handover}
                           for s in slots if (handover := handover_json(s, row, user, mine)) and handover["can_accept"]],
@@ -134,6 +144,7 @@ def game_summary(row: sqlite3.Row, slots: list[sqlite3.Row], user: sqlite3.Row, 
             "SELECT COUNT(*) AS n FROM game_files f JOIN game_slots s ON s.game_id = f.game_id AND s.slot = f.slot "
             "WHERE f.game_id = ? AND f.kind = 'patch' AND s.user_id = ?", (row["id"], user["id"]))["n"] if mine else 0,
         "can_control": bool(can_control(row, user)),
+        "can_manage": manages(row, user),
     }
 
 
@@ -150,11 +161,11 @@ def status_label(status: int, running: bool) -> str:
 def list_games(request: Request, user: sqlite3.Row = Depends(current_user)) -> list[dict]:
     if is_admin(user):
         rows = db.query("SELECT * FROM games ORDER BY id DESC")
-    else:
-        rows = db.query("SELECT g.* FROM games g WHERE g.visibility = 'all' OR EXISTS "
+    else:  # organizers also see the games they run
+        rows = db.query("SELECT g.* FROM games g WHERE g.visibility = 'all' OR (? AND g.created_by = ?) OR EXISTS "
                         "(SELECT 1 FROM game_slots s WHERE s.game_id = g.id AND (s.user_id = ? OR "
                         "(s.handover_at IS NOT NULL AND s.handover_to = ?))) ORDER BY g.id DESC",
-                        (user["id"], user["id"]))
+                        (user["role"] == "organizer", user["id"], user["id"], user["id"]))
     slots = _slots_for([r["id"] for r in rows])
     host = public_host(request)
     return [game_summary(r, slots.get(r["id"], []), user, host) for r in rows]
@@ -163,7 +174,7 @@ def list_games(request: Request, user: sqlite3.Row = Depends(current_user)) -> l
 @router.post("/games")
 async def upload_game(request: Request, file: UploadFile = File(...), name: str = Form(""),
                       start: bool = Form(False), ap_version: str = Form(""),
-                      user: sqlite3.Row = Depends(admin_user)) -> dict:
+                      user: sqlite3.Row = Depends(organizer_user)) -> dict:
     try:
         version = versions.check_choice(ap_version)
     except versions.VersionError as e:
@@ -199,7 +210,7 @@ async def upload_game(request: Request, file: UploadFile = File(...), name: str 
 # ----------------------------------------------------------------------------------------------------------------------
 async def _detail(game_id: int, user: sqlite3.Row, request: Request) -> dict:
     row = get_game(game_id, user)
-    admin = is_admin(user)
+    manager = manages(row, user)
     slots = _slots_for([game_id]).get(game_id, [])
     summary = game_summary(row, slots, user, public_host(request))
     running = summary["state"] in ("starting", "running")
@@ -240,19 +251,25 @@ async def _detail(game_id: int, user: sqlite3.Row, request: Request) -> dict:
         **summary,
         "slots": slot_items, "shared_files": shared,
         "progress": {"checked": checked, "total": total},
-        "password": row["password"] if (admin or summary["my_slots"]) else None,
+        "password": row["password"] if (manager or summary["my_slots"]) else None,
         "options": db.jloads(row["options"], {}),
         "generator_version": row["generator_version"], "min_server_version": row["min_server_version"],
-        "notes": row["notes"], "job_id": row["job_id"],
-        "job_available": bool(job and (admin or job["created_by"] == user["id"])),
+        "job_id": row["job_id"],
+        "job_available": bool(job and (manager or job["created_by"] == user["id"])),
         "share_spoiler_when_done": bool(row["share_spoiler_when_done"]),
     }
-    if admin:
+    if manager:
+        detail["notes"] = row["notes"]  # for whoever runs the game only
         detail["server_password"] = row["server_password"]
         detail["has_save"] = gamepaths.save_path(game_id).is_file()
         # like a password: whoever has it can post to the channel
         detail["discord_webhook_url"] = row["discord_webhook_url"] or ""
         detail["notify_status"] = notify.game_status(game_id)
+        # the link for spectators (spectate.py), and when players are reminded that the others wait for them
+        detail["spectate"] = {"token": row["spectate_token"], "activity": bool(row["spectate_activity"])} \
+            if row["spectate_token"] else None
+        detail["remind_days"] = row["remind_days"]  # None: the server's default
+        detail["remind_days_default"] = app_settings.get_setting("remind_days")
     return detail
 
 
@@ -286,11 +303,21 @@ class GamePatch(BaseModel):
     start_open_minutes: int | None = None
     start_countdown: bool | None = None
     ap_version: str | None = Field(default=None, max_length=20)  # "": the image's
+    spectate_activity: bool | None = None
+    remind_days: int | None = None  # None (sent as null): the server's default; 0: never
+
+
+def _check_webhook(url: str, user: sqlite3.Row) -> None:
+    if not app_settings.valid_url(url):
+        raise HTTPException(400, "The webhook address must start with http:// or https://")
+    # The manager posts to the address it is given: an organizer's game gets Discord's webhooks, not any address
+    if not is_admin(user) and not app_settings.discord_webhook(url):
+        raise HTTPException(400, "Enter the address of a Discord webhook (https://discord.com/api/webhooks/…)")
 
 
 @router.patch("/games/{game_id}")
-async def patch_game(game_id: int, body: GamePatch, request: Request, user: sqlite3.Row = Depends(admin_user)) -> dict:
-    row = get_game(game_id, user)
+async def patch_game(game_id: int, body: GamePatch, request: Request, user: sqlite3.Row = Depends(current_user)) -> dict:
+    row = managed_game(game_id, user)
     changes: dict[str, object] = {}
     given = body.model_fields_set
     restart_required = False
@@ -302,6 +329,9 @@ async def patch_game(game_id: int, body: GamePatch, request: Request, user: sqli
     if "port" in given and body.port is not None:
         if not (1024 <= body.port <= 65535):
             raise HTTPException(400, "Port must be between 1024 and 65535")
+        # the ports published for games; an administrator may know of others
+        if not is_admin(user) and not (CONFIG.port_start <= body.port <= CONFIG.port_end):
+            raise HTTPException(400, f"Pick a port between {CONFIG.port_start} and {CONFIG.port_end}")
         if db.query_one("SELECT 1 FROM games WHERE port = ? AND id != ?", (body.port, game_id)):
             raise HTTPException(409, f"Port {body.port} is already used by another game")
         if body.port != row["port"]:
@@ -363,11 +393,17 @@ async def patch_game(game_id: int, body: GamePatch, request: Request, user: sqli
             restart_required = restart_required or ROOMS.is_active(game_id)
     if "discord_webhook_url" in given and body.discord_webhook_url is not None:
         webhook = body.discord_webhook_url.strip()
-        if webhook and not app_settings.valid_url(webhook):
-            raise HTTPException(400, "The webhook address must start with http:// or https://")
+        if webhook and webhook != row["discord_webhook_url"]:
+            _check_webhook(webhook, user)
         if (webhook or None) != row["discord_webhook_url"]:
             changes["discord_webhook_url"] = webhook or None
             notify.forget_game(game_id)
+    if "spectate_activity" in given and body.spectate_activity is not None:
+        changes["spectate_activity"] = int(body.spectate_activity)
+    if "remind_days" in given:
+        if body.remind_days is not None and not 0 <= body.remind_days <= reminders.MAX_DAYS:
+            raise HTTPException(400, f"Remind players after at most {reminders.MAX_DAYS} days")
+        changes["remind_days"] = body.remind_days
 
     if changes:
         assignments = ", ".join(f"{k} = ?" for k in changes)
@@ -387,8 +423,8 @@ async def patch_game(game_id: int, body: GamePatch, request: Request, user: sqli
 
 
 @router.delete("/games/{game_id}")
-async def remove_game(game_id: int, user: sqlite3.Row = Depends(admin_user)) -> dict:
-    get_game(game_id, user)
+async def remove_game(game_id: int, user: sqlite3.Row = Depends(current_user)) -> dict:
+    managed_game(game_id, user)
     await gamestore.delete_game(game_id)
     notify.forget_game(game_id)
     return {"ok": True}
@@ -400,18 +436,33 @@ class NotificationTest(BaseModel):
 
 
 @router.post("/games/{game_id}/test-notification")
-async def test_game_notification(game_id: int, body: NotificationTest, user: sqlite3.Row = Depends(admin_user)) -> dict:
-    row = get_game(game_id, user)
+async def test_game_notification(game_id: int, body: NotificationTest, user: sqlite3.Row = Depends(current_user)) -> dict:
+    row = managed_game(game_id, user)
     url = (body.discord_webhook_url or "").strip() or row["discord_webhook_url"]
     if not url:
         raise HTTPException(400, "Enter a Discord webhook address first")
-    if not app_settings.valid_url(url):
-        raise HTTPException(400, "The webhook address must start with http:// or https://")
+    if url != row["discord_webhook_url"]:
+        _check_webhook(url, user)
     try:
         await notify.send_test(url, game_id=game_id, game_name=row["name"])
     except notify.DeliveryError as e:
         raise HTTPException(400, str(e)) from None
     return {"ok": True, "notify_status": notify.game_status(game_id)}
+
+
+@router.post("/games/{game_id}/spectate")
+async def new_spectate_link(game_id: int, request: Request, user: sqlite3.Row = Depends(current_user)) -> dict:
+    """A link for spectators (spectate.py): a new one, which ends the old one if there was one."""
+    managed_game(game_id, user)
+    spectate.new_link(game_id)
+    return await _detail(game_id, user, request)
+
+
+@router.delete("/games/{game_id}/spectate")
+async def end_spectate_link(game_id: int, request: Request, user: sqlite3.Row = Depends(current_user)) -> dict:
+    managed_game(game_id, user)
+    spectate.end_link(game_id)
+    return await _detail(game_id, user, request)
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -427,7 +478,7 @@ def _controllable(game_id: int, user: sqlite3.Row) -> sqlite3.Row:
 @router.post("/games/{game_id}/start")
 async def start_game(game_id: int, request: Request, user: sqlite3.Row = Depends(current_user)) -> dict:
     row = _controllable(game_id, user)
-    if row["start_at"] and row["start_stage"] is None and not is_admin(user):
+    if row["start_at"] and row["start_stage"] is None and not manages(row, user):
         raise HTTPException(409, "This game opens at its planned time. An administrator can open it earlier.")
     try:
         await ROOMS.start(game_id, announce=True)
@@ -440,7 +491,7 @@ async def start_game(game_id: int, request: Request, user: sqlite3.Row = Depends
 async def wake_game(game_id: int, request: Request, user: sqlite3.Row = Depends(current_user)) -> dict:
     """A player opened the game page: wakes the game up if it is asleep, and keeps it awake a while longer if not."""
     row = get_game(game_id, user)
-    if not (is_admin(user) or is_participant(game_id, user["id"])):
+    if not (manages(row, user) or is_participant(game_id, user["id"])):
         raise HTTPException(403, "Only the players of this game can wake it up")
     try:
         woken = await ROOMS.wake(game_id)
@@ -469,8 +520,8 @@ async def restart_game(game_id: int, request: Request, user: sqlite3.Row = Depen
 
 
 @router.post("/games/{game_id}/reset-save")
-async def reset_save(game_id: int, request: Request, user: sqlite3.Row = Depends(admin_user)) -> dict:
-    get_game(game_id, user)
+async def reset_save(game_id: int, request: Request, user: sqlite3.Row = Depends(current_user)) -> dict:
+    managed_game(game_id, user)
     if ROOMS.is_active(game_id):
         raise HTTPException(409, "Stop the server before resetting its progress")
     backups.create(game_id, "before-reset")  # so a reset can be undone
@@ -484,15 +535,15 @@ async def reset_save(game_id: int, request: Request, user: sqlite3.Row = Depends
 # backups of the save
 # ----------------------------------------------------------------------------------------------------------------------
 @router.get("/games/{game_id}/backups")
-def list_backups(game_id: int, user: sqlite3.Row = Depends(admin_user)) -> dict:
-    get_game(game_id, user)
+def list_backups(game_id: int, user: sqlite3.Row = Depends(current_user)) -> dict:
+    managed_game(game_id, user)
     return {"backups": backups.listing(game_id), "has_save": gamepaths.save_path(game_id).is_file(),
             "interval_minutes": backups.AUTO_INTERVAL // 60, "keep_auto": backups.KEEP_AUTO}
 
 
 @router.post("/games/{game_id}/backups")
-def create_backup(game_id: int, user: sqlite3.Row = Depends(admin_user)) -> dict:
-    get_game(game_id, user)
+def create_backup(game_id: int, user: sqlite3.Row = Depends(current_user)) -> dict:
+    managed_game(game_id, user)
     entry = backups.create(game_id, "manual")
     if entry is None:
         raise HTTPException(409, "This game has no saved progress yet")
@@ -500,8 +551,8 @@ def create_backup(game_id: int, user: sqlite3.Row = Depends(admin_user)) -> dict
 
 
 @router.post("/games/{game_id}/backups/{name}/restore")
-async def restore_backup(game_id: int, name: str, request: Request, user: sqlite3.Row = Depends(admin_user)) -> dict:
-    get_game(game_id, user)
+async def restore_backup(game_id: int, name: str, request: Request, user: sqlite3.Row = Depends(current_user)) -> dict:
+    managed_game(game_id, user)
     if ROOMS.is_active(game_id):
         raise HTTPException(409, "Stop the server before restoring a backup")
     try:
@@ -513,8 +564,8 @@ async def restore_backup(game_id: int, name: str, request: Request, user: sqlite
 
 
 @router.get("/games/{game_id}/backups/{name}")
-def download_backup(game_id: int, name: str, user: sqlite3.Row = Depends(admin_user)) -> FileResponse:
-    get_game(game_id, user)
+def download_backup(game_id: int, name: str, user: sqlite3.Row = Depends(current_user)) -> FileResponse:
+    managed_game(game_id, user)
     try:
         path = backups.path_of(game_id, name)
     except backups.BackupError as e:
@@ -523,8 +574,8 @@ def download_backup(game_id: int, name: str, user: sqlite3.Row = Depends(admin_u
 
 
 @router.delete("/games/{game_id}/backups/{name}")
-def delete_backup(game_id: int, name: str, user: sqlite3.Row = Depends(admin_user)) -> dict:
-    get_game(game_id, user)
+def delete_backup(game_id: int, name: str, user: sqlite3.Row = Depends(current_user)) -> dict:
+    managed_game(game_id, user)
     try:
         backups.delete(game_id, name)
     except backups.BackupError as e:
@@ -538,8 +589,8 @@ class Command(BaseModel):
 
 @router.post("/games/{game_id}/command")
 async def send_command(game_id: int, body: Command, request: Request,
-                       user: sqlite3.Row = Depends(admin_user)) -> dict:
-    get_game(game_id, user)
+                       user: sqlite3.Row = Depends(current_user)) -> dict:
+    managed_game(game_id, user)
     try:
         await ROOMS.send_command(game_id, body.command)
     except RoomError as e:
@@ -549,8 +600,8 @@ async def send_command(game_id: int, body: Command, request: Request,
 
 
 @router.get("/games/{game_id}/log")
-def game_log(game_id: int, after: int = 0, user: sqlite3.Row = Depends(admin_user)) -> dict:
-    get_game(game_id, user)
+def game_log(game_id: int, after: int = 0, user: sqlite3.Row = Depends(current_user)) -> dict:
+    managed_game(game_id, user)
     return ROOMS.log_since(game_id, after)
 
 
@@ -561,9 +612,10 @@ class SlotAssign(BaseModel):
     user_id: int | None
 
 
-# What a slot forgets when it gets a new player: what the last one said about it, and their offer to hand it over
-NEW_PLAYER = ("player_status = NULL, status_note = NULL, status_at = NULL, "
-              "handover_at = NULL, handover_to = NULL, handover_note = NULL")
+# What a slot forgets when it gets a new player: what the last one said about it, their offer to hand it over and the
+# reminders they got; since when the new one has it (the first parameter)
+NEW_PLAYER = ("player_since = ?, player_status = NULL, status_note = NULL, status_at = NULL, "
+              "handover_at = NULL, handover_to = NULL, handover_note = NULL, reminded_at = NULL, reminders = 0")
 
 
 def _get_slot(game_id: int, slot: int) -> sqlite3.Row:
@@ -623,7 +675,7 @@ async def set_slot_status(game_id: int, slot: int, body: SlotStatus, request: Re
     short note. Everyone who sees the game sees it, and the activity feed has it."""
     game = get_game(game_id, user)
     target = _get_slot(game_id, slot)
-    if not (is_admin(user) or (target["user_id"] is not None and target["user_id"] == user["id"])):
+    if not (manages(game, user) or (target["user_id"] is not None and target["user_id"] == user["id"])):
         raise HTTPException(403, "Only the player of this slot can say how they are doing")
     if target["type"] != 1:
         raise HTTPException(400, "Only player slots have a status")
@@ -673,7 +725,7 @@ async def slot_tracker(game_id: int, slot: int, user: sqlite3.Row = Depends(curr
     """What a slot has received, which of its locations are checked, and its hints. For its owner and admins."""
     game = get_game(game_id, user)
     row = db.query_one("SELECT user_id, type FROM game_slots WHERE game_id = ? AND slot = ?", (game_id, slot))
-    if not row or row["type"] != 1 or (row["user_id"] != user["id"] and not is_admin(user)):
+    if not row or row["type"] != 1 or (row["user_id"] != user["id"] and not manages(game, user)):
         raise HTTPException(404, "No such slot")
     data = dict(await ROOMS.tracker(game_id, slot))
     # the rules the server ran with as of its save; before the first save, the ones it will be started with
@@ -770,8 +822,8 @@ async def text_client_close(game_id: int, slot: int, user: sqlite3.Row = Depends
 
 @router.post("/games/{game_id}/slots/{slot}/assign")
 async def assign_slot(game_id: int, slot: int, body: SlotAssign, request: Request,
-                      user: sqlite3.Row = Depends(admin_user)) -> dict:
-    get_game(game_id, user)
+                      user: sqlite3.Row = Depends(current_user)) -> dict:
+    managed_game(game_id, user)
     target = _get_slot(game_id, slot)
     if target["type"] != 1:
         raise HTTPException(400, "Only player slots can be assigned")
@@ -779,7 +831,7 @@ async def assign_slot(game_id: int, slot: int, body: SlotAssign, request: Reques
         raise HTTPException(404, "No such user")
     if body.user_id != target["user_id"]:  # what the last player said about the slot is not the new one's
         db.execute(f"UPDATE game_slots SET user_id = ?, {NEW_PLAYER} WHERE game_id = ? AND slot = ?",
-                   (body.user_id, game_id, slot))
+                   (body.user_id, time.time(), game_id, slot))
     added = 0
     if body.user_id is not None:
         added = await asyncio.to_thread(gamestore.sync_game_yamls, game_id, slot)
@@ -796,8 +848,9 @@ async def claim_slot(game_id: int, slot: int, request: Request, user: sqlite3.Ro
         if row["single_claim"] and conn.execute("SELECT 1 FROM game_slots WHERE game_id = ? AND user_id = ?",
                                                 (game_id, user["id"])).fetchone():
             raise HTTPException(409, "You already have a slot in this game. Each player may claim only one.")
-        claimed = conn.execute("UPDATE game_slots SET user_id = ? WHERE game_id = ? AND slot = ? AND user_id IS NULL",
-                               (user["id"], game_id, slot)).rowcount
+        claimed = conn.execute(f"UPDATE game_slots SET user_id = ?, {NEW_PLAYER} "
+                               "WHERE game_id = ? AND slot = ? AND user_id IS NULL",
+                               (user["id"], time.time(), game_id, slot)).rowcount
     if not claimed:
         raise HTTPException(409, "Somebody else already claimed that slot")
     added = await asyncio.to_thread(gamestore.sync_game_yamls, game_id, slot)
@@ -810,7 +863,8 @@ async def unclaim_slot(game_id: int, slot: int, request: Request, user: sqlite3.
     target = _get_slot(game_id, slot)
     if target["user_id"] != user["id"]:
         raise HTTPException(403, "That slot is not yours")
-    db.execute(f"UPDATE game_slots SET user_id = NULL, {NEW_PLAYER} WHERE game_id = ? AND slot = ?", (game_id, slot))
+    db.execute(f"UPDATE game_slots SET user_id = NULL, {NEW_PLAYER} WHERE game_id = ? AND slot = ?",
+               (None, game_id, slot))
     return await _detail(game_id, user, request)
 
 
@@ -833,7 +887,7 @@ async def set_handover(game_id: int, slot: int, body: SlotHandover, request: Req
         raise HTTPException(400, "Only player slots can be handed over")
     if target["user_id"] is None:
         raise HTTPException(400, "Nobody plays this slot yet")
-    if not (is_admin(user) or target["user_id"] == user["id"]):
+    if not (manages(game, user) or target["user_id"] == user["id"]):
         raise HTTPException(403, "Only the player of this slot can hand it over")
     note = "".join(ch for ch in " ".join(body.note.split()) if ch.isprintable())
     if len(note) > STATUS_NOTE_LENGTH:
@@ -880,13 +934,13 @@ def _announce_handover(game: sqlite3.Row, slot: sqlite3.Row, owner: str, to: sql
 @router.delete("/games/{game_id}/slots/{slot}/handover")
 async def cancel_handover(game_id: int, slot: int, request: Request, user: sqlite3.Row = Depends(current_user)) -> dict:
     """The player takes their offer back, or the user it was offered to says no."""
-    get_game(game_id, user)
+    game = get_game(game_id, user)
     target = _get_slot(game_id, slot)
-    if not (is_admin(user) or user["id"] in (target["user_id"], target["handover_to"])):
+    if not (manages(game, user) or user["id"] in (target["user_id"], target["handover_to"])):
         raise HTTPException(403, "That slot is not yours")
     db.execute("UPDATE game_slots SET handover_at = NULL, handover_to = NULL, handover_note = NULL "
                "WHERE game_id = ? AND slot = ?", (game_id, slot))
-    if target["handover_to"] == user["id"] and not is_admin(user) and not is_participant(game_id, user["id"]):
+    if target["handover_to"] == user["id"] and not manages(game, user) and not is_participant(game_id, user["id"]):
         # whoever said no may no longer see the game
         return {"declined": True}
     return await _detail(game_id, user, request)
@@ -910,7 +964,7 @@ async def accept_handover(game_id: int, slot: int, request: Request, user: sqlit
                                                  (game_id, user["id"])).fetchone():
             raise HTTPException(409, "You already have a slot in this game. Each player may have only one.")
         conn.execute(f"UPDATE game_slots SET user_id = ?, {NEW_PLAYER} WHERE game_id = ? AND slot = ?",
-                     (user["id"], game_id, slot))
+                     (user["id"], time.time(), game_id, slot))
         previous = conn.execute("SELECT username FROM users WHERE id = ?", (target["user_id"],)).fetchone()
     previous_name = previous["username"] if previous else None
     # the text client spoke in the last player's name
@@ -968,8 +1022,8 @@ def download_my_files(game_id: int, background: BackgroundTasks,
 
 
 @router.get("/games/{game_id}/multidata")
-def download_multidata(game_id: int, user: sqlite3.Row = Depends(admin_user)) -> FileResponse:
-    game = get_game(game_id, user)
+def download_multidata(game_id: int, user: sqlite3.Row = Depends(current_user)) -> FileResponse:
+    game = managed_game(game_id, user)
     path = gamepaths.multidata_path(game_id)
     if not path.is_file():
         raise HTTPException(410, "The file is missing from disk")
@@ -979,8 +1033,8 @@ def download_multidata(game_id: int, user: sqlite3.Row = Depends(admin_user)) ->
 
 @router.post("/games/{game_id}/files")
 async def upload_file(game_id: int, request: Request, file: UploadFile = File(...), slot: int | None = Form(None),
-                      public: bool = Form(False), user: sqlite3.Row = Depends(admin_user)) -> dict:
-    get_game(game_id, user)
+                      public: bool = Form(False), user: sqlite3.Row = Depends(current_user)) -> dict:
+    managed_game(game_id, user)
     if slot is not None:
         _get_slot(game_id, slot)
     tmp = CONFIG.tmp_dir / f"upload-{db.now():.6f}-{user['id']}.bin"
@@ -1008,8 +1062,8 @@ class FilePatch(BaseModel):
 
 @router.patch("/games/{game_id}/files/{file_id}")
 async def patch_file(game_id: int, file_id: int, body: FilePatch, request: Request,
-                     user: sqlite3.Row = Depends(admin_user)) -> dict:
-    get_game(game_id, user)
+                     user: sqlite3.Row = Depends(current_user)) -> dict:
+    managed_game(game_id, user)
     _get_file(game_id, file_id)
     if "slot" in body.model_fields_set:
         if body.slot is not None:
@@ -1021,9 +1075,55 @@ async def patch_file(game_id: int, file_id: int, body: FilePatch, request: Reque
 
 
 @router.delete("/games/{game_id}/files/{file_id}")
-async def delete_file(game_id: int, file_id: int, request: Request, user: sqlite3.Row = Depends(admin_user)) -> dict:
-    get_game(game_id, user)
+async def delete_file(game_id: int, file_id: int, request: Request, user: sqlite3.Row = Depends(current_user)) -> dict:
+    managed_game(game_id, user)
     f = _get_file(game_id, file_id)
     db.execute("DELETE FROM game_files WHERE id = ?", (file_id,))
     (gamepaths.files_dir(game_id) / f["filename"]).unlink(missing_ok=True)
     return await _detail(game_id, user, request)
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+# spectators: a game's link shows it without signing in (spectate.py, watch.html)
+# ----------------------------------------------------------------------------------------------------------------------
+def _watched(token: str) -> sqlite3.Row:
+    game = spectate.game_for(token)
+    if game is None:
+        raise HTTPException(404, "This link does not show a game (any more)")
+    return game
+
+
+@router.get("/watch/{token}")
+async def watch_game(token: str) -> dict:
+    """How far every player got, for spectators: no address, password, user names or files."""
+    game = _watched(token)
+    state = ROOMS.status(game["id"])["state"]
+    if state == "stopped" and ROOMS.is_asleep(game):
+        state = "sleeping"
+    running = state in ("starting", "running")
+    progress = await ROOMS.progress(game["id"])
+    players = []
+    for s in db.query("SELECT * FROM game_slots WHERE game_id = ? AND type = 1 ORDER BY slot", (game["id"],)):
+        p = progress.get(s["slot"], {})
+        players.append({"slot": s["slot"], "name": s["name"], "game": s["game"], "checked": p.get("checked", 0),
+                        "total": s["locations"], "goal_at": history.goal_time(s),
+                        "status": status_label(p.get("status", 0), running),
+                        # what the player says (stuck, on a break, ...), without their note
+                        "player_status": s["player_status"] if s["goal_at"] is None else None})
+    series = history.series(game["id"])
+    for slot in series["slots"]:
+        slot.pop("owner", None)
+    return {"name": game["name"], "state": state, "race_mode": bool(game["race_mode"]),
+            "start": {"at": game["start_at"], "stage": game["start_stage"] or "planned",
+                      "countdown": bool(game["start_countdown"])} if game["start_at"] else None,
+            "finished_at": game["finished_at"], "activity": bool(game["spectate_activity"]),
+            "players": players, "history": series, "now": time.time()}
+
+
+@router.get("/watch/{token}/activity")
+async def watch_activity(token: str, after: int = 0) -> dict:
+    """What happens in the multiworld, if the game shows it to spectators: items, hints, joins and goals."""
+    game = _watched(token)
+    if not game["spectate_activity"]:
+        raise HTTPException(404, "This game does not show its activity to spectators")
+    return spectate.feed(game["id"], after)

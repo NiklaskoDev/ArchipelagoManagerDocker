@@ -1,5 +1,6 @@
 // What happens in the multiworld, for everyone in the game: chat, items, hints, joins and goals (activity.py on the
 // server, read from the server's log). Shown like the text client, in Archipelago's colors, newest at the bottom.
+// Spectators (watch.js) get it from their link, without the chat.
 import { h, clear, withNodes } from "./util.js";
 import { get } from "./api.js";
 import { t } from "./i18n.js";
@@ -23,8 +24,9 @@ function clock(ts) {
     : d.toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 }
 
-export function activitySection({ gameId, mySlots, cleanup, isCurrent }) {
+export function activitySection({ gameId, mySlots, cleanup, isCurrent, source = `/api/games/${gameId}/activity`, spectator = false }) {
   const mine = new Set(mySlots);
+  const filters = spectator ? FILTERS.filter(([key]) => key !== "chat") : FILTERS;
   let entries = [], last = 0, filter = "all", timer = null, loaded = false;
   const list = h("div", { class: "console feed", role: "log", "aria-live": "polite", tabindex: 0 });
   const tabs = h("div", { class: "tabs", role: "tablist", style: { marginBottom: 0 } });
@@ -72,20 +74,21 @@ export function activitySection({ gameId, mySlots, cleanup, isCurrent }) {
   }
 
   function draw(jump = false) {
-    clear(tabs).append(FILTERS.map(([key, label]) => h("button", { class: "tab", type: "button", role: "tab",
+    clear(tabs).append(filters.map(([key, label]) => h("button", { class: "tab", type: "button", role: "tab",
       "aria-selected": String(key === filter), "aria-current": key === filter ? "page" : undefined,
       onclick: () => { filter = key; draw(true); } }, label())));
-    const test = FILTERS.find(([key]) => key === filter)[2];
+    const test = filters.find(([key]) => key === filter)[2];
     const shown = entries.filter((e) => test(e) && (!onlyMine?.input.checked || concerns(e)));
     const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 40;
     clear(list).append(shown.length ? shown.map(line)
-      : h("div", { class: "note" }, loaded ? t("Nothing yet. Chat, items, hints and goals show up here as they happen.") : t("Loading…")));
+      : h("div", { class: "note" }, !loaded ? t("Loading…") : spectator ? t("Nothing yet. Items, hints and goals show up here as they happen.")
+        : t("Nothing yet. Chat, items, hints and goals show up here as they happen.")));
     if (jump || atBottom) list.scrollTop = list.scrollHeight;
   }
 
   async function load() {
     try {
-      const fresh = await get(`/api/games/${gameId}/activity?after=${last}`);
+      const fresh = await get(`${source}?after=${last}`);
       if (!isCurrent()) return;
       if (fresh.last < last) {  // the feed started over (the game was set up again)
         entries = [];
@@ -108,6 +111,7 @@ export function activitySection({ gameId, mySlots, cleanup, isCurrent }) {
 
   return h("div", { class: "section" }, h("div", { class: "card stack" },
     h("div", { class: "card-head" }, h("h2", {}, t("Activity")), onlyMine),
-    h("p", { class: "muted small" }, t("What happens in the multiworld: chat, items sent and found, hints, and who joins and finishes.")),
+    h("p", { class: "muted small" }, spectator ? t("What happens in the multiworld: items sent and found, hints, and who joins and finishes.")
+      : t("What happens in the multiworld: chat, items sent and found, hints, and who joins and finishes.")),
     tabs, list));
 }

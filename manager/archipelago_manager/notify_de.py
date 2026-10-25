@@ -52,6 +52,14 @@ MESSAGES = {
     "In {game}, waiting for items.": "In {game}, wartet auf Gegenstände.",
     "Hinted items they wait for": "Gegenstände mit Hinweis, auf die gewartet wird",
     "**{item}** at {location} in {finder}'s world": "**{item}** bei {location} in der Welt von {finder}",
+    # a player stopped playing while the others play on (reminders.py)
+    "Reminder for {player}": "Erinnerung für {player}",
+    "{player} has not played {game} for {time}, and the others play on.":
+        "{player} hat {game} seit {time} nicht gespielt, und die anderen spielen weiter.",
+    "If they cannot play on, they can hand their slot over on the game page.":
+        "Wer nicht weiterspielen kann, kann den Slot auf der Spielseite übergeben.",
+    "Hinted items of others in their world": "Gegenstände anderer mit Hinweis in dieser Welt",
+    "{player}: {n}": "{player}: {n}",
     # a player hands their slot over
     "{owner} hands {player} over to {user}": "{owner} übergibt {player} an {user}",
     "In {game}: {user} can take over the slot ({world}) on its page, with everything found so far.":

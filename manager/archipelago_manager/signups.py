@@ -222,11 +222,11 @@ def _player_lines(rows: list[sqlite3.Row]) -> str:
 
 
 def _job_owner(signup: sqlite3.Row, user: sqlite3.Row | None) -> sqlite3.Row:
-    """Who a generation job is run as: the admin who asked, else the round's creator, else any admin."""
-    if user is not None:
-        return user
-    owner = db.query_one("SELECT * FROM users WHERE id = ? AND role = 'admin' AND disabled = 0", (signup["created_by"],))
-    owner = owner or db.query_one("SELECT * FROM users WHERE role = 'admin' AND disabled = 0 ORDER BY id")
+    """Who a generation job is run as, and so who runs the game it makes: the round's creator while they may still
+    organize, else whoever asked, else any admin."""
+    owner = db.query_one("SELECT * FROM users WHERE id = ? AND role IN ('admin', 'organizer') AND disabled = 0",
+                         (signup["created_by"],))
+    owner = owner or user or db.query_one("SELECT * FROM users WHERE role = 'admin' AND disabled = 0 ORDER BY id")
     if owner is None:
         raise SignupError("There is no administrator account to run the generation as", 409)
     return owner
@@ -324,7 +324,7 @@ def test(signup_id: int, *, user: sqlite3.Row) -> int:
         if running:
             raise SignupError("A test of this round is already running", 409)
         try:
-            job_id = _start_job(signup, entries(signup_id), user, test=True)
+            job_id = _start_job(signup, entries(signup_id), _job_owner(signup, user), test=True)
         except JobRequestError as e:
             raise SignupError(e.message, e.status, e.missing_games) from None
         db.execute("UPDATE signups SET test_job_id = ? WHERE id = ?", (job_id, signup_id))
