@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
 from pydantic import BaseModel, Field
 
-from .. import __version__, apbridge, audit, backups, db, discord_auth, notify, settings as app_settings, updates
+from .. import __version__, apbridge, audit, backups, db, discord_auth, notify, settings as app_settings, tls, updates
 from ..config import CONFIG
 from ..rooms import ROOMS
 from ..security import admin_user
@@ -26,7 +26,7 @@ router = APIRouter(prefix="/api")
 
 def _settings_json(values: dict) -> dict:
     return {**app_settings.public_settings(values), "port_range": [CONFIG.port_start, CONFIG.port_end],
-            "public_host_from_env": CONFIG.public_host, "notify_status": notify.status(),
+            "public_host_from_env": CONFIG.public_host, "notify_status": notify.status(), "tls_status": tls.status(values),
             "discord_redirect_uri": (values["site_url"] + discord_auth.CALLBACK_PATH) if values["site_url"] else None}
 
 
@@ -54,14 +54,21 @@ class SettingsPatch(BaseModel):
     discord_client_secret: str | None = Field(default=None, max_length=200)
     discord_signup: bool | None = None
     discord_guild_id: str | None = Field(default=None, max_length=64)
+    tls_cert: str | None = Field(default=None, max_length=1024)
+    tls_key: str | None = Field(default=None, max_length=1024)
 
 
 @router.patch("/settings")
 def write_settings(body: SettingsPatch, request: Request, _admin: sqlite3.Row = Depends(admin_user)) -> dict:
     before = app_settings.get_settings()
+    patch = body.model_dump(exclude_unset=True, exclude_none=True)
+    # A certificate the servers could not use is refused here, rather than when the next game starts
+    files = tls.paths({**before, **{k: str(v).strip() for k, v in patch.items() if k in ("tls_cert", "tls_key")}})
     try:
-        updated = app_settings.update_settings(body.model_dump(exclude_unset=True, exclude_none=True))
-    except app_settings.SettingsError as e:
+        if files and files != tls.paths(before):
+            tls.inspect(*files)
+        updated = app_settings.update_settings(patch)
+    except (app_settings.SettingsError, tls.TLSError) as e:
         raise HTTPException(400, str(e)) from None
     audit.note(request, changed=sorted(key for key in updated if updated[key] != before.get(key)))
     return _settings_json(updated)
@@ -113,6 +120,7 @@ async def system_info(_admin: sqlite3.Row = Depends(admin_user)) -> dict:
         "failed_worlds": (apbridge.STATE.info or {}).get("failed", {}),
         "quarantined": apbridge.STATE.quarantined,
         "update": updates.status(),
+        "tls": tls.status(),
         "data_dir": str(CONFIG.data_dir),
         "disk": {"total": usage.total, "free": usage.free},
         "data_bytes": await asyncio.to_thread(_dir_size, CONFIG.data_dir),

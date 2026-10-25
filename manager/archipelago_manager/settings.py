@@ -32,6 +32,8 @@ DEFAULT_SERVER_OPTIONS: dict[str, Any] = {
     "compatibility": 2,
     "use_embedded_options": False,
     "loglevel": "info",
+    # encrypted connections (wss://) when a certificate is set (tls.py); off for clients that cannot encrypt
+    "tls": True,
 }
 
 DEFAULTS: dict[str, Any] = {
@@ -54,6 +56,10 @@ DEFAULTS: dict[str, Any] = {
     "discord_client_secret": "",  # never sent to the browser; see public_settings()
     "discord_signup": False,       # create accounts for Discord users nobody linked yet
     "discord_guild_id": "",        # if set, only members of this Discord server may sign in with Discord
+    # Certificate for encrypted game connections (tls.py), as paths inside the container; the key may be in the
+    # certificate's file. Empty: games are served unencrypted.
+    "tls_cert": CONFIG.tls_cert,
+    "tls_key": CONFIG.tls_key,
 }
 LANGUAGES = ("en", "de")
 
@@ -169,6 +175,10 @@ def update_settings(patch: dict[str, Any]) -> dict[str, Any]:
         elif key == "discord_client_secret":
             if not isinstance(value, str) or len(value) > 200 or not re.fullmatch(r"[\x21-\x7e]*", value):
                 raise SettingsError("That is not a valid client secret")
+        elif key in ("tls_cert", "tls_key"):
+            if not isinstance(value, str) or len(value) > 1024 or "\x00" in value:
+                raise SettingsError("Enter the path of the file in the container, e.g. /config/tls/fullchain.pem")
+            value = value.strip()
         elif key == "remind_days":
             if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= REMIND_MAX_DAYS:
                 raise SettingsError(f"Remind players after 0 to {REMIND_MAX_DAYS} days (0: never)")
@@ -184,6 +194,8 @@ def update_settings(patch: dict[str, Any]) -> dict[str, Any]:
     if after["discord_login"] and not discord_login_ready(after):
         raise SettingsError("To turn on signing in with Discord, enter the client ID, the client secret and the "
                             "address of this web UI")
+    if after["tls_key"] and not after["tls_cert"]:
+        raise SettingsError("Enter the certificate as well as its key")
     with db.connection() as conn:
         for key, value in clean.items():
             conn.execute("INSERT INTO settings(key, value) VALUES (?, ?) "

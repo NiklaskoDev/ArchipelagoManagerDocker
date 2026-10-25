@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from .. import (activity, apbridge, audit, backups, db, gamepaths, gamestore, ggimport, history, notify, reminders,
-               schedule, spectate, versions, visits, settings as app_settings, textclient)
+               schedule, spectate, tls, versions, visits, settings as app_settings, textclient)
 from ..config import CONFIG
 from ..rooms import ROOMS, STATUS_GOAL, RoomError, mask_secrets, sleep_minutes, slot_rules, valid_password
 from ..security import current_user, is_admin, manages, organizer_user
@@ -120,6 +120,8 @@ def game_summary(row: sqlite3.Row, slots: list[sqlite3.Row], user: sqlite3.Row, 
         "desired_state": row["desired_state"],
         "sleep_minutes": sleep_minutes(row),  # 0: never falls asleep
         "port": row["port"], "address": f"{host}:{row['port']}" if row["port"] else None,
+        # encrypted connections (wss): as the server runs, or as it will start
+        "tls": runtime["tls"] if runtime["tls"] is not None else tls.wanted(row),
         "has_password": bool(row["password"]),
         "games": games, "missing_games": apbridge.missing_games(games, row["ap_version"]),
         # the Archipelago version the server runs (players need a client that goes with it); own: not the image's

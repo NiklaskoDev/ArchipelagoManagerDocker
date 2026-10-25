@@ -1,6 +1,6 @@
 import { h, clear, icon, toast, action, confirmDialog, fmtBytes, fmtDate } from "../util.js";
 import { get, patch, put, post, del, refreshStatus } from "../api.js";
-import { pageHeader, field, checkbox, banner, adminTabs, serverOptionsForm, updateBanner, updateStatus, copyField, select, romsCard, deliveryStatus } from "../components.js";
+import { pageHeader, field, checkbox, banner, adminTabs, serverOptionsForm, updateBanner, updateStatus, copyField, select, romsCard, deliveryStatus, tlsBanner } from "../components.js";
 import { t, tServer, plural } from "../i18n.js";
 
 const CALLBACK_PATH = "/api/auth/discord/callback";
@@ -25,15 +25,17 @@ export default async function render({ root, cleanup }) {
   const remindDays = h("input", { class: "input", type: "number", min: 0, max: 60, value: settings.remind_days });
   const discord = notificationsCard(settings);
   const login = discordLoginCard(settings, siteUrl);
+  const encryption = tlsCard(settings);
   useThisPage.onclick = () => { siteUrl.value = location.origin; login.siteChanged(); };
   const saveSettings = h("button", { class: "btn primary", type: "button" }, t("Save settings"));
   saveSettings.onclick = action(async () => {
     const body = { public_host: publicHost.value.trim(), site_url: siteUrl.value.trim(), default_server_options: rules.read(),
-      remind_days: Number(remindDays.value || 0), ...discord.read(), ...login.read() };
+      remind_days: Number(remindDays.value || 0), ...discord.read(), ...login.read(), ...encryption.read() };
     for (const [key, box] of Object.entries(toggles)) body[key] = box.input.checked;
     const saved = await patch("/api/settings", body);
     discord.drawStatus(saved.notify_status);
     login.saved(saved);
+    encryption.drawStatus(saved.tls_status);
     refreshStatus().catch(() => {});  // what players may ask to be mentioned for, in the user menu
     toast(t("Settings saved"), "success");
   });
@@ -105,6 +107,7 @@ export default async function render({ root, cleanup }) {
         field(t("Address of this web UI"), h("div", { class: "row" }, h("div", { class: "grow" }, siteUrl), useThisPage),
           t("Where players open this page, e.g. https://archipelago.example.com. Discord messages link here, and signing in with Discord needs it.")),
         h("div", { class: "stack tight" }, Object.values(toggles))),
+      encryption.node,
       h("div", { class: "card stack" }, h("h2", {}, t("Defaults for new games")),
         h("p", { class: "muted small" }, t("Applied when a game is added. Each game can override them.")), rules.node,
         field(t("Remind players who stopped playing after (days)"), remindDays,
@@ -244,6 +247,49 @@ function notificationsCard(settings) {
     notify_events: boxes.filter((b) => b.box.input.checked).map((b) => b.key),
     notify_mentions: mentions.input.checked,
   });
+  return { node, read, drawStatus };
+}
+
+// The certificate the game servers present for encrypted connections (tls.py). Saved with "Save settings".
+function tlsCard(settings) {
+  const cert = h("input", { class: "input mono", value: settings.tls_cert, autocomplete: "off", spellcheck: false,
+    placeholder: "/config/tls/fullchain.pem" });
+  const key = h("input", { class: "input mono", value: settings.tls_key, autocomplete: "off", spellcheck: false,
+    placeholder: "/config/tls/privkey.pem" });
+  const statusHost = h("div", { class: "stack tight" });
+  const drawStatus = (status) => {
+    clear(statusHost);
+    if (!status.enabled) {
+      statusHost.append(h("p", { class: "muted small" }, t("Off: games are served unencrypted.")));
+      return;
+    }
+    const problem = tlsBanner(status);
+    if (problem) statusHost.append(problem);
+    if (!status.ok) return;
+    statusHost.append(h("dl", { class: "kv" },
+      h("dt", {}, t("For")), h("dd", {}, status.names.join(", ")),
+      h("dt", {}, t("Valid until")), h("dd", {}, fmtDate(status.expires_at)),
+      h("dt", {}, t("Issued by")), h("dd", {}, status.self_signed ? t("itself (self-signed)") : status.issuer || "—")));
+    if (status.self_signed) {
+      statusHost.append(banner("warn", icon("alert", 16), t("Archipelago's clients only accept certificates of a known authority, such as Let's Encrypt. With a self-signed one, players cannot connect.")));
+    }
+    if (status.covers_public_host === false) {
+      statusHost.append(banner("warn", icon("alert", 16), t("The certificate is not for the public address {host}, so players' clients will refuse it. Set the public address to one of the names it is for.", { host: settings.public_host })));
+    }
+    if (status.games_without) {
+      statusHost.append(h("p", { class: "muted small" }, plural(status.games_without,
+        "{n} game is set to run without encryption.", "{n} games are set to run without encryption.")));
+    }
+  };
+  drawStatus(settings.tls_status);
+  const node = h("div", { class: "card stack" }, h("h2", {}, t("Encrypted game connections")),
+    h("p", { class: "muted small" }, t("With a certificate, the game servers accept encrypted connections only (wss://), so passwords and chat do not cross the internet readable. Archipelago's clients switch to it by themselves; players keep entering the same address. The certificate must be for the public address, from an authority such as Let's Encrypt: mount the folder your reverse proxy keeps it in into the container (read only), and enter the paths as the container sees them. Renewed certificates are taken over by the running servers once nobody is connected.")),
+    h("div", { class: "form-grid" },
+      field(t("Certificate"), cert, t("PEM file with the certificate and its chain, e.g. fullchain.pem")),
+      field(t("Private key"), key, t("PEM file without a password, e.g. privkey.pem. Empty if it is in the certificate's file."))),
+    h("p", { class: "muted small" }, t("Leave both empty to turn encryption off.")),
+    statusHost);
+  const read = () => ({ tls_cert: cert.value.trim(), tls_key: key.value.trim() });
   return { node, read, drawStatus };
 }
 

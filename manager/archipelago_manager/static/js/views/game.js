@@ -1,5 +1,5 @@
 import { h, clear, icon, toast, action, confirmDialog, openModal, fmtBytes, fmtAgo, fmtDate, fmtUntil, fmtSpan, shortName,
-         toLocalInput, fromLocalInput } from "../util.js";
+         toLocalInput, fromLocalInput, withNodes } from "../util.js";
 import { api, get, post, patch, del, isAdmin, canGenerate, state } from "../api.js";
 import { stateBadge, badge, chips, progressBar, copyField, copyButton, controlButtons, banner, field, checkbox, select,
          missingGamesPanel, isActive, serverOptionsForm, deliveryStatus } from "../components.js";
@@ -213,7 +213,8 @@ export default async function render({ root, params, cleanup, isCurrent, query }
           : !running && game.state !== "starting" ? h("span", { class: "muted small" }, t("The server is not running right now.")) : null),
       sleepNote(),
       h("dl", { class: "kv" },
-        h("dt", {}, t("Server")), h("dd", {}, game.address ? copyField(game.address)
+        h("dt", {}, t("Server")), h("dd", {}, game.address ? h("div", { class: "row" }, copyField(game.address),
+          game.tls ? h("span", { class: "badge ok" }, icon("lock", 12), t("encrypted")) : null)
           : h("span", { class: "muted" }, game.state === "sleeping" ? t("Gets a port when it wakes up") : t("No port assigned"))),
         game.password ? [h("dt", {}, t("Password")), h("dd", {}, copyField(game.password))] : null,
         game.my_slots.length ? [h("dt", {}, plural(game.my_slots.length, "Your slot", "Your slots")),
@@ -224,7 +225,9 @@ export default async function render({ root, params, cleanup, isCurrent, query }
         h("dt", {}, t("Progress")), h("dd", {}, progressBar(game.progress.checked, game.progress.total))),
       h("p", { class: "muted small" }, game.password
         ? t("In your Archipelago client, enter the server address, your slot name and the password.")
-        : t("In your Archipelago client, enter the server address and your slot name."))));
+        : t("In your Archipelago client, enter the server address and your slot name."),
+        game.tls && game.address ? [" ", withNodes(t("The connection is encrypted; a client that does not find that out by itself takes {address}."),
+          { address: h("span", { class: "mono" }, `wss://${game.address}`) })] : null)));
   }
 
   // -------------------------------------------------------------------------------------------------------------------
@@ -335,7 +338,7 @@ export default async function render({ root, params, cleanup, isCurrent, query }
   }
 
   function signature() {
-    return JSON.stringify([game.state, game.error, game.slots, game.progress, game.password, game.address, game.missing_games, game.my_slots,
+    return JSON.stringify([game.state, game.error, game.slots, game.progress, game.password, game.address, game.tls, game.missing_games, game.my_slots,
       game.finished_at, game.start, game.sleep_minutes, game.offered_slots]);
   }
   function drawLive() {

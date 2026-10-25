@@ -1,6 +1,6 @@
 import { h, clear, icon, fmtBytes, fmtSpan } from "../util.js";
 import { get, state, isAdmin, isOrganizer } from "../api.js";
-import { pageHeader, missingGamesPanel, gameCard, empty, updateBanner } from "../components.js";
+import { pageHeader, missingGamesPanel, gameCard, empty, updateBanner, tlsBanner } from "../components.js";
 import { signupCard } from "./signups.js";
 import { t, plural } from "../i18n.js";
 
@@ -82,6 +82,7 @@ export default async function render({ root, cleanup, isCurrent }) {
   root.append(
     pageHeader(t("Welcome, {name}", { name: state.user.username }), admin ? t("Overview of this server.") : t("Your games and player configs.")),
     system?.update?.update_available ? h("div", { class: "page-banner" }, updateBanner(system.update)) : null,
+    tlsBanner(system?.tls) ? h("div", { class: "page-banner" }, tlsBanner(system.tls)) : null,
     missingHost,
     system ? h("div", { class: "grid tiles" },
       tile(`${system.running_games} / ${system.games}`, t("Games running")),

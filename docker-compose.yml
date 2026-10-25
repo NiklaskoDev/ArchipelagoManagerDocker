@@ -23,5 +23,9 @@ services:
       # ADMIN_PASSWORD: "change-me-please"
       # Behind a reverse proxy: trust its X-Forwarded-* headers (use the proxy's address, not * on the open internet).
       # FORWARDED_ALLOW_IPS: "172.18.0.2"
+      # Optional: encrypt game connections (wss) with your domain's certificate, as paths inside the container.
+      # TLS_CERT: "/certs/live/example.com/fullchain.pem"
+      # TLS_KEY: "/certs/live/example.com/privkey.pem"
     volumes:
       - ./config:/config
+      # - /path/to/letsencrypt:/certs:ro   # where your reverse proxy keeps its certificates

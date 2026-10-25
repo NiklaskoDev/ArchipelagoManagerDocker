@@ -445,6 +445,8 @@ export function serverOptionsForm(opts) {
   const noCheat = checkbox(t("Disable !getitem (item cheat)"), opts.disable_item_cheat);
   const embedded = checkbox(t("Use the hint/release options stored in the seed"), opts.use_embedded_options,
     t("Seeds created on archipelago.gg carry the options chosen there."));
+  const tls = checkbox(t("Encrypted connections (wss)"), opts.tls,
+    t("When a certificate is set under Admin → Settings. Turn it off for a game whose clients cannot encrypt; a running server changes over once nobody is connected."));
   const node = h("div", { class: "stack" },
     h("div", { class: "form-grid" },
       field(t("Hint cost (%)"), o.hint_cost, t("Share of a player's locations that earns one hint")),
@@ -455,15 +457,31 @@ export function serverOptionsForm(opts) {
       field(t("Falls asleep after (minutes)"), o.auto_shutdown_minutes,
         t("With nobody connected. A player wakes it up again by opening the game page.")),
       field(t("Log level"), o.loglevel)),
-    awake, noCheat, embedded);
+    awake, noCheat, embedded, tls);
   const read = () => ({
     hint_cost: Number(o.hint_cost.value), location_check_points: Number(o.location_check_points.value),
     auto_shutdown_minutes: awake.input.checked ? 0 : Number(o.auto_shutdown_minutes.value),
     release_mode: o.release_mode.value, collect_mode: o.collect_mode.value, remaining_mode: o.remaining_mode.value,
     countdown_mode: o.countdown_mode.value, compatibility: Number(o.compatibility.value), loglevel: o.loglevel.value,
-    disable_item_cheat: noCheat.input.checked, use_embedded_options: embedded.input.checked,
+    disable_item_cheat: noCheat.input.checked, use_embedded_options: embedded.input.checked, tls: tls.input.checked,
   });
   return { node, read };
+}
+
+// What admins must know about the certificate for encrypted game connections (tls.py), or null if all is well
+export function tlsBanner(status) {
+  if (!status?.enabled) return null;
+  const link = h("a", { href: "#/admin/settings" }, t("Admin → Settings"));
+  if (!status.ok) {
+    return banner("error", icon("lock", 18), h("div", { class: "grow" },
+      h("strong", {}, t("Games with encrypted connections cannot start.")), " ", tServer(status.error), " ",
+      h("div", { class: "small" }, withNodes(t("Fix the certificate under {where}, or turn off encrypted connections in the games' settings."), { where: link }))));
+  }
+  if (!status.expires_soon) return null;
+  return banner(status.expired ? "error" : "warn", icon("lock", 18), h("div", { class: "grow" },
+    h("strong", {}, status.expired ? t("The certificate for encrypted connections expired on {date}.", { date: fmtDate(status.expires_at) })
+      : t("The certificate for encrypted connections expires on {date}.", { date: fmtDate(status.expires_at) })), " ",
+    h("div", { class: "small" }, t("Players' clients refuse an expired certificate. Renew it: running servers take the new one over by themselves once nobody is connected."))));
 }
 
 export function adminTabs(current) {
