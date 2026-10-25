@@ -284,6 +284,26 @@ def add_entry(signup_id: int, body: NewEntry, user: sqlite3.Row = Depends(curren
     return {**signup_detail(signup_id, user), "warnings": result["warnings"]}
 
 
+class MysteryPick(BaseModel):
+    game: str = Field(max_length=200)
+    weight: int = 1
+    random: bool = False
+
+
+class MysteryPicks(BaseModel):
+    games: list[MysteryPick] = Field(max_length=mystery.MAX_GAMES + 1)
+
+
+@router.post("/mystery-weights")
+async def mystery_weights(body: MysteryPicks, _user: sqlite3.Row = Depends(organizer_user)):
+    """A mystery round's weights from a list of games (mystery.weights_for), to set or to change further by hand."""
+    try:
+        return {"yaml": await mystery.weights_for([p.model_dump() for p in body.games])}
+    except mystery.WeightsError as e:
+        return JSONResponse(status_code=409 if e.missing_games else 400,
+                            content={"detail": e.message, "missing_games": e.missing_games})
+
+
 class MysteryEntry(BaseModel):
     player_name: str = Field(max_length=64)
 

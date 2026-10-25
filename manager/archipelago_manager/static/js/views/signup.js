@@ -77,12 +77,60 @@ export async function openSignupForm({ signup = null, onSaved }) {
   };
   const weightsField = field(t("Weights"), h("div", { class: "stack tight" }, weights,
     h("div", { class: "row" }, h("button", { class: "btn sm", type: "button", onclick: () => weightsFile.click() }, icon("upload", 14), t("Load a file")), weightsFile)),
-    t("One player file with weights over games and options, like a mystery yaml. Every entry is this file with its player's name; changing it changes them all."));
+    t("One player file with weights over games and options, like a mystery yaml: written from the games above, or by hand. Every entry is this file with its player's name; changing it changes them all."));
+  // or put the weights together from a list of games: how often each comes up, and its default or random options
+  const picks = [];
+  const picksHost = h("div", { class: "stack tight" });
+  const pickInput = h("input", { class: "input", list: listId, placeholder: t("Type a game and press Enter") });
+  const drawPicks = () => {
+    clear(picksHost).append(picks.length ? picks.map((pick) => {
+      const weight = h("input", { class: "input opt-number sm", type: "number", min: 0, max: 1000, value: pick.weight,
+        "aria-label": t("Weight of {game}", { game: pick.game }) });
+      weight.oninput = () => { pick.weight = Math.max(0, Math.round(Number(weight.value) || 0)); };
+      const how = select([["default", t("Its default options")], ["random", t("Every option at random")]], pick.random ? "random" : "default");
+      how.setAttribute("aria-label", t("Options of {game}", { game: pick.game }));
+      how.onchange = () => { pick.random = how.value === "random"; };
+      return h("div", { class: "row", style: { flexWrap: "nowrap" } },
+        h("span", { class: "grow" }, pick.game), weight, h("div", { style: { width: "220px" } }, how),
+        h("button", { class: "btn ghost icon-only sm", type: "button", "aria-label": t("Remove {game}", { game: pick.game }),
+          onclick: () => { picks.splice(picks.indexOf(pick), 1); drawPicks(); } }, icon("x", 12)));
+    }) : h("span", { class: "muted small" }, t("No games picked yet.")));
+  };
+  const addPick = () => {
+    const value = pickInput.value.trim();
+    if (!value) return;
+    const match = known.find((g) => g.toLowerCase() === value.toLowerCase());
+    if (!match) { toast(t("\"{game}\" is not installed on this server", { game: value }), "error"); return; }
+    if (!picks.some((p) => p.game === match)) picks.push({ game: match, weight: 1, random: false });
+    pickInput.value = "";
+    drawPicks();
+  };
+  pickInput.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); addPick(); } });
+  drawPicks();
+  const writeWeights = h("button", { class: "btn sm", type: "button" }, icon("edit", 14), t("Write the weights"));
+  writeWeights.onclick = action(async () => {
+    if (!picks.length) throw new Error(t("Pick at least one game"));
+    if (weights.value.trim() && !(await confirmDialog(t("The weights below are replaced by ones for the picked games."),
+      { title: t("Replace the weights?"), confirmText: t("Replace") }))) return;
+    try {
+      weights.value = (await post("/api/mystery-weights", { games: picks })).yaml;
+    } catch (err) {
+      if (err.data?.missing_games?.length) promptMissingGames(err.data.missing_games.map((game) => ({ game })));
+      throw err;
+    }
+  });
+  const builder = h("div", { class: "card stack tight", style: { background: "var(--surface-2)" } },
+    h("span", { class: "field-label" }, t("Pick the games")),
+    h("p", { class: "muted small", style: { margin: 0 } }, t("Each game comes up as often as its weight says, against the others: 3 and 1 means three times as often. With every option at random, each option that can be left to chance is, except deathlink, progression balancing and accessibility.")),
+    picksHost,
+    h("div", { class: "row" }, h("div", { class: "grow" }, pickInput),
+      h("button", { class: "btn sm", type: "button", onclick: addPick }, icon("plus", 14), t("Add")), writeWeights));
+
   const allowedField = field(t("Allowed games"), h("div", { class: "stack tight" }, chipsHost, h("div", { class: "row" }, h("div", { class: "grow" }, gameInput),
     h("button", { class: "btn sm", type: "button", onclick: addGame }, icon("plus", 14), t("Add")))),
     t("Leave empty to allow every installed game."));
   const syncMystery = () => {
-    weightsField.hidden = !mysteryBox.input.checked;
+    weightsField.hidden = builder.hidden = !mysteryBox.input.checked;
     allowedField.hidden = mysteryBox.input.checked;
   };
   mysteryBox.input.addEventListener("change", syncMystery);
@@ -129,7 +177,7 @@ export async function openSignupForm({ signup = null, onSaved }) {
         field(t("Deadline"), deadline, signup?.status === "closed" ? t("Reopen the round to take entries again.") : t("Sign-ups close automatically at this time.")),
         field(t("Configs per player"), perUser)),
       noDeadline,
-      mysteryBox, weightsField, allowedField,
+      mysteryBox, builder, weightsField, allowedField,
       h("datalist", { id: listId }, known.map((g) => h("option", { value: g }))),
       h("div", { class: "stack tight" }, autoGenerate, hostAfter),
       h("details", {}, h("summary", { class: "muted" }, t("Generation options")),

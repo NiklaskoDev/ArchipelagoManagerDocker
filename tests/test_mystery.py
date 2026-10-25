@@ -123,3 +123,32 @@ def test_a_round_becomes_a_mystery_round_only_while_nobody_entered(admin, make_u
     assert r.status_code == 200 and not r.json()["mystery"]
     assert admin.get(f"/api/signups/{sid}/mystery.yaml").status_code == 404
     admin.delete(f"/api/signups/{sid}")
+
+
+def test_mystery_weights_come_from_a_list_of_games(admin, make_user):
+    _name, org = make_user("org", role="organizer")
+    _name, ann = make_user("ann")
+    picks = [{"game": "ChecksFinder", "weight": 3}, {"game": "APQuest", "weight": 1, "random": True}]
+    assert ann.post("/api/mystery-weights", json={"games": picks}).status_code == 403
+    r = org.post("/api/mystery-weights", json={"games": picks})
+    assert r.status_code == 200, r.text
+    doc = yaml.safe_load(r.json()["yaml"])
+    assert doc["game"] == {"ChecksFinder": 3, "APQuest": 1} and doc["ChecksFinder"] == {}
+    # every option of the game that can be left to chance, but not the ones nobody should find out by chance
+    assert doc["APQuest"] and set(doc["APQuest"].values()) == {"random"}
+    assert not {"progression_balancing", "accessibility", "death_link"} & set(doc["APQuest"])
+    # it is what a round takes, and it rolls
+    rolled = ann.post("/api/configs/roll", json={"content": r.json()["yaml"]}).json()["rolled"]
+    assert rolled[0]["game"] in ("ChecksFinder", "APQuest")
+    created = org.post("/api/signups", json={"name": f"Picked {time.time_ns()}", "mystery": True,
+                                             "mystery_weights": r.json()["yaml"]})
+    assert created.status_code == 200 and created.json()["mystery_games"] == ["APQuest", "ChecksFinder"]
+    org.delete(f"/api/signups/{created.json()['id']}")
+
+    for wrong, status in (([], 400), ([{"game": "ChecksFinder", "weight": 0}], 400),
+                          ([{"game": "ChecksFinder"}, {"game": "ChecksFinder"}], 400),
+                          ([{"game": "ChecksFinder", "weight": 1001}], 400),
+                          ([{"game": "Not A Game"}], 409)):
+        r = org.post("/api/mystery-weights", json={"games": wrong})
+        assert r.status_code == status, (wrong, r.text)
+    assert r.json()["missing_games"] == ["Not A Game"]

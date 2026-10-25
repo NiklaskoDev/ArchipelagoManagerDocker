@@ -96,7 +96,7 @@ SKIP = {("POST", "/api/configs"), ("POST", "/api/configs/text"), ("POST", "/api/
         ("PUT", "/api/games/{game_id}/slots/{slot}/status"),
         ("POST", "/api/configs/form/read"), ("POST", "/api/configs/form/write"), ("POST", "/api/configs/roll"),
         ("POST", "/api/signups/{signup_id}/entries"), ("POST", "/api/signups/{signup_id}/entries/{entry_id}/refresh"),
-        ("POST", "/api/signups/{signup_id}/mystery-entries")}
+        ("POST", "/api/signups/{signup_id}/mystery-entries"), ("POST", "/api/mystery-weights")}
 # Recorded for everyone, not only administrators
 FOR_EVERYONE = {"game.start", "game.stop", "game.restart", "slot.action", "slot.handover_accept"}
 

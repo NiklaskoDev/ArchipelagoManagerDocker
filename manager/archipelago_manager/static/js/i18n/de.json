@@ -1267,7 +1267,6 @@
   "Players join with just a player name. Nobody knows their game before it is generated.": "Spieler treten nur mit einem Spielernamen bei. Niemand kennt sein Spiel, bevor es generiert ist.",
   "Weights": "Gewichte",
   "Load a file": "Datei laden",
-  "One player file with weights over games and options, like a mystery yaml. Every entry is this file with its player's name; changing it changes them all.": "Eine Spielerdatei mit Gewichten über Spiele und Optionen, wie eine Mystery-YAML. Jeder Eintrag ist diese Datei mit dem Namen seines Spielers; änderst du sie, ändern sich alle.",
   "Mystery": "Mystery",
   "Everyone joins with a player name and plays what the round's weights roll for them, out of these games:": "Jeder tritt mit einem Spielernamen bei und spielt, was die Gewichte der Runde für ihn auswürfeln, aus diesen Spielen:",
   "The weights": "Die Gewichte",
@@ -1279,7 +1278,19 @@
   "You get a game and options rolled from the round's weights when the game is generated.": "Spiel und Optionen werden beim Generieren aus den Gewichten der Runde für dich ausgewürfelt.",
   "Join with a player name {until}, until {date}.": "Tritt bis {date} mit einem Spielernamen bei ({until}).",
   "Join with a player name until the organizer closes the round.": "Tritt mit einem Spielernamen bei, bis die Runde geschlossen wird.",
-  "You have not joined yet.": "Du bist noch nicht dabei."
+  "You have not joined yet.": "Du bist noch nicht dabei.",
+  "One player file with weights over games and options, like a mystery yaml: written from the games above, or by hand. Every entry is this file with its player's name; changing it changes them all.": "Eine Spielerdatei mit Gewichten über Spiele und Optionen, wie eine Mystery-YAML: aus den Spielen oben geschrieben oder von Hand. Jeder Eintrag ist diese Datei mit dem Namen seines Spielers; änderst du sie, ändern sich alle.",
+  "Weight of {game}": "Gewicht von {game}",
+  "Its default options": "Seine Standardoptionen",
+  "Every option at random": "Jede Option zufällig",
+  "Options of {game}": "Optionen von {game}",
+  "No games picked yet.": "Noch keine Spiele ausgewählt.",
+  "Write the weights": "Gewichte schreiben",
+  "Pick at least one game": "Wähle mindestens ein Spiel",
+  "The weights below are replaced by ones for the picked games.": "Die Gewichte unten werden durch welche für die ausgewählten Spiele ersetzt.",
+  "Replace the weights?": "Gewichte ersetzen?",
+  "Pick the games": "Spiele auswählen",
+  "Each game comes up as often as its weight says, against the others: 3 and 1 means three times as often. With every option at random, each option that can be left to chance is, except deathlink, progression balancing and accessibility.": "Jedes Spiel kommt im Verhältnis zu den anderen so oft dran, wie sein Gewicht sagt: 3 und 1 heißt dreimal so oft. Mit „Jede Option zufällig“ wird jede Option dem Zufall überlassen, die das zulässt, außer Deathlink, Progression Balancing und Accessibility."
  },
  "server": {
   " (line {0})": " (Zeile {0})",
@@ -1617,7 +1628,13 @@
   "The weights of a mystery round describe one player, which every entry is a copy of": "Die Gewichte einer Mystery-Runde beschreiben einen Spieler, von dem jeder Eintrag eine Kopie ist",
   "The weights cannot be generated: {0}": "Mit diesen Gewichten lässt sich nicht generieren: {0}",
   "Not installed on this server: {0}": "Auf diesem Server nicht installiert: {0}",
-  "This is a mystery round: join it with your player name": "Das ist eine Mystery-Runde: Tritt ihr mit deinem Spielernamen bei"
+  "This is a mystery round: join it with your player name": "Das ist eine Mystery-Runde: Tritt ihr mit deinem Spielernamen bei",
+  "Pick at least one game": "Wähle mindestens ein Spiel",
+  "Pick at most {0} games": "Wähle höchstens {0} Spiele",
+  "Each game can be picked once": "Jedes Spiel kann nur einmal ausgewählt werden",
+  "A game's weight is a whole number from 0 to {0}": "Das Gewicht eines Spiels ist eine ganze Zahl von 0 bis {0}",
+  "At least one game needs a weight above 0": "Mindestens ein Spiel braucht ein Gewicht über 0",
+  "The options of {0} are not known on this server": "Die Optionen von {0} sind auf diesem Server nicht bekannt"
  },
  "server_extra": [
   " (line {0})",
