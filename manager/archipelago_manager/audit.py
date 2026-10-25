@@ -78,6 +78,9 @@ ACTIONS: dict[tuple[str, str], str] = {
     ("POST", "/api/jobs"): "job.start",
     ("POST", "/api/jobs/{job_id}/cancel"): "job.cancel",
     ("DELETE", "/api/jobs/{job_id}"): "job.delete",
+    ("POST", "/api/presets"): "job.preset_add",
+    ("PUT", "/api/presets/{preset_id}"): "job.preset_change",
+    ("DELETE", "/api/presets/{preset_id}"): "job.preset_delete",
     ("POST", "/api/signups"): "signup.add",
     ("PATCH", "/api/signups/{signup_id}"): "signup.change",
     ("DELETE", "/api/signups/{signup_id}"): "signup.delete",
@@ -110,7 +113,7 @@ _TARGETS = [
     (re.compile(r"^/api/apworld-sources/(\d+)(?:/|$)"), "source", "SELECT repo FROM apworld_sources WHERE id = ?"),
     (re.compile(r"^/api/configs/(\d+)(?:/|$)"), "config", "SELECT name FROM configs WHERE id = ?"),
 ]
-_ID_PARAMS = {"game_id", "user_id", "signup_id", "job_id", "apworld_id", "source_id", "config_id", "token_id"}
+_ID_PARAMS = {"game_id", "user_id", "signup_id", "job_id", "apworld_id", "source_id", "config_id", "token_id", "preset_id"}
 
 
 def watched(request: Request) -> bool:

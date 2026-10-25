@@ -1,6 +1,6 @@
 import { h, clear, icon, toast, action, confirmDialog, openModal, fmtAgo, fmtDate, fmtUntil, toLocalInput, fromLocalInput } from "../util.js";
 import { api, get, post, patch, del, state } from "../api.js";
-import { banner, badge, chips, field, checkbox, select, missingGamesPanel, missingRomsPanel, promptMissingGames } from "../components.js";
+import { banner, badge, chips, field, checkbox, select, missingGamesPanel, missingRomsPanel, promptMissingGames, presetBar, gameSettingsSection } from "../components.js";
 import { t, plural, tServer } from "../i18n.js";
 
 const SPOILER_CHOICES = [[1, t("Basic spoiler log")], [0, t("No spoiler log")], [2, t("With playthrough")], [3, t("Playthrough and paths")]];
@@ -19,9 +19,12 @@ export function deadlineText(signup) {
 
 // Create (no `signup`) or edit a round. `onSaved` receives the round as the server returns it.
 export async function openSignupForm({ signup = null, onSaved }) {
-  const worlds = await get("/api/worlds").catch(() => ({ games: [] }));
+  const presets = presetBar({ read: readOptions, apply: applyOptions });
+  const [worlds, presetData] = await Promise.all([get("/api/worlds").catch(() => ({ games: [] })),
+    presets.load().catch(() => ({ server_defaults: null }))]);
   const known = worlds.games.map((g) => g.name);
-  const opts = signup?.options || { spoiler: 1, race: false, skip_prog_balancing: false, plando: ["bosses", "connections", "texts"], host_after: true };
+  const opts = signup?.options || { spoiler: 1, race: false, skip_prog_balancing: false, plando: ["bosses", "connections", "texts"], host_after: true,
+    server_options: null };
 
   const name = h("input", { class: "input", maxLength: 120, value: signup?.name || "", placeholder: t("e.g. Friday run") });
   const description = h("textarea", { class: "input", rows: 3, maxLength: 2000, value: signup?.description || "",
@@ -141,6 +144,28 @@ export async function openSignupForm({ signup = null, onSaved }) {
   const race = checkbox(t("Race mode"), opts.race, t("Spoiler log is withheld and patches are encrypted where supported."));
   const skipBalance = checkbox(t("Skip progression balancing"), opts.skip_prog_balancing);
   const plando = PLANDO.map(([key, label]) => ({ key, box: checkbox(label, opts.plando.includes(key)) }));
+  const gameSettings = presetData.server_defaults ? gameSettingsSection(opts.server_options, presetData.server_defaults) : null;
+  const generationDetails = h("details", {}, h("summary", { class: "muted" }, t("Generation options")),
+    h("div", { class: "stack", style: { marginTop: "10px" } },
+      field(t("Spoiler log"), spoiler), h("div", { class: "stack tight" }, race, skipBalance),
+      h("div", { class: "stack tight" }, h("span", { class: "field-label" }, t("Allowed plando")), h("div", { class: "row" }, plando.map((p) => p.box)))));
+
+  // what a template (presets.py) holds, as far as a round has it: no meta.yaml and no Archipelago version of its own
+  function readOptions() {
+    return { spoiler: Number(spoiler.value), race: race.input.checked, skip_prog_balancing: skipBalance.input.checked,
+      plando: plando.filter((p) => p.box.input.checked).map((p) => p.key), host_after: hostAfter.input.checked,
+      meta: null, ap_version: null, server_options: gameSettings ? gameSettings.read() : null };
+  }
+  function applyOptions(o) {
+    spoiler.value = String(o.spoiler);
+    race.input.checked = o.race;
+    skipBalance.input.checked = o.skip_prog_balancing;
+    for (const p of plando) p.box.input.checked = o.plando.includes(p.key);
+    hostAfter.input.checked = o.host_after;
+    generationDetails.open = true;
+    gameSettings?.apply(o.server_options);
+    return o.meta || o.ap_version ? t("A round has no meta.yaml or Archipelago version of its own, so the template's are left out.") : "";
+  }
 
   const save = h("button", { class: "btn primary", type: "button" }, signup ? t("Save") : t("Open sign-ups"));
   save.onclick = action(async () => {
@@ -154,7 +179,8 @@ export async function openSignupForm({ signup = null, onSaved }) {
       allowed_games: allowed, auto_generate: autoGenerate.input.checked, mystery: mysteryBox.input.checked,
       ...(mysteryBox.input.checked && weights.value !== weightsText ? { mystery_weights: weights.value } : {}),
       options: { spoiler: Number(spoiler.value), race: race.input.checked, skip_prog_balancing: skipBalance.input.checked,
-        plando: plando.filter((p) => p.box.input.checked).map((p) => p.key), host_after: hostAfter.input.checked },
+        plando: plando.filter((p) => p.box.input.checked).map((p) => p.key), host_after: hostAfter.input.checked,
+        server_options: gameSettings ? gameSettings.read() : opts.server_options },
     };
     let result;
     try {
@@ -180,10 +206,7 @@ export async function openSignupForm({ signup = null, onSaved }) {
       mysteryBox, builder, weightsField, allowedField,
       h("datalist", { id: listId }, known.map((g) => h("option", { value: g }))),
       h("div", { class: "stack tight" }, autoGenerate, hostAfter),
-      h("details", {}, h("summary", { class: "muted" }, t("Generation options")),
-        h("div", { class: "stack", style: { marginTop: "10px" } },
-          field(t("Spoiler log"), spoiler), h("div", { class: "stack tight" }, race, skipBalance),
-          h("div", { class: "stack tight" }, h("span", { class: "field-label" }, t("Allowed plando")), h("div", { class: "row" }, plando.map((p) => p.box)))))),
+      presets.node, generationDetails, gameSettings?.node),
     actions: [h("button", { class: "btn", type: "button", onclick: () => modal.close() }, t("Cancel")), save],
   });
   syncMystery();

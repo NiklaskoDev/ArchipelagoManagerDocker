@@ -24,6 +24,8 @@ const ACTIONS = {
   "source.update": () => t("Installed a new release"), "source.check": () => t("Checked for a new release"), "source.delete": () => t("Removed a GitHub repository"),
   "config.change": () => t("Changed a config"), "config.delete": () => t("Deleted a config"), "config.share": () => t("Shared or stopped sharing a config"),
   "job.start": () => t("Started a generation"), "job.cancel": () => t("Cancelled a generation"), "job.delete": () => t("Deleted a generation"),
+  "job.preset_add": () => t("Saved a template of generation options"), "job.preset_change": () => t("Changed a template of generation options"),
+  "job.preset_delete": () => t("Deleted a template of generation options"),
   "signup.add": () => t("Opened a sign-up round"), "signup.change": () => t("Changed a sign-up round"), "signup.delete": () => t("Deleted a sign-up round"),
   "signup.close": () => t("Closed a sign-up round"), "signup.reopen": () => t("Reopened a sign-up round"), "signup.generate": () => t("Generated a sign-up round"),
   "signup.test": () => t("Test-generated a sign-up round"), "signup.entry_delete": () => t("Removed an entry"),

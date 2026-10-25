@@ -18,7 +18,7 @@ import threading
 import time
 from pathlib import Path
 
-from . import apbridge, configstore, db, notify, yamlinfo
+from . import apbridge, configstore, db, notify, settings as app_settings, yamlinfo
 from .config import CONFIG
 from .generation import (GENERATION, PLANDO_OPTIONS, JobRequestError, PreparedPlayer, check_players, create_job,
                          prepare_player)
@@ -29,7 +29,8 @@ TICK_SECONDS = 20
 REMIND_BEFORE = 24 * 3600
 MAX_CONFIGS_PER_USER = 20
 DEFAULT_OPTIONS = {"spoiler": 1, "race": False, "skip_prog_balancing": False,
-                   "plando": ["bosses", "connections", "texts"], "host_after": True}
+                   "plando": ["bosses", "connections", "texts"], "host_after": True,
+                   "server_options": None}  # the game's server settings; None: the defaults for new games
 
 # Closing and generating change a round in several steps. The routes run in worker threads and the deadline check in
 # the event loop, so a plain lock keeps them from closing or generating the same round twice.
@@ -78,6 +79,14 @@ def clean_options(options: dict | None) -> dict:
             raise SignupError(f"{key} must be true or false")
     if not isinstance(result["plando"], list) or any(p not in PLANDO_OPTIONS for p in result["plando"]):
         raise SignupError("Unknown plando option")
+    if result["server_options"] is not None:
+        if not isinstance(result["server_options"], dict):
+            raise SignupError("The settings for the new game are not valid")
+        try:
+            result["server_options"] = app_settings.clean_server_options(
+                result["server_options"], base=app_settings.get_setting("default_server_options"))
+        except app_settings.SettingsError as e:
+            raise SignupError(str(e)) from None
     return result
 
 
@@ -366,7 +375,7 @@ def _start_job(signup: sqlite3.Row, rows: list[sqlite3.Row], owner: sqlite3.Row,
     opts = clean_options(db.jloads(signup["options"], {}))
     return create_job(owner, _players(signup, rows), name=signup["name"], spoiler=opts["spoiler"], race=opts["race"],
                       seed=None, skip_prog_balancing=opts["skip_prog_balancing"], plando=opts["plando"], meta=None,
-                      host_after=opts["host_after"], test=test)
+                      host_after=opts["host_after"], test=test, server_options=opts["server_options"])
 
 
 def generate(signup_id: int, *, user: sqlite3.Row | None = None) -> int:

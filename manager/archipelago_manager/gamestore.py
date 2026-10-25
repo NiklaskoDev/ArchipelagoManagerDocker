@@ -99,7 +99,8 @@ def _version_text(parts: list[int]) -> str:
 
 async def import_game(src: Path, original_name: str, *, name: str | None = None, created_by: int | None = None,
                       source: str = "upload", job_id: int | None = None,
-                      owners: dict[str, int] | None = None, ap_version: str | None = None) -> int:
+                      owners: dict[str, int] | None = None, ap_version: str | None = None,
+                      server_options: dict | None = None) -> int:
     """Turns an uploaded zip or .archipelago file into a hosted-ready game. Returns the new game id.
 
     `ap_version` is the Archipelago version the game is to run on (None: the image's); it reads the file, too.
@@ -132,7 +133,9 @@ async def import_game(src: Path, original_name: str, *, name: str | None = None,
 
         stem = Path(original_name).stem
         display = (name or "").strip() or (stem if stem and not stem.startswith("AP_") else f"Seed {meta['seed_name']}")
-        options = app_settings.get_setting("default_server_options")
+        # the defaults, unless the generation asked for others (a template's, presets.py)
+        options = app_settings.clean_server_options(server_options) if server_options else \
+            app_settings.get_setting("default_server_options")
 
         for attempt in range(3):
             port = allocate_port()
