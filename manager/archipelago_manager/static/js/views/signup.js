@@ -238,8 +238,10 @@ export default async function render({ root, params, cleanup, isCurrent }) {
     if (signup.status === "open" && signup.open) {
       return banner("info", icon("calendar", 18), h("div", { class: "grow" },
         h("strong", {}, t("Sign-ups are open.")), " ",
-        signup.deadline ? t("Enter your config {until}, until {date}.", { until: fmtUntil(signup.deadline), date: fmtDate(signup.deadline) })
-          : t("Enter your config until the organizer closes the round."),
+        signup.mystery ? (signup.deadline ? t("Join with a player name {until}, until {date}.", { until: fmtUntil(signup.deadline), date: fmtDate(signup.deadline) })
+          : t("Join with a player name until the organizer closes the round."))
+          : signup.deadline ? t("Enter your config {until}, until {date}.", { until: fmtUntil(signup.deadline), date: fmtDate(signup.deadline) })
+            : t("Enter your config until the organizer closes the round."),
         h("div", { class: "small muted" }, t("You can still change or withdraw your entry until then."))));
     }
     if (signup.status === "generating") {
@@ -382,7 +384,7 @@ export default async function render({ root, params, cleanup, isCurrent }) {
           signup.open ? h("button", { class: "btn sm", type: "button", onclick: action(async () => {
             if (await confirmDialog(t("You can join again as long as the round is open."), { title: t("Withdraw this entry?"), confirmText: t("Withdraw") })) await run("DELETE", `/api/signups/${id}/entries/${e.id}`);
           }) }, t("Withdraw")) : null),
-        e.issues.map((issue) => h("div", { class: "form-error" }, tServer(issue)))))) : h("p", { class: "muted" }, t("You have not entered yet.")),
+        e.issues.map((issue) => h("div", { class: "form-error" }, tServer(issue)))))) : h("p", { class: "muted" }, t("You have not joined yet.")),
       canEnter ? h("div", { class: "stack tight" },
         h("span", { class: "field-label" }, mine.length ? t("Join with another player name") : t("Join with your player name")),
         h("div", { class: "row" }, h("div", { class: "grow" }, playerName), join),

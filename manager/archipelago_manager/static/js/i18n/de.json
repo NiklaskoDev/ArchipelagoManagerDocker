@@ -1276,7 +1276,10 @@
   "You can join again as long as the round is open.": "Du kannst wieder beitreten, solange die Runde offen ist.",
   "Join with another player name": "Mit einem weiteren Spielernamen beitreten",
   "Join with your player name": "Mit deinem Spielernamen beitreten",
-  "You get a game and options rolled from the round's weights when the game is generated.": "Spiel und Optionen werden beim Generieren aus den Gewichten der Runde für dich ausgewürfelt."
+  "You get a game and options rolled from the round's weights when the game is generated.": "Spiel und Optionen werden beim Generieren aus den Gewichten der Runde für dich ausgewürfelt.",
+  "Join with a player name {until}, until {date}.": "Tritt bis {date} mit einem Spielernamen bei ({until}).",
+  "Join with a player name until the organizer closes the round.": "Tritt mit einem Spielernamen bei, bis die Runde geschlossen wird.",
+  "You have not joined yet.": "Du bist noch nicht dabei."
  },
  "server": {
   " (line {0})": " (Zeile {0})",
