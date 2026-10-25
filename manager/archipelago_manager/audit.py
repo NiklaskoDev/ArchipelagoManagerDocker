@@ -40,6 +40,9 @@ ACTIONS: dict[tuple[str, str], str] = {
     ("POST", "/api/games/{game_id}/slots/{slot}/assign"): "slot.assign",
     ("POST", "/api/games/{game_id}/slots/{slot}/claim"): "slot.claim",
     ("POST", "/api/games/{game_id}/slots/{slot}/unclaim"): "slot.unclaim",
+    ("PUT", "/api/games/{game_id}/slots/{slot}/handover"): "slot.handover",
+    ("DELETE", "/api/games/{game_id}/slots/{slot}/handover"): "slot.handover_cancel",
+    ("POST", "/api/games/{game_id}/slots/{slot}/handover/accept"): "slot.handover_accept",
     ("POST", "/api/games/{game_id}/files"): "game.file_add",
     ("PATCH", "/api/games/{game_id}/files/{file_id}"): "game.file_change",
     ("DELETE", "/api/games/{game_id}/files/{file_id}"): "game.file_delete",
@@ -49,6 +52,8 @@ ACTIONS: dict[tuple[str, str], str] = {
     ("POST", "/api/system/check-updates"): "system.check_updates",
     ("POST", "/api/system/reload-worlds"): "system.reload_worlds",
     ("POST", "/api/system/backup"): "system.backup",
+    ("POST", "/api/ap-versions"): "system.version_install",
+    ("DELETE", "/api/ap-versions/{version}"): "system.version_remove",
     ("POST", "/api/users"): "user.add",
     ("PATCH", "/api/users/{user_id}"): "user.change",
     ("DELETE", "/api/users/{user_id}"): "user.delete",
@@ -85,7 +90,7 @@ SKIP = {("POST", "/api/configs"), ("POST", "/api/configs/text"), ("POST", "/api/
         ("POST", "/api/configs/form/read"), ("POST", "/api/configs/form/write"),
         ("POST", "/api/signups/{signup_id}/entries"), ("POST", "/api/signups/{signup_id}/entries/{entry_id}/refresh")}
 # Recorded for everyone, not only administrators
-FOR_EVERYONE = {"game.start", "game.stop", "game.restart", "slot.action"}
+FOR_EVERYONE = {"game.start", "game.stop", "game.restart", "slot.action", "slot.handover_accept"}
 
 # What a request acts on, from its path, and how to find its name
 _TARGETS = [

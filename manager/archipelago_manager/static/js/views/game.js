@@ -21,6 +21,7 @@ export default async function render({ root, params, cleanup, isCurrent, query }
   const admin = isAdmin();
   let game = await get(`/api/games/${id}`);
   const users = admin ? await get("/api/users") : [];
+  const apVersions = admin ? await get("/api/ap-versions") : null;
 
   const headerHost = h("div");
   // what happened while the player was away, for players of the game
@@ -55,8 +56,13 @@ export default async function render({ root, params, cleanup, isCurrent, query }
           game.job_available && (admin || state.status?.permissions?.generate)
             ? h("a", { class: "btn sm", href: `#/generate?from=${game.job_id}` }, icon("restart", 14), t("Generate again")) : null)),
       startBanner(),
+      offersBanner(),
       game.state === "crashed" ? banner("error", icon("alert", 18), h("div", { class: "grow" },
         h("strong", {}, t("The server stopped unexpectedly.")), " ", game.error ? tServer(game.error) : t("See the console for details."))) : null,
+      game.ap_version_missing ? banner("error", icon("alert", 18), h("div", { class: "grow" },
+        h("strong", {}, t("Archipelago {version} is not installed on this server.", { version: game.ap_version })), " ",
+        admin ? t("This game runs on it. Install it again under Admin → Settings, or choose another version in the game's settings.")
+          : t("This game runs on it, so it cannot start until an administrator installs it again."))) : null,
       game.missing_games.length ? missingGamesPanel(game.missing_games.map((g) => ({ game: g, configs: [], games: [{ id, name: game.name }], pending: [] })),
         refresh) : null);
   }
@@ -84,6 +90,84 @@ export default async function render({ root, params, cleanup, isCurrent, query }
     ].filter(Boolean).join(" ");
     return banner(opened ? "ok" : "info", icon("calendar", 18), h("div", { class: "grow" },
       h("div", {}, t("Starts {date}", { date: fmtDate(start.at) }), " · ", left), h("div", { class: "muted small" }, how)));
+  }
+
+  // Slots their players hand over to this user, or to whoever takes them
+  function offersBanner() {
+    if (!game.offered_slots.length) return null;
+    return h("div", { class: "stack tight page-banner" }, game.offered_slots.map((o) => banner("info", icon("users", 18),
+      h("div", { class: "grow" },
+        h("div", {}, o.to_me ? t("{owner} wants to hand {slot} ({game}) over to you.", { owner: o.from, slot: o.name, game: o.game })
+          : t("{owner} is looking for someone to take over {slot} ({game}).", { owner: o.from, slot: o.name, game: o.game })),
+        h("div", { class: "muted small" }, o.note ? `“${o.note}” · ` : "", t("You get its files and continue where they left off."))),
+      h("div", { class: "row" }, acceptButton(o, "primary"), o.to_me ? declineButton(o) : null))));
+  }
+
+  function acceptButton(slot, kind = "") {
+    return h("button", { class: `btn sm ${kind}`, type: "button", onclick: action(async () => {
+      if (!(await confirmDialog(t("You become the player of {slot}: its files, its YAML and everything found so far are yours, and {owner} no longer plays it.",
+        { slot: slot.name, owner: slot.handover?.from ?? slot.from }), { title: t("Take over {slot}?", { slot: slot.name }), confirmText: t("Take over") }))) return;
+      const result = await post(`/api/games/${id}/slots/${slot.slot}/handover/accept`);
+      applyGame(result);
+      toast(t("You now own {slot}", { slot: slot.name }), "success");
+      if (result.configs_added) toast(t("Your YAML was added to your configs"), "success");
+    }) }, t("Take over"));
+  }
+
+  function declineButton(slot) {
+    return h("button", { class: "btn sm ghost", type: "button", onclick: action(async () => {
+      const result = await del(`/api/games/${id}/slots/${slot.slot}/handover`);
+      toast(t("You said no to {slot}", { slot: slot.name }), "success");
+      if (result.declined) location.hash = "#/games";  // the game was only visible for the offer
+      else applyGame(result);
+    }) }, t("No, thanks"));
+  }
+
+  // The player hands their slot over: to a user they name, or to whoever takes it. It stays theirs until then.
+  function handoverDialog(slot) {
+    let anyone = true;
+    const name = `handover-${slot.slot}`;
+    const user = h("input", { class: "input", autocomplete: "off", disabled: true, placeholder: t("Their user name on this server") });
+    const choices = [[true, t("Whoever takes it"), game.visibility === "all" ? t("Everyone on this server can see this game and take the slot.")
+      : t("Everyone in this game can take the slot.")], [false, t("A particular user"), t("Only they can take it; they see this game until they do or say no.")]];
+    const radios = choices.map(([value, label, hint]) => {
+      const input = h("input", { type: "radio", name, checked: value === anyone });
+      input.onchange = () => { anyone = value; user.disabled = anyone; if (!anyone) user.focus(); };
+      return h("label", { class: "check" }, input, h("span", {}, label, h("span", { class: "hint" }, hint)));
+    });
+    const note = h("input", { class: "input", maxlength: STATUS_NOTE_LENGTH, placeholder: t("For example: I have no time any more, the next item is in the Water Temple") });
+    const save = h("button", { class: "btn primary", type: "button" }, t("Hand over"));
+    const modal = openModal({
+      title: t("Hand over {slot}", { slot: slot.name }),
+      body: h("div", { class: "stack" },
+        h("p", { class: "muted small" }, t("Whoever takes the slot over gets its files and its YAML, and plays on from where you are. Until then it stays yours, and you can take the offer back.")),
+        h("div", { class: "stack tight" }, radios), field(t("User"), user), field(t("Note"), note)),
+      actions: [h("button", { class: "btn", type: "button", onclick: () => modal.close() }, t("Cancel")), save],
+    });
+    save.onclick = action(async () => {
+      if (!anyone && !user.value.trim()) throw new Error(t("Enter the user name of whoever should take it over"));
+      applyGame(await api("PUT", `/api/games/${id}/slots/${slot.slot}/handover`, { to: anyone ? null : user.value.trim(), note: note.value }));
+      modal.close();
+      toast(t("{slot} is offered", { slot: slot.name }), "success");
+    });
+  }
+
+  // Who a slot is handed over to, and what the viewer can do about it
+  function handoverLine(slot) {
+    const o = slot.handover;
+    if (!o) return null;
+    const mine = slot.mine || admin;
+    return h("div", { class: "stack tight" },
+      h("span", { class: "small" }, badge(t("Handing over"), "warn"), " ",
+        o.to ? (o.to_me ? t("to you") : t("to {user}", { user: o.to })) : t("to whoever takes it")),
+      o.note ? h("span", { class: "muted small" }, o.note) : null,
+      h("div", { class: "row" },
+        o.can_accept && !slot.mine ? acceptButton(slot, "primary") : null,
+        o.to_me ? declineButton(slot) : null,
+        mine ? h("button", { class: "btn sm ghost", type: "button", onclick: action(async () => {
+          applyGame(await del(`/api/games/${id}/slots/${slot.slot}/handover`));
+          toast(t("The offer is taken back"), "success");
+        }) }, t("Take back")) : null));
   }
 
   // A game that falls asleep: a player's visit wakes it up, and keeps it from falling asleep for a while
@@ -119,6 +203,8 @@ export default async function render({ root, params, cleanup, isCurrent, query }
         game.my_slots.length ? [h("dt", {}, plural(game.my_slots.length, "Your slot", "Your slots")),
           h("dd", { class: "stack tight" }, game.my_slots.map((s) => h("div", { class: "row" },
             copyField(s.name), h("span", { class: "muted" }, s.game))))] : null,
+        h("dt", {}, "Archipelago"), h("dd", {}, game.ap_version || "—",
+          game.ap_version_own ? h("span", { class: "muted small" }, " ", t("(use a client of this version)")) : null),
         h("dt", {}, t("Progress")), h("dd", {}, progressBar(game.progress.checked, game.progress.total))),
       h("p", { class: "muted small" }, game.password
         ? t("In your Archipelago client, enter the server address, your slot name and the password.")
@@ -185,13 +271,16 @@ export default async function render({ root, params, cleanup, isCurrent, query }
             "Copied {n} config files from this game into the user's library"), "success");
         } catch (err) { toast(err.message, "error"); applyGame(await get(`/api/games/${id}`)); }
       };
-      return sel;
+      return h("div", { class: "stack tight" }, sel, handoverLine(slot));
     }
     if (slot.mine) {
-      return h("span", { class: "row" }, h("strong", {}, t("You")),
-        h("button", { class: "btn sm ghost", type: "button", onclick: action(async () => applyGame(await post(`/api/games/${id}/slots/${slot.slot}/unclaim`))) }, t("Release")));
+      return h("div", { class: "stack tight" }, h("span", { class: "row" }, h("strong", {}, t("You")),
+        slot.handover ? null : h("button", { class: "btn sm ghost", type: "button", title: t("Let someone else play on from where you are"),
+          onclick: () => handoverDialog(slot) }, t("Hand over")),
+        h("button", { class: "btn sm ghost", type: "button", onclick: action(async () => applyGame(await post(`/api/games/${id}/slots/${slot.slot}/unclaim`))) }, t("Release"))),
+        handoverLine(slot));
     }
-    if (slot.owner) return slot.owner;
+    if (slot.owner) return slot.handover ? h("div", { class: "stack tight" }, h("span", {}, slot.owner), handoverLine(slot)) : slot.owner;
     if (slot.claimable) {
       return h("button", { class: "btn sm primary", type: "button", onclick: action(async () => {
         const result = await post(`/api/games/${id}/slots/${slot.slot}/claim`);
@@ -231,7 +320,7 @@ export default async function render({ root, params, cleanup, isCurrent, query }
 
   function signature() {
     return JSON.stringify([game.state, game.error, game.slots, game.progress, game.password, game.address, game.missing_games, game.my_slots,
-      game.finished_at, game.start, game.sleep_minutes]);
+      game.finished_at, game.start, game.sleep_minutes, game.offered_slots]);
   }
   function drawLive() {
     drawnSignature = signature();
@@ -506,6 +595,14 @@ export default async function render({ root, params, cleanup, isCurrent, query }
     const shareSpoiler = checkbox(t("Share the spoiler log with the players when everyone has finished"), game.share_spoiler_when_done,
       t("When every player has reached their goal (or you move the game to the archive), the spoiler log becomes visible to every player in the game."));
     const rules = serverOptionsForm(opts);
+    // the Archipelago version the server runs on: the server's own, or one installed besides it
+    const versionChoices = [["", t("This server's ({version})", { version: apVersions.default || "?" })],
+      ...apVersions.versions.filter((v) => v.status === "installed" || v.version === game.ap_version_own)
+        .map((v) => [v.version, v.status === "installed" ? v.version : t("{version} (not installed)", { version: v.version })])];
+    if (game.ap_version_own && !versionChoices.some(([value]) => value === game.ap_version_own)) {
+      versionChoices.push([game.ap_version_own, t("{version} (not installed)", { version: game.ap_version_own })]);
+    }
+    const apVersion = select(versionChoices, game.ap_version_own || "");
     // a planned start; the field holds minutes, so an unchanged value is not sent back
     let plannedValue = toLocalInput(game.start?.at);
     const startAt = h("input", { class: "input", type: "datetime-local", value: plannedValue });
@@ -530,14 +627,14 @@ export default async function render({ root, params, cleanup, isCurrent, query }
       const body = { name: name.value, password: password.value, server_password: adminPassword.value, options,
         visibility: visibility.value, claimable: claimable.input.checked, single_claim: singleClaim.input.checked,
         notes: notes.value, share_spoiler_when_done: shareSpoiler.input.checked, discord_webhook_url: webhook.value.trim(),
-        start_open_minutes: Number(openMinutes.value || 0), start_countdown: countdown.input.checked };
+        start_open_minutes: Number(openMinutes.value || 0), start_countdown: countdown.input.checked, ap_version: apVersion.value };
       if (startAt.value !== plannedValue) body.start_at = fromLocalInput(startAt.value);
       if (port.value) body.port = Number(port.value);
       const result = await patch(`/api/games/${id}`, body);
       game = result;
       plannedValue = toLocalInput(game.start?.at);
       drawLive();
-      toast(result.restart_required ? t("Saved. Restart the server to apply the port or startup options.") : t("Settings saved"), "success");
+      toast(result.restart_required ? t("Saved. Restart the server for the changes to take effect.") : t("Settings saved"), "success");
     });
     return h("details", { class: "card" }, h("summary", {}, t("Settings")),
       h("div", { class: "stack" },
@@ -545,7 +642,8 @@ export default async function render({ root, params, cleanup, isCurrent, query }
           field(t("Name"), name), field(t("Port"), port, t("Must be mapped in Docker. Takes effect after a restart.")),
           field(t("Room password"), password, t("Players need it to connect")),
           field(t("Remote admin password"), adminPassword, t("Lets clients use !admin; leave empty to disable")),
-          field(t("Who can see this game"), visibility)),
+          field(t("Who can see this game"), visibility),
+          field(t("Archipelago version"), apVersion, t("What the server runs, and what players need a client of. Further versions are installed under Admin → Settings."))),
         claimable, singleClaim, shareSpoiler, field(t("Notes"), notes),
         h("h3", {}, t("Planned start")),
         h("p", { class: "muted small" }, t("The server opens by itself before the start and is announced on Discord; until then only administrators can start it. The results time every goal from the start, to the second.")),

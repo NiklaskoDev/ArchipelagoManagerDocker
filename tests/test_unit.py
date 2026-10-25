@@ -385,3 +385,14 @@ def test_the_activity_feed_keeps_what_players_see(tmp_path, monkeypatch):
         assert [e["text"] for e in activity.entries(game_id, after=1)["entries"]] == ["second"]
     finally:
         activity.forget(game_id)
+
+
+def test_custom_worlds_go_into_the_versions_they_work_with():
+    assert apbridge.parse_version("0.6.2") == (0, 6, 2) and apbridge.parse_version("v0.5.1") == (0, 5, 1)
+    assert apbridge.parse_version("") is None and apbridge.parse_version("next") is None
+    assert apbridge.works_with({}, (0, 5, 0))
+    assert apbridge.works_with({"minimum_ap_version": "0.6.0"}, (0, 6, 2))
+    assert not apbridge.works_with({"minimum_ap_version": "0.6.0"}, (0, 5, 1))
+    assert not apbridge.works_with({"maximum_ap_version": "0.5.1"}, (0, 6, 2))
+    assert apbridge.works_with({"minimum_ap_version": "0.5.0", "maximum_ap_version": "0.6.9"}, (0, 6, 2))
+    assert apbridge.works_with({"minimum_ap_version": "nonsense"}, (0, 6, 2))

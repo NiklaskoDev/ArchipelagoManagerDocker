@@ -12,8 +12,8 @@ import pytest
 from helpers import (APClient, FakeWebhook, build_apworld, make_game, player_yaml, run_job, save_now, server_pid,
                      upload_yaml, wait_for, wait_state)
 
-ALL_EVENTS = ["game_online", "game_crashed", "player_goal", "player_stuck", "hint_found", "generation", "signup",
-              "apworld_pending", "apworld_update", "ap_update"]
+ALL_EVENTS = ["game_online", "game_crashed", "player_goal", "player_stuck", "slot_handover", "hint_found", "generation",
+              "signup", "apworld_pending", "apworld_update", "ap_update"]
 CHECKS_FINDER_BASE = 81000  # ChecksFinder's locations are "Tile 1" (81000) to "Tile 25"
 
 

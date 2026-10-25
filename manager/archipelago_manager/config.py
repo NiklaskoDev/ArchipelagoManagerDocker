@@ -50,6 +50,8 @@ class Config:
     # Look for newer Archipelago releases on GitHub (once at start, then twice a day) so admins know to update.
     update_check: bool
     releases_url: str
+    # Where further Archipelago versions are downloaded from (versions.py); {version} is the release, such as 0.6.2
+    ap_source_url: str
     # GitHub's API, for custom games that come from a repository's releases (replaced by a fake in tests)
     github_api: str
     # Discord's OAuth2 endpoints, for signing in with Discord (replaced by a fake in tests)
@@ -113,6 +115,8 @@ def load_config() -> Config:
         update_check=os.environ.get("UPDATE_CHECK", "true").strip().lower() not in ("0", "false", "no", "off"),
         releases_url=os.environ.get("AP_RELEASES_URL",
                                     "https://api.github.com/repos/ArchipelagoMW/Archipelago/releases/latest"),
+        ap_source_url=os.environ.get(
+            "AP_SOURCE_URL", "https://github.com/ArchipelagoMW/Archipelago/archive/refs/tags/{version}.tar.gz"),
         github_api=os.environ.get("GITHUB_API_URL", "https://api.github.com").rstrip("/"),
         discord_api=os.environ.get("DISCORD_API_URL", "https://discord.com/api/v10").rstrip("/"),
         discord_authorize=os.environ.get("DISCORD_AUTHORIZE_URL", "https://discord.com/oauth2/authorize"),

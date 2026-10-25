@@ -10,8 +10,8 @@ from helpers import APClient, make_game, wait_for, wait_state
 
 pytestmark = pytest.mark.ap
 
-ALL_EVENTS = ["game_online", "game_crashed", "player_goal", "player_stuck", "hint_found", "generation", "signup",
-              "apworld_pending", "apworld_update", "ap_update"]
+ALL_EVENTS = ["game_online", "game_crashed", "player_goal", "player_stuck", "slot_handover", "hint_found", "generation",
+              "signup", "apworld_pending", "apworld_update", "ap_update"]
 
 
 def visit(client, gid, **body):

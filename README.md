@@ -26,10 +26,13 @@ players log in to keep their YAML configs, see their games and download their pa
   spot. A test generation before the deadline shows whether the entries generate together. When the deadline passes the
   game is generated from all entries and everyone is added to it.
 - **Posts to Discord.** A webhook message when a game goes online or crashes, a player reaches their goal or says they
-  are stuck, a hinted item is found, a game is generated, sign-ups open or close, a custom game waits for approval, or a
+  are stuck, a slot is handed over, a hinted item is found, a game is generated, sign-ups open or close, a custom game waits for approval, or a
   new Archipelago version is out. A game can post to a channel of its own, and players can ask to be mentioned.
 - **Keeps custom games.** `.apworld` files are stored. If a config or a seed needs a game the server does not have, the
   UI says so and offers to add it. Regular users can *submit* an APWorld; an admin approves it.
+- **Runs every game on the Archipelago version it needs.** Besides the version in the image, admins can install
+  further Archipelago releases from the web UI. Each game runs, and each generation generates, on the version chosen for
+  it, so an old seed or a custom game that needs another version keeps working next to the rest.
 - **One UI for admins and players.** Players see only their games, can start and stop them (if allowed) and download
   their files. Admins also get the live console, file management, per-game settings and user management.
 - **A text client in the browser.** Players chat with the multiworld and use the server's commands (`!hint`,
@@ -133,11 +136,18 @@ by your players:
    game sees it in the slot table and in the activity, and the Discord channel hears when someone is stuck, with where
    the items hinted for them are, so whoever holds one knows (one message per player in ten minutes). Once you reach
    your goal it is no longer shown; giving up the slot clears it.
-9. **Progress over time** on the game page charts every player's share of their locations checked, from the first
-   check on, with a dot where someone reached their goal. Point at the chart (or focus it and use the arrow keys) for
-   everyone's numbers at that moment; pressing a name in the legend brings that player to the front. With more than
-   eight players, your own slots are in color and the others gray. The table below lists the standings: who reached
-   their goal first, and after how long, then who got furthest.
+9. **Handing your slot over:** no time to finish? *Hand over* next to your name in the slot table offers your slot to
+   a user you name, or to whoever takes it (everyone who can see the game: its players, or every user if the game is
+   visible to all). Whoever *takes it over* becomes the slot's player with everything found so far: its files, its YAML
+   (copied into their configs) and its progress, and plays on with the same slot name. Until then the slot stays
+   yours, and *Take back* ends the offer. A user it is offered to sees the game on their dashboard (*Slots looking for
+   a player*) even if they are not in it yet, and can say *No, thanks*. With *only one slot each*, someone who already
+   has a slot cannot take another one. The activity and the Discord channel hear about the offer and the takeover.
+10. **Progress over time** on the game page charts every player's share of their locations checked, from the first
+    check on, with a dot where someone reached their goal. Point at the chart (or focus it and use the arrow keys) for
+    everyone's numbers at that moment; pressing a name in the legend brings that player to the front. With more than
+    eight players, your own slots are in color and the others gray. The table below lists the standings: who reached
+    their goal first, and after how long, then who got furthest.
 
 **Sharing configs:** *Share* next to one of your configs offers it to everyone on the server; *Stop sharing* takes it
 back. Configs others share are listed under **Shared by players** on **My configs** (also reachable from *New config*):
@@ -175,7 +185,8 @@ itself. Both edit the same file, so switch whenever you like.
 - **Add a pregenerated game:** *Games → Add a game*, drop the zip. The slots are matched to users whose config has the
   same player name (case-insensitive) and game. If the zip contains the players' YAMLs, a user whose config is one of
   them wins over others with the same name. If it is still ambiguous the slot is left unassigned rather than guessed;
-  assign it from the slot's *Owner* drop-down. Turning on *claimable* in the game's settings lets players pick their own;
+  assign it from the slot's *Owner* drop-down (which also ends an offer to hand the slot over; you can take one back
+  under the drop-down too). Turning on *claimable* in the game's settings lets players pick their own;
   add *only one slot each* so nobody can take more than one (you can still assign extra slots by hand).
 - **Generate a game:** *Generate*, tick the configs, set the options, *Generate*. Slot owners are taken from the configs.
   If a generation fails, the job page marks the configs the generator complained about and says what is wrong with them.
@@ -202,7 +213,7 @@ itself. Both edit the same file, so switch whenever you like.
   Players who linked their Discord account (see below) can have these messages mention them, so Discord notifies them:
   in the user menu, *Discord mentions…*, they tick what they want to hear about: a new game they play in is ready,
   a game they play in is online, someone found an item hinted for them, someone in a game they play in is stuck,
-  sign-ups open, or sign-ups close soon and they have not entered yet. Nobody is mentioned unless they asked for it,
+  a slot is offered to them (or, in a game they can see, to whoever takes it), sign-ups open, or sign-ups close soon and they have not entered yet. Nobody is mentioned unless they asked for it,
   and only in messages you have switched on; untick *Let players be mentioned* to keep every message silent.
 
   A game can post to a channel of its own: paste another webhook under *Settings → Discord* on the game page (and
@@ -221,6 +232,23 @@ itself. Both edit the same file, so switch whenever you like.
   *Create an account…* to let people without an account sign up through Discord (they can set a password later in the
   user menu), and enter a Discord server ID to admit only members of that server. Accounts are matched by Discord's
   account ID only, never by name; admins see who is linked under *Admin → Users* and can unlink an account there.
+- **Archipelago versions:** *Admin → Settings → Archipelago versions*, type a release number (such as `0.6.2`) and
+  *Install*. The manager downloads that release's source from GitHub, makes a Python environment for it with
+  Archipelago's requirements and those of its worlds (as the image does for its own version), and checks that it
+  loads; the log shows each step. It takes a few minutes and some hundred megabytes in the data folder
+  (`ap-versions/`), and needs internet access while it runs. Worlds whose requirements need a C compiler do not load in
+  a further version (the image has none); the card lists them. Then pick the version:
+  - for a game: *Settings → Archipelago version* on the game page (the server needs a restart to switch). The *Connect*
+    box tells players which version the game runs on, so they use a client of it. Tracker, progress, text client and
+    Discord messages read the game with its own version;
+  - for a generation: *Archipelago version* on *Generate* (also offered to players who may generate); the game it makes
+    runs on the same version;
+  - for an upload: *Archipelago version* in *Add a game*.
+
+  Custom games (APWorlds) are added to every installed version they say they work with (`minimum_ap_version` and
+  `maximum_ap_version` in their manifest), and the base ROMs of the image's version are shared with the others. Each
+  further version has its own `host.yaml` in its folder. A version can be removed once no game uses it. Sign-up rounds
+  always generate with the image's version.
 - **Run a game:** *Start / Stop / Restart* on the game page. *Settings* holds the room password, the remote-admin
   password, hint cost, `!release`/`!collect`/`!remaining` rules and when the game falls asleep. Passwords and rules apply
   to a running server immediately; the port and a few startup options need a restart (the UI tells you).
@@ -349,6 +377,7 @@ Everything is optional except the volume. Set these as environment variables (Un
 | `MAX_EXTRACT_MB` | `2048` | Largest total size a game archive may unpack to. |
 | `GENERATION_TIMEOUT` | `3600` | Seconds before a generation is stopped. |
 | `TZ` | *(empty)* | Time zone for logs. |
+| `AP_SOURCE_URL` | GitHub | Where further Archipelago versions are downloaded from; `{version}` stands for the release number. Default `https://github.com/ArchipelagoMW/Archipelago/archive/refs/tags/{version}.tar.gz`. |
 | `UPDATE_CHECK` | `true` | Ask GitHub for new releases of Archipelago and of custom games added from GitHub, and show them to admins. `false` stops all requests the manager makes to GitHub on its own. |
 
 ## Data and backups
@@ -365,11 +394,12 @@ Everything lives in the `/config` volume:
 | `jobs/` | Generation inputs and logs (older ones are pruned at startup, keeping the latest 50) |
 | `signups/<id>/` | The YAMLs entered in a sign-up round |
 | `ap-data/Archipelago/` | Archipelago's `host.yaml`, logs and the custom worlds folder |
+| `ap-versions/<version>/` | A further Archipelago version: its source with its own `host.yaml` and custom worlds, and its Python environment |
 
 Back up the whole folder. Game saves are written every minute and when a server stops, so stopping the container
 (`docker stop`, allow 30 s) saves everything. Without stopping anything, *Admin → Settings → Backup of everything*
-downloads the folder as one zip, with a consistent copy of the database (`tmp/` and the generated templates are left
-out). To restore it, stop the container, put the zip's contents into an empty data folder, and start the container.
+downloads the folder as one zip, with a consistent copy of the database (`tmp/`, the generated templates and the
+further Archipelago versions are left out: after a restore, *Install again* brings a version back). To restore it, stop the container, put the zip's contents into an empty data folder, and start the container.
 The zip holds the password hashes, the Discord client secret and the webhook addresses: keep it as safe as the folder
 itself. The copies under `games/<id>/backups/` protect against mistakes inside
 the manager (a reset, a restore); they live in the same folder, so they are no replacement for backing it up.
@@ -380,8 +410,9 @@ The image bundles one Archipelago release (shown under Admin → Settings → Sy
 version it needs; if the bundled Archipelago is older than that, the UI refuses the upload with a clear message
 instead of failing later.
 
-Archipelago is part of the image, so a new Archipelago version arrives as a new image. Nothing is installed inside a
-running container.
+Archipelago is part of the image, so a new version of the image's Archipelago arrives as a new image. Games that should
+stay on an older (or try a newer) Archipelago can run on a further version installed from the web UI (see
+*Archipelago versions* above); those stay as they are when the image is updated.
 
 **On the server:** when a newer Archipelago release exists, admins see a notice on the dashboard and under
 *Admin → Settings → System* (the manager asks GitHub once at start and then twice a day; `UPDATE_CHECK=false` turns

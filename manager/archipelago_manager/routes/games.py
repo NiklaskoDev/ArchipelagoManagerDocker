@@ -13,8 +13,8 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPExcepti
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from .. import (activity, apbridge, audit, backups, db, gamepaths, gamestore, history, notify, schedule, visits,
-               settings as app_settings, textclient)
+from .. import (activity, apbridge, audit, backups, db, gamepaths, gamestore, history, notify, schedule, versions,
+               visits, settings as app_settings, textclient)
 from ..config import CONFIG
 from ..rooms import ROOMS, STATUS_GOAL, RoomError, mask_secrets, sleep_minutes, slot_rules, valid_password
 from ..security import admin_user, current_user, is_admin
@@ -35,11 +35,18 @@ def is_participant(game_id: int, user_id: int) -> bool:
     return db.query_one("SELECT 1 FROM game_slots WHERE game_id = ? AND user_id = ?", (game_id, user_id)) is not None
 
 
+def is_offered_to(game_id: int, user_id: int) -> bool:
+    """Whether a player of the game offers their slot to this user (set_handover): they see the game to take it."""
+    return db.query_one("SELECT 1 FROM game_slots WHERE game_id = ? AND handover_at IS NOT NULL AND handover_to = ?",
+                        (game_id, user_id)) is not None
+
+
 def get_game(game_id: int, user: sqlite3.Row) -> sqlite3.Row:
     row = db.query_one("SELECT * FROM games WHERE id = ?", (game_id,))
     if not row:
         raise HTTPException(404, "No such game")
-    if not (is_admin(user) or row["visibility"] == "all" or is_participant(game_id, user["id"])):
+    if not (is_admin(user) or row["visibility"] == "all" or is_participant(game_id, user["id"])
+            or is_offered_to(game_id, user["id"])):
         raise HTTPException(404, "No such game")
     return row
 
@@ -71,12 +78,24 @@ def _slots_for(game_ids: list[int]) -> dict[int, list[sqlite3.Row]]:
     if not game_ids:
         return {}
     marks = ",".join("?" * len(game_ids))
-    rows = db.query(f"SELECT s.*, u.username AS owner FROM game_slots s LEFT JOIN users u ON u.id = s.user_id "
+    rows = db.query(f"SELECT s.*, u.username AS owner, o.username AS handover_to_name FROM game_slots s "
+                    f"LEFT JOIN users u ON u.id = s.user_id LEFT JOIN users o ON o.id = s.handover_to "
                     f"WHERE s.game_id IN ({marks}) ORDER BY s.game_id, s.slot", game_ids)
     grouped: dict[int, list[sqlite3.Row]] = {}
     for r in rows:
         grouped.setdefault(r["game_id"], []).append(r)
     return grouped
+
+
+def handover_json(s: sqlite3.Row, game: sqlite3.Row, user: sqlite3.Row, my_slots: list) -> dict | None:
+    """A slot its player hands over: to whom (None: whoever takes it), and whether this user can take it."""
+    if s["handover_at"] is None or s["type"] != 1 or s["user_id"] is None:
+        return None
+    for_me = s["handover_to"] is None or s["handover_to"] == user["id"]
+    return {"at": s["handover_at"], "from": s["owner"], "to": s["handover_to_name"],
+            "to_me": s["handover_to"] == user["id"], "note": s["handover_note"],
+            # with "one slot each", someone who already has a slot cannot take another one
+            "can_accept": for_me and s["user_id"] != user["id"] and not (game["single_claim"] and my_slots)}
 
 
 def game_summary(row: sqlite3.Row, slots: list[sqlite3.Row], user: sqlite3.Row, host: str) -> dict:
@@ -94,7 +113,10 @@ def game_summary(row: sqlite3.Row, slots: list[sqlite3.Row], user: sqlite3.Row, 
         "sleep_minutes": sleep_minutes(row),  # 0: never falls asleep
         "port": row["port"], "address": f"{host}:{row['port']}" if row["port"] else None,
         "has_password": bool(row["password"]),
-        "games": games, "missing_games": apbridge.missing_games(games),
+        "games": games, "missing_games": apbridge.missing_games(games, row["ap_version"]),
+        # the Archipelago version the server runs (players need a client that goes with it); own: not the image's
+        "ap_version": apbridge.ap_version(row["ap_version"]), "ap_version_own": row["ap_version"],
+        "ap_version_missing": bool(row["ap_version"] and not versions.available(row["ap_version"])),
         "player_count": len(players), "claimed_count": sum(1 for s in players if s["user_id"] is not None),
         "visibility": row["visibility"], "claimable": bool(row["claimable"]),
         "single_claim": bool(row["single_claim"]),
@@ -105,6 +127,9 @@ def game_summary(row: sqlite3.Row, slots: list[sqlite3.Row], user: sqlite3.Row, 
                   "stage": row["start_stage"] or "planned"} if row["start_at"] else None,
         "goal_count": sum(1 for s in players if s["goal_at"] is not None),
         "my_slots": [{"slot": s["slot"], "name": s["name"], "game": s["game"]} for s in mine],
+        # slots offered to this user, or to whoever takes them
+        "offered_slots": [{"slot": s["slot"], "name": s["name"], "game": s["game"], **handover}
+                          for s in slots if (handover := handover_json(s, row, user, mine)) and handover["can_accept"]],
         "my_file_count": db.query_one(
             "SELECT COUNT(*) AS n FROM game_files f JOIN game_slots s ON s.game_id = f.game_id AND s.slot = f.slot "
             "WHERE f.game_id = ? AND f.kind = 'patch' AND s.user_id = ?", (row["id"], user["id"]))["n"] if mine else 0,
@@ -127,8 +152,9 @@ def list_games(request: Request, user: sqlite3.Row = Depends(current_user)) -> l
         rows = db.query("SELECT * FROM games ORDER BY id DESC")
     else:
         rows = db.query("SELECT g.* FROM games g WHERE g.visibility = 'all' OR EXISTS "
-                        "(SELECT 1 FROM game_slots s WHERE s.game_id = g.id AND s.user_id = ?) ORDER BY g.id DESC",
-                        (user["id"],))
+                        "(SELECT 1 FROM game_slots s WHERE s.game_id = g.id AND (s.user_id = ? OR "
+                        "(s.handover_at IS NOT NULL AND s.handover_to = ?))) ORDER BY g.id DESC",
+                        (user["id"], user["id"]))
     slots = _slots_for([r["id"] for r in rows])
     host = public_host(request)
     return [game_summary(r, slots.get(r["id"], []), user, host) for r in rows]
@@ -136,7 +162,12 @@ def list_games(request: Request, user: sqlite3.Row = Depends(current_user)) -> l
 
 @router.post("/games")
 async def upload_game(request: Request, file: UploadFile = File(...), name: str = Form(""),
-                      start: bool = Form(False), user: sqlite3.Row = Depends(admin_user)) -> dict:
+                      start: bool = Form(False), ap_version: str = Form(""),
+                      user: sqlite3.Row = Depends(admin_user)) -> dict:
+    try:
+        version = versions.check_choice(ap_version)
+    except versions.VersionError as e:
+        raise HTTPException(e.status, e.message) from None
     tmp = CONFIG.tmp_dir / f"upload-{db.now():.6f}-{user['id']}.bin"
     size = 0
     try:
@@ -147,7 +178,8 @@ async def upload_game(request: Request, file: UploadFile = File(...), name: str 
                     raise HTTPException(413, "File is too large")
                 out.write(chunk)
         try:
-            game_id = await gamestore.import_game(tmp, file.filename or "", name=name, created_by=user["id"])
+            game_id = await gamestore.import_game(tmp, file.filename or "", name=name, created_by=user["id"],
+                                                  ap_version=version)
         except gamestore.GameImportError as e:
             raise HTTPException(400, str(e)) from None
     finally:
@@ -195,6 +227,7 @@ async def _detail(game_id: int, user: sqlite3.Row, request: Request) -> dict:
             "status": status_label(p.get("status", 0), running) if s["type"] == 1 else None,
             # what the player says about how they are doing (set_slot_status)
             "player_status": s["player_status"], "status_note": s["status_note"], "status_at": s["status_at"],
+            "handover": handover_json(s, row, user, summary["my_slots"]),
             "files": files_by_slot.get(s["slot"], []),
         })
     shared = [_file_json(f) for f in visible_files if not (f["slot"] is not None and f["kind"] == "patch")]
@@ -213,7 +246,6 @@ async def _detail(game_id: int, user: sqlite3.Row, request: Request) -> dict:
         "notes": row["notes"], "job_id": row["job_id"],
         "job_available": bool(job and (admin or job["created_by"] == user["id"])),
         "share_spoiler_when_done": bool(row["share_spoiler_when_done"]),
-        "ap_version": apbridge.ap_version(),
     }
     if admin:
         detail["server_password"] = row["server_password"]
@@ -253,6 +285,7 @@ class GamePatch(BaseModel):
     start_at: float | None = None  # null takes a planned start back
     start_open_minutes: int | None = None
     start_countdown: bool | None = None
+    ap_version: str | None = Field(default=None, max_length=20)  # "": the image's
 
 
 @router.patch("/games/{game_id}")
@@ -317,6 +350,17 @@ async def patch_game(game_id: int, body: GamePatch, request: Request, user: sqli
         changes["start_open_minutes"] = body.start_open_minutes
     if "start_countdown" in given and body.start_countdown is not None:
         changes["start_countdown"] = int(body.start_countdown)
+    if "ap_version" in given and body.ap_version is not None:
+        try:
+            version = versions.check_choice(body.ap_version)
+        except versions.VersionError as e:
+            raise HTTPException(e.status, e.message) from None
+        needed = apbridge.parse_version(row["min_server_version"] or "")
+        if needed and (apbridge.version_tuple(version) or needed) < needed:
+            raise HTTPException(400, f"This multiworld needs Archipelago {row['min_server_version']} or newer")
+        if version != row["ap_version"]:
+            changes["ap_version"] = version
+            restart_required = restart_required or ROOMS.is_active(game_id)
     if "discord_webhook_url" in given and body.discord_webhook_url is not None:
         webhook = body.discord_webhook_url.strip()
         if webhook and not app_settings.valid_url(webhook):
@@ -515,6 +559,11 @@ def game_log(game_id: int, after: int = 0, user: sqlite3.Row = Depends(admin_use
 # ----------------------------------------------------------------------------------------------------------------------
 class SlotAssign(BaseModel):
     user_id: int | None
+
+
+# What a slot forgets when it gets a new player: what the last one said about it, and their offer to hand it over
+NEW_PLAYER = ("player_status = NULL, status_note = NULL, status_at = NULL, "
+              "handover_at = NULL, handover_to = NULL, handover_note = NULL")
 
 
 def _get_slot(game_id: int, slot: int) -> sqlite3.Row:
@@ -729,8 +778,8 @@ async def assign_slot(game_id: int, slot: int, body: SlotAssign, request: Reques
     if body.user_id is not None and not db.query_one("SELECT 1 FROM users WHERE id = ?", (body.user_id,)):
         raise HTTPException(404, "No such user")
     if body.user_id != target["user_id"]:  # what the last player said about the slot is not the new one's
-        db.execute("UPDATE game_slots SET user_id = ?, player_status = NULL, status_note = NULL, status_at = NULL "
-                   "WHERE game_id = ? AND slot = ?", (body.user_id, game_id, slot))
+        db.execute(f"UPDATE game_slots SET user_id = ?, {NEW_PLAYER} WHERE game_id = ? AND slot = ?",
+                   (body.user_id, game_id, slot))
     added = 0
     if body.user_id is not None:
         added = await asyncio.to_thread(gamestore.sync_game_yamls, game_id, slot)
@@ -761,9 +810,120 @@ async def unclaim_slot(game_id: int, slot: int, request: Request, user: sqlite3.
     target = _get_slot(game_id, slot)
     if target["user_id"] != user["id"]:
         raise HTTPException(403, "That slot is not yours")
-    db.execute("UPDATE game_slots SET user_id = NULL, player_status = NULL, status_note = NULL, status_at = NULL "
-               "WHERE game_id = ? AND slot = ?", (game_id, slot))
+    db.execute(f"UPDATE game_slots SET user_id = NULL, {NEW_PLAYER} WHERE game_id = ? AND slot = ?", (game_id, slot))
     return await _detail(game_id, user, request)
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+# handing a slot over: its player offers it to someone (or to whoever takes it), who takes it over with its progress
+# ----------------------------------------------------------------------------------------------------------------------
+class SlotHandover(BaseModel):
+    to: str | None = Field(default=None, max_length=100)  # a username; None: whoever takes it
+    note: str = Field(default="", max_length=1000)
+
+
+@router.put("/games/{game_id}/slots/{slot}/handover")
+async def set_handover(game_id: int, slot: int, body: SlotHandover, request: Request,
+                       user: sqlite3.Row = Depends(current_user)) -> dict:
+    """The player of a slot (or an admin) offers it to another user, or to whoever takes it. The slot stays theirs
+    until someone takes it over (accept_handover)."""
+    game = get_game(game_id, user)
+    target = _get_slot(game_id, slot)
+    if target["type"] != 1:
+        raise HTTPException(400, "Only player slots can be handed over")
+    if target["user_id"] is None:
+        raise HTTPException(400, "Nobody plays this slot yet")
+    if not (is_admin(user) or target["user_id"] == user["id"]):
+        raise HTTPException(403, "Only the player of this slot can hand it over")
+    note = "".join(ch for ch in " ".join(body.note.split()) if ch.isprintable())
+    if len(note) > STATUS_NOTE_LENGTH:
+        raise HTTPException(400, f"Keep the note to {STATUS_NOTE_LENGTH} characters")
+    to = None
+    if body.to and body.to.strip():
+        to = db.query_one("SELECT id, username FROM users WHERE username = ? AND disabled = 0", (body.to.strip(),))
+        if not to:
+            raise HTTPException(404, "There is no user of that name")
+        if to["id"] == target["user_id"]:
+            raise HTTPException(400, "That user already plays this slot")
+        if game["single_claim"] and is_participant(game_id, to["id"]):
+            raise HTTPException(409, "That user already has a slot in this game, and each player may have only one")
+    db.execute("UPDATE game_slots SET handover_at = ?, handover_to = ?, handover_note = ? WHERE game_id = ? AND slot = ?",
+               (time.time(), to["id"] if to else None, note or None, game_id, slot))
+    owner = db.query_one("SELECT username FROM users WHERE id = ?", (target["user_id"],))["username"]
+    activity.add(game_id, {"kind": "handover", "player": target["name"], "from": owner,
+                           **({"to": to["username"]} if to else {}), **({"note": note} if note else {})})
+    if to:
+        audit.note(request, to=to["username"])
+    _announce_handover(game, target, owner, to, note)
+    return await _detail(game_id, user, request)
+
+
+def _announce_handover(game: sqlite3.Row, slot: sqlite3.Row, owner: str, to: sqlite3.Row | None, note: str) -> None:
+    fields = [(notify.tr("Note"), notify.md(note))] if note else []
+    if to:
+        title = notify.tr("{owner} hands {player} over to {user}", owner=owner, player=slot["name"], user=to["username"])
+        text = notify.tr("In {game}: {user} can take over the slot ({world}) on its page, with everything found so far.",
+                         game=notify.md(game["name"]), user=notify.md(to["username"]), world=notify.md(slot["game"]))
+        ping_users: set[int] | None = {to["id"]}
+    else:
+        title = notify.tr("{player} needs a new player", player=slot["name"])
+        text = notify.tr("In {game}, {owner} hands over their slot ({world}). Whoever takes it continues where they "
+                         "left off.", game=notify.md(game["name"]), owner=notify.md(owner), world=notify.md(slot["game"]))
+        # everyone who can see the game can take it
+        ping_users = None if game["visibility"] == "all" else {
+            r["user_id"] for r in db.query("SELECT user_id FROM game_slots WHERE game_id = ? AND user_id IS NOT NULL",
+                                           (game["id"],))} - {slot["user_id"]}
+    notify.emit("slot_handover", title, text, url=notify.link(f"/games/{game['id']}"), fields=fields, color="info",
+                ping="slot_handover", ping_users=ping_users, game_id=game["id"])
+
+
+@router.delete("/games/{game_id}/slots/{slot}/handover")
+async def cancel_handover(game_id: int, slot: int, request: Request, user: sqlite3.Row = Depends(current_user)) -> dict:
+    """The player takes their offer back, or the user it was offered to says no."""
+    get_game(game_id, user)
+    target = _get_slot(game_id, slot)
+    if not (is_admin(user) or user["id"] in (target["user_id"], target["handover_to"])):
+        raise HTTPException(403, "That slot is not yours")
+    db.execute("UPDATE game_slots SET handover_at = NULL, handover_to = NULL, handover_note = NULL "
+               "WHERE game_id = ? AND slot = ?", (game_id, slot))
+    if target["handover_to"] == user["id"] and not is_admin(user) and not is_participant(game_id, user["id"]):
+        # whoever said no may no longer see the game
+        return {"declined": True}
+    return await _detail(game_id, user, request)
+
+
+@router.post("/games/{game_id}/slots/{slot}/handover/accept")
+async def accept_handover(game_id: int, slot: int, request: Request, user: sqlite3.Row = Depends(current_user)) -> dict:
+    """Takes over a slot offered to this user (or to whoever takes it): its files, its YAML and its progress."""
+    game = get_game(game_id, user)
+    with db.connection() as conn:  # one locked transaction: two people cannot both take the same offer
+        target = conn.execute("SELECT * FROM game_slots WHERE game_id = ? AND slot = ?", (game_id, slot)).fetchone()
+        if not target:
+            raise HTTPException(404, "No such slot")
+        if target["handover_at"] is None or target["user_id"] is None:
+            raise HTTPException(409, "This slot is no longer being handed over")
+        if target["handover_to"] is not None and target["handover_to"] != user["id"]:
+            raise HTTPException(403, "This slot is offered to somebody else")
+        if target["user_id"] == user["id"]:
+            raise HTTPException(400, "This slot is already yours")
+        if game["single_claim"] and conn.execute("SELECT 1 FROM game_slots WHERE game_id = ? AND user_id = ?",
+                                                 (game_id, user["id"])).fetchone():
+            raise HTTPException(409, "You already have a slot in this game. Each player may have only one.")
+        conn.execute(f"UPDATE game_slots SET user_id = ?, {NEW_PLAYER} WHERE game_id = ? AND slot = ?",
+                     (user["id"], game_id, slot))
+        previous = conn.execute("SELECT username FROM users WHERE id = ?", (target["user_id"],)).fetchone()
+    previous_name = previous["username"] if previous else None
+    # the text client spoke in the last player's name
+    await TEXT_CLIENTS.close((game_id, slot, target["user_id"]))
+    added = await asyncio.to_thread(gamestore.sync_game_yamls, game_id, slot)
+    activity.add(game_id, {"kind": "handover_done", "player": target["name"], "to": user["username"],
+                           **({"from": previous_name} if previous_name else {})})
+    if previous_name:
+        audit.note(request, previous=previous_name)
+    notify.emit("slot_handover", notify.tr("{user} takes over {player}", user=user["username"], player=target["name"]),
+                notify.tr("In {game}, from {owner}.", game=notify.md(game["name"]), owner=notify.md(previous_name or "?")),
+                url=notify.link(f"/games/{game_id}"), color="success", game_id=game_id)
+    return {**await _detail(game_id, user, request), "configs_added": added}
 
 
 # ----------------------------------------------------------------------------------------------------------------------

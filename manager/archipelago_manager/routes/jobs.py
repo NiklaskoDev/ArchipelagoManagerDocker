@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from .. import audit, db, settings as app_settings
+from .. import apbridge, audit, db, versions, settings as app_settings
 from ..generation import GENERATION, JobRequestError, create_job, job_dir, prepare_players
 from ..security import current_user, is_admin
 
@@ -58,18 +58,27 @@ class JobCreate(BaseModel):
     plando: list[str] = ["bosses", "connections", "texts"]
     meta: str | None = Field(default=None, max_length=65536)
     host_after: bool = True
+    ap_version: str | None = Field(default=None, max_length=20)  # None or "": the image's
 
 
 @router.post("/jobs")
-def start_job(body: JobCreate, request: Request, user: sqlite3.Row = Depends(current_user)):
+async def start_job(body: JobCreate, request: Request, user: sqlite3.Row = Depends(current_user)):
     admin = is_admin(user)
     if not admin and not app_settings.get_setting("users_can_generate"):
         raise HTTPException(403, "Only administrators can generate games on this server")
     try:
-        players = prepare_players(body.config_ids, user, is_admin=admin)
+        version = versions.check_choice(body.ap_version)
+        if version:  # its games, to check the players' against
+            await apbridge.extra_info(version)
+    except versions.VersionError as e:
+        raise HTTPException(e.status, e.message) from None
+    except apbridge.APBridgeError as e:
+        raise HTTPException(503, f"Archipelago {version} is unavailable: {e}") from None
+    try:
+        players = prepare_players(body.config_ids, user, is_admin=admin, version=version)
         job_id = create_job(user, players, name=body.name, spoiler=body.spoiler, race=body.race, seed=body.seed,
                             skip_prog_balancing=body.skip_prog_balancing, plando=body.plando, meta=body.meta,
-                            host_after=body.host_after)
+                            host_after=body.host_after, ap_version=version)
     except JobRequestError as e:
         return JSONResponse(status_code=e.status, content={"detail": e.message, "missing_games": e.missing_games})
     GENERATION.enqueue(job_id)

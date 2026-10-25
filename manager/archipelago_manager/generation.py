@@ -18,7 +18,7 @@ from typing import Any
 
 import yaml
 
-from . import apbridge, configstore, db, gamestore, notify, yamlinfo
+from . import apbridge, configstore, db, gamestore, notify, versions, yamlinfo
 from .config import CONFIG
 from .rooms import ROOMS, RoomError, player_list, slot_owners
 
@@ -49,7 +49,8 @@ def job_dir(job_id: int) -> Path:
     return CONFIG.jobs_dir / str(job_id)
 
 
-def prepare_players(config_ids: list[int], user: sqlite3.Row, *, is_admin: bool) -> list[PreparedPlayer]:
+def prepare_players(config_ids: list[int], user: sqlite3.Row, *, is_admin: bool,
+                    version: str | None = None) -> list[PreparedPlayer]:
     """Loads and validates the chosen configs. Raises JobRequestError with a message fit for the user."""
     if not config_ids:
         raise JobRequestError("Select at least one player config")
@@ -69,7 +70,7 @@ def prepare_players(config_ids: list[int], user: sqlite3.Row, *, is_admin: bool)
         except FileNotFoundError:
             raise JobRequestError(f"The file for '{row['name']}' is missing from disk", 410) from None
         players.append(prepare_player(row["id"], row["user_id"], row["name"], data, used_filenames))
-    check_players(players)
+    check_players(players, version)
     return players
 
 
@@ -91,8 +92,9 @@ def prepare_player(config_id: int | None, user_id: int | None, label: str, data:
     return PreparedPlayer(config_id, user_id, label, filename, data, info)
 
 
-def check_players(players: list[PreparedPlayer]) -> None:
-    """Checks the players together: unique names, and every game installed."""
+def check_players(players: list[PreparedPlayer], version: str | None = None) -> None:
+    """Checks the players together: unique names, and every game installed (in that Archipelago version; for a further
+    version, call apbridge.extra_info first, or the games cannot be checked here)."""
     names: dict[str, str] = {}
     for p in players:
         for name in p.info.player_names:
@@ -105,7 +107,7 @@ def check_players(players: list[PreparedPlayer]) -> None:
 
     if apbridge.STATE.info is None:
         raise JobRequestError(f"Archipelago is unavailable: {apbridge.STATE.error or 'not loaded yet'}", 503)
-    missing = apbridge.missing_games({g for p in players for g in p.info.games})
+    missing = apbridge.missing_games({g for p in players for g in p.info.games}, version)
     if missing:
         raise JobRequestError("These games are not installed: " + ", ".join(missing), 409, missing)
     # Generate.py would stop at the same check, after a wait in the queue and with a less helpful message
@@ -129,7 +131,7 @@ def clean_meta(meta: str | None) -> str | None:
 
 def create_job(user: sqlite3.Row, players: list[PreparedPlayer], *, name: str | None, spoiler: int, race: bool,
                seed: int | None, skip_prog_balancing: bool, plando: list[str], meta: str | None,
-               host_after: bool, test: bool = False) -> int:
+               host_after: bool, test: bool = False, ap_version: str | None = None) -> int:
     """Queues a generation. A test generation only finds out whether the players generate together: its result is
     thrown away instead of becoming a game."""
     if spoiler not in (0, 1, 2, 3):
@@ -141,6 +143,8 @@ def create_job(user: sqlite3.Row, players: list[PreparedPlayer], *, name: str | 
     meta = clean_meta(meta)
     options = {"spoiler": spoiler, "race": race, "seed": seed, "skip_prog_balancing": skip_prog_balancing,
                "plando": plando, "has_meta": meta is not None}
+    if ap_version:  # the Archipelago version that generates, and that the game runs on (versions.py)
+        options["ap_version"] = ap_version
     if test:
         options["test"] = True
     job_id = db.execute(
@@ -172,7 +176,7 @@ def create_job(user: sqlite3.Row, players: list[PreparedPlayer], *, name: str | 
 _NOISE_PREFIXES = ("Exception ignored in atexit", "EOFError")
 
 
-def _explain_failure(lines: list[str]) -> str | None:
+def _explain_failure(lines: list[str], version: str | None = None) -> str | None:
     """Plain words for failures with a known cause: a base ROM that is missing or the wrong version."""
     for text in lines:
         if "FileNotFoundError:" in text:
@@ -182,6 +186,8 @@ def _explain_failure(lines: list[str]) -> str | None:
                 missing = missing.rsplit(": ", 1)[-1]
             if missing:
                 folder = (apbridge.STATE.where or {}).get("user_path") or str(CONFIG.ap_dir)
+                if version:  # a further version keeps its files in its own folder
+                    folder = str(apbridge.ap_dir(version))
                 where = apbridge.file_location_text(apbridge.describe_file(Path(folder) / missing))
                 return (f"A file needed to generate is missing on the server. If a game in this multiworld needs its "
                         f"base ROM, put {where}, named exactly like that.")
@@ -215,7 +221,7 @@ def _player_file_errors(lines: list[str]) -> dict[str, str]:
     return {filename: "\n".join(found[1:] or found)[:1500] for filename, found in errors.items()}
 
 
-def _summarize_failure(lines: list[str]) -> str:
+def _summarize_failure(lines: list[str], version: str | None = None) -> str:
     """Picks the lines of a generator log that explain the failure."""
     cleaned = []
     for text in lines:
@@ -226,7 +232,7 @@ def _summarize_failure(lines: list[str]) -> str:
                    and any(w in text for w in ("Error", "Exception", "error", "Unsupported", "unbeatable", "Names have"))]
     chosen = interesting[-3:] or [text.strip() for text in cleaned][-3:]
     summary = "\n".join(chosen)[:1500] or "The generator failed without output"
-    explanation = _explain_failure(cleaned)
+    explanation = _explain_failure(cleaned, version)
     return f"{explanation}\n{summary}" if explanation else summary
 
 
@@ -338,9 +344,15 @@ class GenerationManager:
         output = directory / "output"
         output.mkdir(exist_ok=True)
         db.execute("UPDATE jobs SET status = 'running', started_at = ? WHERE id = ?", (time.time(), job_id))
+        version = opts.get("ap_version")
+        if version:
+            if not versions.available(version):
+                self._finish(job_id, "failed", versions.unavailable_text(version))
+                return
+            apbridge.link_roms(version)
 
         cmd = apbridge.ap_command("Generate.py", "--player_files_path", str(directory / "Players"),
-                                  "--outputpath", str(output), "--spoiler", str(opts.get("spoiler", 1)))
+                                  "--outputpath", str(output), "--spoiler", str(opts.get("spoiler", 1)), version=version)
         if opts.get("race"):
             cmd.append("--race")
         if opts.get("seed") is not None:
@@ -354,7 +366,7 @@ class GenerationManager:
         self._log(job_id, "$ " + " ".join(cmd[1:]))
         proc = await asyncio.create_subprocess_exec(
             *cmd, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
-            cwd=str(CONFIG.ap_dir), env=apbridge.ap_env(), start_new_session=True)
+            cwd=str(apbridge.ap_dir(version)), env=apbridge.ap_env(), start_new_session=True)
         self.current = (job_id, proc)
         lines: list[str] = []
 
@@ -392,7 +404,7 @@ class GenerationManager:
                 for filename, error in _player_file_errors(lines).items():
                     conn.execute("UPDATE job_players SET error = ? WHERE job_id = ? AND filename = ?",
                                  (error, job_id, filename))
-            self._finish(job_id, "failed", _summarize_failure(lines))
+            self._finish(job_id, "failed", _summarize_failure(lines, version))
             return
 
         archives = sorted(output.glob("AP_*.zip"), key=lambda p: p.stat().st_mtime)
@@ -414,7 +426,7 @@ class GenerationManager:
         try:
             game_id = await gamestore.import_game(
                 archives[-1], job["name"] or "", name=job["name"], created_by=job["created_by"],
-                source="generated", job_id=job_id, owners=owners)
+                source="generated", job_id=job_id, owners=owners, ap_version=version)
         except gamestore.GameImportError as e:
             self._finish(job_id, "failed", f"Generated, but importing the result failed: {e}")
             return

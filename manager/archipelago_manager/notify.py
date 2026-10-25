@@ -29,7 +29,8 @@ USER_AGENT = f"DiscordBot (https://github.com/NiklaskoDev/ArchipelagoManagerDock
 # What players with a linked Discord account can ask to be mentioned for, and the kind of message that carries it: they
 # are only mentioned in messages the admin has switched on.
 PING_EVENTS = {"game_ready": "generation", "game_online": "game_online", "hint_found": "hint_found",
-               "player_stuck": "player_stuck", "signup_open": "signup", "signup_closing": "signup"}
+               "player_stuck": "player_stuck", "slot_handover": "slot_handover", "signup_open": "signup",
+               "signup_closing": "signup"}
 PING_KINDS = tuple(PING_EVENTS)
 # A message holds 2000 characters, a mention of a Discord id with up to 20 digits takes 24 of them
 MAX_MENTIONS = 80

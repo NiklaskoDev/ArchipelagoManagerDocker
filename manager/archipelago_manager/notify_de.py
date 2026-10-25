@@ -52,6 +52,16 @@ MESSAGES = {
     "In {game}, waiting for items.": "In {game}, wartet auf Gegenstände.",
     "Hinted items they wait for": "Gegenstände mit Hinweis, auf die gewartet wird",
     "**{item}** at {location} in {finder}'s world": "**{item}** bei {location} in der Welt von {finder}",
+    # a player hands their slot over
+    "{owner} hands {player} over to {user}": "{owner} übergibt {player} an {user}",
+    "In {game}: {user} can take over the slot ({world}) on its page, with everything found so far.":
+        "In {game}: {user} kann den Slot ({world}) auf seiner Seite übernehmen, mit allem, was bisher gefunden wurde.",
+    "{player} needs a new player": "{player} sucht einen neuen Spieler",
+    "In {game}, {owner} hands over their slot ({world}). Whoever takes it continues where they left off.":
+        "In {game} gibt {owner} den Slot ({world}) ab. Wer ihn übernimmt, spielt dort weiter, wo aufgehört wurde.",
+    "Note": "Notiz",
+    "{user} takes over {player}": "{user} übernimmt {player}",
+    "In {game}, from {owner}.": "In {game}, von {owner}.",
     "Time": "Zeit",
     "{d} d {h} h": "{d} T. {h} Std.",
     "{h} h {m} min": "{h} Std. {m} Min.",

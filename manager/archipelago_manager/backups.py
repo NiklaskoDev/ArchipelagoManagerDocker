@@ -129,7 +129,9 @@ def delete(game_id: int, name: str) -> None:
 # ----------------------------------------------------------------------------------------------------------------------
 # the backup of everything: the whole data folder as one zip, for an administrator to download
 # ----------------------------------------------------------------------------------------------------------------------
-_NOT_KEPT = {"tmp", "templates"}  # passing files, and the templates, which are made again at startup
+# passing files, the templates, which are made again at startup, and the further Archipelago versions, which are large
+# and downloaded again from the settings page (versions.py)
+_NOT_KEPT = {"tmp", "templates", "ap-versions"}
 _DATABASE = {"manager.sqlite3", "manager.sqlite3-wal", "manager.sqlite3-shm", "manager.sqlite3-journal"}
 
 

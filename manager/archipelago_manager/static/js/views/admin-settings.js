@@ -1,5 +1,5 @@
-import { h, clear, icon, toast, action, fmtBytes } from "../util.js";
-import { get, patch, put, post, refreshStatus } from "../api.js";
+import { h, clear, icon, toast, action, confirmDialog, fmtBytes, fmtDate } from "../util.js";
+import { get, patch, put, post, del, refreshStatus } from "../api.js";
 import { pageHeader, field, checkbox, banner, adminTabs, serverOptionsForm, updateBanner, updateStatus, copyField, select, romsCard, deliveryStatus } from "../components.js";
 import { t, tServer, plural } from "../i18n.js";
 
@@ -109,7 +109,88 @@ export default async function render({ root, cleanup }) {
       discord.node,
       romsCard(),
       backupCard(),
+      versionsCard(cleanup),
       hostDetails, systemCard));
+}
+
+// Further Archipelago versions, for games that need another one than this server comes with (versions.py)
+function versionsCard(cleanup) {
+  const host = h("div", { class: "stack" });
+  const input = h("input", { class: "input", placeholder: t("e.g. 0.6.2"), autocomplete: "off", style: { maxWidth: "160px" },
+    "aria-label": t("Version to install") });
+  const install = h("button", { class: "btn", type: "button" }, icon("download", 14), t("Install"));
+  const logs = {};  // the log of the versions whose log is open, kept across redraws
+  let timer = null;
+  cleanup(() => clearTimeout(timer));
+  const STATUS = { installing: ["warn", () => t("Installing…")], installed: ["ok", () => t("Installed")],
+    failed: ["bad", () => t("Failed")], missing: ["bad", () => t("Files missing")] };
+
+  function logView(version) {
+    const pre = h("pre", { class: "console", style: { maxHeight: "260px", margin: 0 } }, logs[version] ?? t("Loading…"));
+    const details = h("details", {}, h("summary", { class: "muted small" }, t("Log")), pre);
+    if (version in logs) details.open = true;
+    details.addEventListener("toggle", action2(async () => {
+      if (!details.open) { delete logs[version]; return; }
+      logs[version] = await get(`/api/ap-versions/${version}/log`);
+      pre.textContent = logs[version];
+      pre.scrollTop = pre.scrollHeight;
+    }));
+    return details;
+  }
+
+  function draw(data) {
+    const rows = data.versions.map((v) => {
+      const [kind, label] = STATUS[v.status];
+      return h("div", { class: "card stack tight", style: { padding: "12px 14px" } },
+        h("div", { class: "row spread" },
+          h("div", { class: "row" }, h("strong", {}, `Archipelago ${v.version}`), h("span", { class: `badge ${kind}` }, label()),
+            v.size ? h("span", { class: "muted small" }, fmtBytes(v.size)) : null,
+            v.world_count ? h("span", { class: "muted small" }, plural(v.world_count, "{n} game loaded", "{n} games loaded")) : null),
+          h("div", { class: "row" },
+            ["failed", "missing"].includes(v.status) ? h("button", { class: "btn sm", type: "button", onclick: action(async () => {
+              draw(await post("/api/ap-versions", { version: v.version }));
+            }) }, icon("restart", 14), t("Install again")) : null,
+            v.status !== "installing" ? h("button", { class: "btn sm ghost icon-only", type: "button", title: t("Remove"), "aria-label": t("Remove"),
+              onclick: action(async () => {
+                if (!(await confirmDialog(t("Its files are deleted. Games cannot run on it any more until it is installed again."),
+                  { title: t("Remove Archipelago {version}?", { version: v.version }), danger: true, confirmText: t("Remove") }))) return;
+                draw(await del(`/api/ap-versions/${v.version}`));
+                toast(t("Archipelago {version} removed", { version: v.version }), "success");
+              }) }, icon("trash", 14)) : null)),
+        v.error ? h("div", { class: "form-error small" }, tServer(v.error)) : null,
+        v.status === "missing" ? h("div", { class: "muted small" }, t("Its files are not in the data folder (backups leave them out). Install it again.")) : null,
+        v.games.length ? h("div", { class: "muted small" }, t("Used by: {games}", { games: v.games.join(", ") })) : null,
+        v.failed_worlds.length ? h("div", { class: "muted small" }, t("Did not load: {games}", { games: v.failed_worlds.join(", ") })) : null,
+        v.installed_at && v.status === "installed" ? h("div", { class: "muted small" }, t("Installed {date}", { date: fmtDate(v.installed_at) })) : null,
+        logView(v.version));
+    });
+    clear(host).append(rows.length ? rows : h("p", { class: "muted" }, t("Only the version this server comes with.")));
+    const busy = data.versions.some((v) => v.status === "installing");
+    install.disabled = busy;
+    clearTimeout(timer);
+    if (busy) {
+      timer = setTimeout(async () => {
+        const fresh = await get("/api/ap-versions").catch(() => null);
+        for (const version of Object.keys(logs)) logs[version] = await get(`/api/ap-versions/${version}/log`).catch(() => logs[version]);
+        if (fresh && host.isConnected) draw(fresh);
+      }, 3000);
+    }
+  }
+
+  install.onclick = action(async () => {
+    const version = input.value.trim();
+    if (!version) throw new Error(t("Enter the version to install, e.g. 0.6.2"));
+    logs[version.replace(/^v/, "")] = "";
+    draw(await post("/api/ap-versions", { version }));
+    input.value = "";
+    toast(t("Installing Archipelago {version}. This takes a few minutes.", { version }), "success");
+  });
+  input.onkeydown = (e) => { if (e.key === "Enter") install.click(); };
+  get("/api/ap-versions").then(draw).catch((err) => clear(host).append(banner("error", icon("alert", 16), err.message)));
+
+  return h("div", { class: "card stack" }, h("h2", {}, t("Archipelago versions")),
+    h("p", { class: "muted small" }, t("Games run on the version this server comes with, unless their settings name another one. Install further versions here, for seeds or custom games that need an older (or newer) Archipelago: each is downloaded from GitHub with its requirements, which takes a few minutes and some hundred megabytes. Custom games are added to every version they say they work with; base ROMs are shared. Backups of everything leave the versions out: install them again after a restore.")),
+    host, h("div", { class: "row" }, input, install));
 }
 
 const EVENTS = [
@@ -117,6 +198,8 @@ const EVENTS = [
   ["game_crashed", t("A game server crashes")],
   ["player_goal", t("A player reaches their goal, and when everyone has")],
   ["player_stuck", t("A player says they are stuck"), t("With their note and where the items hinted for them are.")],
+  ["slot_handover", t("A player hands their slot over, and someone takes it over"),
+    t("A slot offered to whoever takes it is announced to everyone who can see the game.")],
   ["hint_found", t("A hinted item is found"), t("Many at once, for example after a !release, come as one message.")],
   ["generation", t("A new game is generated, or generating fails")],
   ["signup", t("Sign-up rounds open, close soon and close")],
