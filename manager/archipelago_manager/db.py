@@ -10,7 +10,7 @@ from collections.abc import Iterable, Iterator
 
 from .config import CONFIG
 
-SCHEMA_VERSION = 15
+SCHEMA_VERSION = 16
 
 # Added in schema version 3
 _SIGNUPS = """
@@ -130,6 +130,25 @@ CREATE TABLE ap_versions (
     size          INTEGER,
     error         TEXT
 );
+"""
+
+# Added in schema version 16
+_API_TOKENS = """
+-- Personal API tokens (security.py): a script or bot acts as the user who made the token, with read or full access.
+-- Only a hash of the token is kept; hint is its end, so its owner can tell their tokens apart.
+CREATE TABLE api_tokens (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name         TEXT NOT NULL,
+    token_hash   TEXT NOT NULL UNIQUE,
+    hint         TEXT NOT NULL,
+    access       TEXT NOT NULL CHECK (access IN ('read', 'write')),
+    created_at   REAL NOT NULL,
+    expires_at   REAL,
+    last_used_at REAL,
+    last_used_ip TEXT
+);
+CREATE INDEX api_tokens_user ON api_tokens(user_id);
 """
 
 SCHEMA = """
@@ -285,7 +304,7 @@ CREATE TABLE job_players (
 );
 CREATE INDEX job_players_job ON job_players(job_id);
 """ + _SIGNUPS + _SOURCES + "ALTER TABLE apworld_sources ADD COLUMN latest_asset TEXT; " + \
-    "ALTER TABLE signups ADD COLUMN test_job_id INTEGER;" + _PROGRESS + _AUDIT + _VISITS + _AP_VERSIONS
+    "ALTER TABLE signups ADD COLUMN test_job_id INTEGER;" + _PROGRESS + _AUDIT + _VISITS + _AP_VERSIONS + _API_TOKENS
 
 
 # Upgrades for databases created by older versions: MIGRATIONS[n] turns schema n - 1 into schema n. New databases get
@@ -328,6 +347,7 @@ MIGRATIONS: dict[int, str] = {
         "ALTER TABLE game_slots ADD COLUMN handover_note TEXT;",
     # further Archipelago versions, and the one a game runs on (NULL: the image's)
     15: _AP_VERSIONS + "ALTER TABLE games ADD COLUMN ap_version TEXT;",
+    16: _API_TOKENS,
 }
 
 

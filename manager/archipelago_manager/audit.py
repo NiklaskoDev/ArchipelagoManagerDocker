@@ -53,6 +53,8 @@ ACTIONS: dict[tuple[str, str], str] = {
     ("POST", "/api/system/reload-worlds"): "system.reload_worlds",
     ("POST", "/api/system/backup"): "system.backup",
     ("POST", "/api/ap-versions"): "system.version_install",
+    ("POST", "/api/tokens"): "token.add",
+    ("DELETE", "/api/tokens/{token_id}"): "token.delete",
     ("DELETE", "/api/ap-versions/{version}"): "system.version_remove",
     ("POST", "/api/users"): "user.add",
     ("PATCH", "/api/users/{user_id}"): "user.change",
@@ -102,7 +104,7 @@ _TARGETS = [
     (re.compile(r"^/api/apworld-sources/(\d+)(?:/|$)"), "source", "SELECT repo FROM apworld_sources WHERE id = ?"),
     (re.compile(r"^/api/configs/(\d+)(?:/|$)"), "config", "SELECT name FROM configs WHERE id = ?"),
 ]
-_ID_PARAMS = {"game_id", "user_id", "signup_id", "job_id", "apworld_id", "source_id", "config_id"}
+_ID_PARAMS = {"game_id", "user_id", "signup_id", "job_id", "apworld_id", "source_id", "config_id", "token_id"}
 
 
 def watched(request: Request) -> bool:
@@ -138,6 +140,8 @@ def finish(request: Request, user: sqlite3.Row, before: tuple | None) -> None:
     if user["role"] != "admin" and action not in FOR_EVERYONE:
         return
     details = dict(request.scope.get("audit") or {})
+    if request.scope.get("api_token"):  # done by a script or bot with one of the user's API tokens
+        details["token"] = request.scope["api_token"]["name"]
     what = details.pop("target", None) or before
     for name, value in (request.scope.get("path_params") or {}).items():
         if name not in _ID_PARAMS:

@@ -18,6 +18,7 @@ const ROUTES = [
   [/^\/admin\/users$/, () => import("./views/admin-users.js"), "admin"],
   [/^\/admin\/settings$/, () => import("./views/admin-settings.js"), "admin"],
   [/^\/admin\/log$/, () => import("./views/admin-log.js"), "admin"],
+  [/^\/tokens$/, () => import("./views/tokens.js"), null],
 ];
 
 const app = document.getElementById("app");
@@ -160,6 +161,7 @@ function drawUserMenu(menu) {
       : state.status.discord_login ? item("link", t("Link Discord"), linkDiscord) : null,
     (user.discord_name || state.status.discord_login) && state.status.ping_kinds.length
       ? item("bell", t("Discord mentions…"), pingsDialog) : null,
+    item("key", t("API tokens"), () => { location.hash = "#/tokens"; }),
     item("globe", LANGUAGES[other], () => {
       if (dirtyCheck?.() && !confirm(t("You have unsaved changes. Leave this page anyway?"))) return;
       setLanguage(other);

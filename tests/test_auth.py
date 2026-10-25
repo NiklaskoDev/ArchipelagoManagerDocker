@@ -227,6 +227,7 @@ def test_a_database_from_the_first_version_is_upgraded(tmp_path):
     conn.execute("DROP TABLE game_visits")
     for column in ("player_status", "status_note", "status_at", "handover_at", "handover_to", "handover_note"):
         conn.execute(f"ALTER TABLE game_slots DROP COLUMN {column}")
+    conn.execute("DROP TABLE api_tokens")
     conn.execute("DROP TABLE ap_versions")
     conn.execute("ALTER TABLE games DROP COLUMN ap_version")
     conn.execute("ALTER TABLE games DROP COLUMN stopped_at")
@@ -247,7 +248,7 @@ def test_a_database_from_the_first_version_is_upgraded(tmp_path):
         games = admin.get("/api/games").json()
         assert [(g["name"], g["single_claim"], g["finished_at"]) for g in games] == [("Old game", False, None)]
         conn = sqlite3.connect(db_path)
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 15
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 16
         conn.close()
         # tables added since then exist and work
         r = admin.post("/api/signups", json={"name": "After the upgrade"})
