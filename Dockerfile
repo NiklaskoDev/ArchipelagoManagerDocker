@@ -14,10 +14,11 @@ FROM python:${PYTHON_VERSION}-slim-bookworm AS archipelago
 ARG AP_VERSION
 ENV PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# git: fetching the source and one world requirement that is installed from git. gcc/g++: native extensions. cmake:
-# dolphin-memory-engine (The Wind Waker), which has no wheel for arm64 and is built from source there.
+# git: fetching the source and one world requirement that is installed from git. gcc/g++: native extensions. cmake
+# and make (which cmake only recommends): dolphin-memory-engine (The Wind Waker), which has no wheel for arm64 and is
+# built from source there.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates git gcc g++ libc6-dev cmake \
+ && apt-get install -y --no-install-recommends ca-certificates git gcc g++ libc6-dev cmake make \
  && rm -rf /var/lib/apt/lists/*
 
 RUN git clone --depth 1 --branch "${AP_VERSION}" https://github.com/ArchipelagoMW/Archipelago.git /opt/archipelago \
