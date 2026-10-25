@@ -14,9 +14,10 @@ FROM python:${PYTHON_VERSION}-slim-bookworm AS archipelago
 ARG AP_VERSION
 ENV PIP_NO_CACHE_DIR=1 PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# git: fetching the source and one world requirement that is installed from git. gcc/g++: native extensions.
+# git: fetching the source and one world requirement that is installed from git. gcc/g++: native extensions. cmake:
+# dolphin-memory-engine (The Wind Waker), which has no wheel for arm64 and is built from source there.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates git gcc g++ libc6-dev \
+ && apt-get install -y --no-install-recommends ca-certificates git gcc g++ libc6-dev cmake \
  && rm -rf /var/lib/apt/lists/*
 
 RUN git clone --depth 1 --branch "${AP_VERSION}" https://github.com/ArchipelagoMW/Archipelago.git /opt/archipelago \
@@ -31,7 +32,7 @@ RUN python -m venv /opt/venv-ap \
  && grep -v -i -E '^(kivy|kivymd|pyshortcuts)' requirements.txt > /tmp/core-requirements.txt \
  && /opt/venv-ap/bin/pip install -r /tmp/core-requirements.txt "setuptools>=75,<81" requests \
  && for requirements in worlds/*/requirements.txt; do \
-        /opt/venv-ap/bin/pip install -r "$requirements" --constraint /tmp/core-requirements.txt; \
+        /opt/venv-ap/bin/pip install -r "$requirements" --constraint /tmp/core-requirements.txt || exit 1; \
     done
 
 # Optional but worthwhile: Archipelago falls back to pure Python without this, which is slower for large multiworlds.

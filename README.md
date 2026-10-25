@@ -57,6 +57,9 @@ players log in to keep their YAML configs, see their games and download their pa
 
 ## Quick start
 
+Images are published for `linux/amd64` and `linux/arm64` (Raspberry Pi 4 and 5 with a 64-bit system, ARM NAS, Apple
+silicon); Docker picks the right one.
+
 ### Unraid
 
 1. Add the template. Until the app is listed in Community Applications, put it where Unraid looks for user templates
@@ -544,7 +547,8 @@ saves stay, and games that were running start again. Custom APWorlds can stop lo
 
 **Where new images come from:** the `Archipelago update` workflow checks for a new release every day. When there is
 one, it opens a pull request that bumps `AP_VERSION` in the `Dockerfile` and starts CI for it, which tests the manager
-against the new release and smoke tests the image. Merging the pull request publishes the new image. This needs one
+against the new release and smoke tests the image, on amd64 and on arm64. Merging the pull request publishes the new
+image. This needs one
 setting in the repository: *Settings → Actions → General → Workflow permissions → Allow GitHub Actions to create and
 approve pull requests*. You can also run the workflow by hand (*Actions → Archipelago update → Run workflow*) or edit
 `AP_VERSION` yourself.
@@ -637,4 +641,6 @@ DATA_DIR=../data AP_DIR=$PWD/../Archipelago AP_PYTHON=$PWD/../ap-venv/bin/python
 
 ## Limitations
 
-- Images are published for `linux/amd64` only.
+- On `linux/arm64`, a further Archipelago version installed from the web UI comes without The Wind Waker: its
+  requirement `dolphin-memory-engine` has no build for arm64 and the image has no compiler to make one, so that world
+  is skipped (the install log says so). The version the image comes with has it.
