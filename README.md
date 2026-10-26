@@ -438,8 +438,10 @@ curl -H "Authorization: Bearer apm_…" "https://archipelago.example.com/api/gam
 Tokens cannot make or list tokens, change passwords, sign in or out, link Discord, or add, change or remove user
 accounts (an administrator's token can list them). The token page shows when each
 token was last used, and from where; *Revoke* ends one at once. Administrators see everyone's tokens there and can
-revoke any of them. A token also stops working when it expires or its user is disabled, and goes with its user. The
-administrators' log names the token an administrator's change was made with.
+revoke any of them. A token also stops working when it expires or its user is disabled, and goes with its user. A new
+password ends a user's tokens as well, in case someone who knew the old one made some: when an administrator sets it,
+and when you change your own (unless you untick *Also revoke my API tokens*). The administrators' log names the token
+an administrator's change was made with.
 
 ### Language
 
@@ -570,7 +572,9 @@ approve pull requests*. You can also run the workflow by hand (*Actions → Arch
 ## Security notes
 
 - Passwords are stored as salted scrypt hashes; sessions are `HttpOnly`, `SameSite=Lax` cookies; state-changing API
-  calls require a custom header, which blocks cross-site requests; failed logins are rate limited.
+  calls require a custom header, which blocks cross-site requests; failed logins are rate limited per address (an IPv6
+  address counts with its whole /64 network, which one connection usually has, so hopping between them buys no
+  guesses).
 - API tokens are 256-bit random values of which only a SHA-256 hash is stored. They go in the `Authorization` header,
   which another website cannot make a browser send, so they need no CSRF header. A request with a token is judged by
   the token alone, never by a cookie it also carries, and a token cannot manage tokens, passwords, sign-ins, Discord
@@ -602,10 +606,13 @@ approve pull requests*. You can also run the workflow by hand (*Actions → Arch
 - Signing in with Discord uses OAuth2 with a single-use `state` bound to the browser that started it, a fixed redirect
   address, and Discord's account ID; Discord's tokens are revoked right after use. Disabled users cannot sign in this
   way either.
-- Server logs never show the room or admin passwords (MultiServer repeats them when they are set).
+- Server logs never show the room or admin passwords (MultiServer repeats them when they are set), and neither does a
+  game server's command line, which every process on the machine can read: the passwords reach the server through its
+  console.
 - Without a session, requests may be only a few kilobytes; only admins and organizers (and, for custom games, players
   allowed to submit them, up to 100 MB) can upload large files. Players can keep at most 200 configs and have at most 5 custom
-  games and 5 GitHub repositories waiting for approval.
+  games and 5 GitHub repositories waiting for approval. Each player rolls one file at a time, and rolls never take more
+  than half of the places for Archipelago's helper processes, so rolling in a loop holds up nothing else.
 - An approved GitHub repository installs exactly the release file the admin was shown; if the repository changed it in
   the meantime, the admin is asked to look again. Downloads are checked against GitHub's SHA-256 digest.
 - Creating the first administrator takes a random setup code that is only in the container's log and in
@@ -649,12 +656,13 @@ DATA_DIR=../data AP_DIR=$PWD/../Archipelago AP_PYTHON=$PWD/../ap-venv/bin/python
 - **Tests:** `AP_DIR=… AP_PYTHON=… pytest`. They start the real server and talk to it over HTTP and websockets,
   generate real multiworlds and connect real clients. Without `AP_DIR` the tests that need Archipelago are skipped.
 - **Browser walkthrough:** `tests/ui/flows.mjs` drives the UI with Playwright (see the file header).
-- **Image smoke test:** `python tests/smoke.py http://localhost:8080` against a fresh instance. CI runs it against the
-  built image before publishing.
+- **Image smoke test:** `SETUP_CODE=… python tests/smoke.py http://localhost:8080` against a fresh instance, with the
+  setup code from its log. CI runs it against the built image before publishing.
 - The front end is plain ES modules in `manager/archipelago_manager/static/`, with no build step.
 - `ap_helper.py` runs inside Archipelago's own Python environment: it lists worlds, decodes multidata and saves,
   renders templates and describes each game's options for the options form, so the manager never imports Archipelago's
-  code itself. `yamlform.py` turns a YAML into the form's values and back.
+  code itself. `ap_server.py` starts a game's `MultiServer.py` there, with the passwords it reads from the server's
+  console. `yamlform.py` turns a YAML into the form's values and back.
 
 ## Limitations
 

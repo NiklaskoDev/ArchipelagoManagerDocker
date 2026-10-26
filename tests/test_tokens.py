@@ -122,6 +122,26 @@ def test_tokens_that_no_longer_work(setup):
     assert proxied.patch("/api/settings", json={"public_host": "y"}).status_code == 403
 
 
+def test_a_new_password_ends_the_tokens_made_with_the_old_one(setup):
+    # Someone who knew the old password could have made themselves tokens; changing it ends them unless asked not to
+    server, admin, ann = setup
+    kept, revoked = make_token(ann, name="bot"), make_token(ann, name="old")
+    r = ann.post("/api/auth/password", json={"current_password": "password123", "new_password": "password456",
+                                             "revoke_tokens": False})
+    assert r.json() == {"ok": True, "tokens_revoked": 0}
+    assert bearer(server, kept["token"]).get("/api/games").status_code == 200
+    r = ann.post("/api/auth/password", json={"current_password": "password456", "new_password": "password789"})
+    assert r.json() == {"ok": True, "tokens_revoked": 2}
+    for made in (kept, revoked):
+        assert bearer(server, made["token"]).get("/api/games").status_code == 401
+    assert ann.get("/api/tokens").json() == []
+    # so does a new password an administrator sets
+    made = make_token(ann)
+    ann_id = next(u["id"] for u in admin.get("/api/users").json() if u["username"] == "ann")
+    assert admin.patch(f"/api/users/{ann_id}", json={"password": "fresh-start1"}).status_code == 200
+    assert bearer(server, made["token"]).get("/api/games").status_code == 401
+
+
 def test_tokens_per_user_are_limited(setup):
     _server, _admin, ann = setup
     for i in range(25):

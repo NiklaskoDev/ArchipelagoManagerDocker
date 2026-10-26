@@ -8,7 +8,7 @@ from archipelago_manager.config import CONFIG
 from archipelago_manager.generation import _player_file_errors, _summarize_failure
 from archipelago_manager.rooms import slot_rules
 from archipelago_manager.gamestore import classify
-from archipelago_manager.security import hash_password, verify_password, LoginThrottle
+from archipelago_manager.security import client_address, hash_password, verify_password, LoginThrottle
 from archipelago_manager.textclient import Session, concerns_me, render
 
 
@@ -137,6 +137,18 @@ class TestSecurity:
         assert not throttle.blocked("other")
         throttle.clear("ip|user")
         assert not throttle.blocked("ip|user")
+
+    @pytest.mark.parametrize("host, counted_as", [
+        ("192.0.2.7", "192.0.2.7"),
+        # every address of a home connection's IPv6 network counts as one, so hopping between them buys no guesses
+        ("2001:db8:1:2:aaaa::1", "2001:db8:1:2::/64"), ("2001:db8:1:2:ffff:ffff:ffff:ffff", "2001:db8:1:2::/64"),
+        ("2001:db8:1:3::1", "2001:db8:1:3::/64"),
+        ("::ffff:192.0.2.7", "192.0.2.7"),  # IPv4 by way of an IPv6 socket
+        ("testclient", "testclient"),
+    ])
+    def test_failed_attempts_are_counted_per_address_or_ipv6_network(self, host, counted_as):
+        from starlette.requests import Request
+        assert client_address(Request({"type": "http", "client": (host, 50000)})) == counted_as
 
 
 class TestClassify:

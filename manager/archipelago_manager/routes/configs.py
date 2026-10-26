@@ -286,9 +286,16 @@ class RollRequest(BaseModel):
     content: str = Field(max_length=yamlinfo.MAX_YAML_BYTES)
 
 
+# Who is rolling right now: one roll at a time each (mystery.roll)
+_rolling: set[int] = set()
+
+
 @router.post("/configs/roll")
-async def roll_config(body: RollRequest, _user: sqlite3.Row = Depends(current_user)) -> dict:
+async def roll_config(body: RollRequest, user: sqlite3.Row = Depends(current_user)) -> dict:
     """What a file with weights comes out as when the generator rolls it, once (mystery.py)."""
+    if user["id"] in _rolling:
+        raise HTTPException(429, "Your last roll is not done yet. Roll again when it is.")
+    _rolling.add(user["id"])
     try:
         await asyncio.to_thread(yamlinfo.analyze, body.content, "config")
         return await mystery.roll(body.content)
@@ -296,6 +303,8 @@ async def roll_config(body: RollRequest, _user: sqlite3.Row = Depends(current_us
         raise HTTPException(400, str(e)) from None
     except mystery.RollError as e:
         raise HTTPException(400, f"This file cannot be rolled: {e}") from None
+    finally:
+        _rolling.discard(user["id"])
 
 
 @router.post("/configs/form/read")

@@ -59,7 +59,7 @@ export default async function render({ root, isCurrent }) {
     save.onclick = action(async () => {
       await patch(`/api/users/${user.id}`, { password: pw.value });
       modal.close();
-      toast(t("Password for {user} changed. They have been signed out.", { user: user.username }), "success");
+      toast(t("Password for {user} changed. They have been signed out, and their API tokens were revoked.", { user: user.username }), "success");
     });
     const modal = openModal({ title: t("New password for {user}", { user: user.username }), body: field(t("New password"), pw, t("At least 8 characters")),
       actions: [h("button", { class: "btn", type: "button", onclick: () => modal.close() }, t("Cancel")), save] });

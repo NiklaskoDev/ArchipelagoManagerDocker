@@ -4,6 +4,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import ipaddress
 import secrets
 import sqlite3
 import time
@@ -82,6 +83,12 @@ def destroy_session(token: str) -> None:
 def destroy_user_sessions(user_id: int, except_token: str | None = None) -> None:
     keep = _hash_token(except_token) if except_token else ""
     db.execute("DELETE FROM sessions WHERE user_id = ? AND token_hash != ?", (user_id, keep))
+
+
+def revoke_user_tokens(user_id: int) -> int:
+    """Revokes all API tokens of a user. Returns how many there were."""
+    with db.connection() as conn:
+        return conn.execute("DELETE FROM api_tokens WHERE user_id = ?", (user_id,)).rowcount
 
 
 def https_in_use(request: Request) -> bool:
@@ -185,6 +192,19 @@ def organizer_user(user: sqlite3.Row = Depends(current_user)) -> sqlite3.Row:
 def manages(row: sqlite3.Row, user: sqlite3.Row) -> bool:
     """Whether a user runs a game or a sign-up round (created_by): administrators run all of them, organizers their own."""
     return is_admin(user) or (user["role"] == "organizer" and row["created_by"] == user["id"])
+
+
+def client_address(request: Request) -> str:
+    """Who a request comes from, as the limits on failed attempts count them: the IP address, but for IPv6 its /64
+    network. One home connection gets a whole /64, so trying from the next address of it buys no more guesses."""
+    host = request.client.host if request.client else "?"
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return host
+    if address.version == 6:
+        return str(address.ipv4_mapped) if address.ipv4_mapped else str(ipaddress.ip_network(f"{address}/64", strict=False))
+    return host
 
 
 class LoginThrottle:

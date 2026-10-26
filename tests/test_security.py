@@ -17,6 +17,8 @@ def test_passwords_never_reach_the_log():
     assert mask_secrets("> /option server_password hunter2") == "> /option server_password ********"
     assert mask_secrets("Notice (all): Bob: !admin login hunter2") == "Notice (all): Bob: !admin login ********"
     assert mask_secrets("Set option hint_cost to 10") == "Set option hint_cost to 10"
+    assert mask_secrets("Hosting game at 0.0.0.0:38281 (Password: a)b)") == "Hosting game at 0.0.0.0:38281 (Password: ********)"
+    assert mask_secrets("Hosting game at 0.0.0.0:38281 (No password)") == "Hosting game at 0.0.0.0:38281 (No password)"
 
 
 def test_meta_files_cannot_expand_through_merge_keys():

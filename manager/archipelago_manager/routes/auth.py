@@ -19,9 +19,9 @@ from pydantic import BaseModel, Field
 from .. import __version__, audit, db, discord_auth, notify, settings as app_settings
 from ..config import CONFIG
 from ..security import (ROLES, SESSION_COOKIE, LoginThrottle, admin_user, check_password_policy, check_username,
-                        create_session, current_user, destroy_session, destroy_user_sessions, hash_password,
-                        https_in_use, is_organizer, login_throttle, organizer_user, set_session_cookie,
-                        user_for_request, verify_password)
+                        client_address, create_session, current_user, destroy_session, destroy_user_sessions,
+                        hash_password, https_in_use, is_organizer, login_throttle, organizer_user, revoke_user_tokens,
+                        set_session_cookie, user_for_request, verify_password)
 from ..security import ip_throttle
 
 router = APIRouter(prefix="/api")
@@ -37,8 +37,8 @@ def user_json(row: sqlite3.Row) -> dict:
 
 
 def _client_key(request: Request, username: str) -> str:
-    host = request.client.host if request.client else "?"
-    return f"{host}|{username.strip().casefold()}"  # as the lookup sees the name, so "admin " counts as "admin"
+    # the name as the lookup sees it, so "admin " counts as "admin"
+    return f"{client_address(request)}|{username.strip().casefold()}"
 
 
 def has_users() -> bool:
@@ -152,7 +152,7 @@ def setup(body: SetupRequest, request: Request, response: Response) -> dict:
     global _setup_code
     if has_users():
         raise HTTPException(409, "Setup has already been completed")
-    ip_key = f"ip|{request.client.host if request.client else '?'}"
+    ip_key = f"ip|{client_address(request)}"
     if ip_throttle.blocked(ip_key):
         raise HTTPException(429, "Too many failed logins. Try again in a few minutes.")
     if _setup_code is None or not hmac.compare_digest(_normalized(body.code), _setup_code):
@@ -168,7 +168,7 @@ def setup(body: SetupRequest, request: Request, response: Response) -> dict:
 @router.post("/auth/login")
 def login(creds: Credentials, request: Request, response: Response) -> dict:
     key = _client_key(request, creds.username)
-    ip_key = f"ip|{request.client.host if request.client else '?'}"
+    ip_key = f"ip|{client_address(request)}"
     if login_throttle.blocked(key) or ip_throttle.blocked(ip_key):
         raise HTTPException(429, "Too many failed logins. Try again in a few minutes.")
     row = db.query_one("SELECT * FROM users WHERE username = ?", (creds.username.strip(),))
@@ -209,6 +209,8 @@ def register(creds: Credentials, request: Request, response: Response) -> dict:
 class PasswordChange(BaseModel):
     current_password: str = Field(default="", max_length=256)
     new_password: str = Field(max_length=256)
+    # Whoever knew the old password may have made tokens with it, which would outlast the change
+    revoke_tokens: bool = True
 
 
 @router.post("/auth/password")
@@ -219,7 +221,7 @@ def change_password(body: PasswordChange, request: Request, user: sqlite3.Row = 
     check_password_policy(body.new_password)
     db.execute("UPDATE users SET password_hash = ? WHERE id = ?", (hash_password(body.new_password), user["id"]))
     destroy_user_sessions(user["id"], except_token=request.cookies.get(SESSION_COOKIE))
-    return {"ok": True}
+    return {"ok": True, "tokens_revoked": revoke_user_tokens(user["id"]) if body.revoke_tokens else 0}
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -244,7 +246,7 @@ _discord_starts = LoginThrottle(limit=30, window=10 * 60)
 @router.get("/auth/discord/login")
 def discord_login(request: Request, next: str = "") -> RedirectResponse:
     """Sends the browser to Discord. Opened as a page (not fetched), on the site_url address."""
-    key = request.client.host if request.client else "?"
+    key = client_address(request)
     if _discord_starts.blocked(key):
         return _back_to_app("#/?discord_error=busy")
     _discord_starts.fail(key)
@@ -392,10 +394,11 @@ def patch_user(user_id: int, body: UserPatch, request: Request, admin: sqlite3.R
         db.execute("UPDATE users SET disabled = ? WHERE id = ?", (int(body.disabled), user_id))
         if body.disabled:
             destroy_user_sessions(user_id)
-    if body.password:
+    if body.password:  # for someone who lost theirs, or whose account someone else used: they start afresh
         check_password_policy(body.password)
         db.execute("UPDATE users SET password_hash = ? WHERE id = ?", (hash_password(body.password), user_id))
         destroy_user_sessions(user_id)
+        revoke_user_tokens(user_id)
     if body.unlink_discord:
         db.execute("UPDATE users SET discord_id = NULL, discord_name = NULL WHERE id = ?", (user_id,))
         destroy_user_sessions(user_id)  # sessions that came from that Discord account end with it

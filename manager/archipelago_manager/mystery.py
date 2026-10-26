@@ -28,6 +28,11 @@ MAX_WEIGHT = 1000
 KEEP_DEFAULT = {"progression_balancing", "accessibility", "death_link"}
 
 
+# Every roll loads Archipelago with all its games in a helper. Rolls take at most this many of the helpers' places at a
+# time (apbridge.run_helper), so players rolling away cannot hold up imports, trackers and the like.
+_ROLLS = asyncio.Semaphore(2)
+
+
 class RollError(ValueError):
     pass
 
@@ -38,7 +43,8 @@ async def roll(text: str) -> dict:
         path = Path(tmp) / "weights.yaml"
         path.write_text(text, encoding="utf-8")
         try:
-            result = await apbridge.run_helper("roll", str(path), timeout=180)
+            async with _ROLLS:
+                result = await apbridge.run_helper("roll", str(path), timeout=180)
         except apbridge.APBridgeError as e:
             message = str(e).split(": ", 1)[1] if str(e).startswith(("Exception: ", "OptionError: ", "ValueError: ")) \
                 else str(e)

@@ -1,6 +1,7 @@
 """Chance in configs (mystery.py): rolling a file with weights as the generator does, and mystery rounds, where every
 player gets what one file of weights rolls for them."""
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 import yaml
@@ -52,6 +53,20 @@ def test_a_file_with_weights_is_rolled_as_the_generator_rolls_it(admin, make_use
     r = ann.post("/api/configs/roll", json={"content": player_yaml("Nobody", "Not A Game")})
     assert r.status_code == 400 and r.json()["detail"].startswith("This file cannot be rolled: ")
     assert ann.post("/api/configs/roll", json={"content": "name: [unclosed"}).status_code == 400
+
+
+def test_a_player_rolls_one_file_at_a_time(admin, make_user):
+    # Each roll loads Archipelago with every game; someone rolling in a loop must not hold up the server's other work
+    _name, ann = make_user("ann")
+    _name, bob = make_user("bob")
+    with ThreadPoolExecutor(3) as pool:
+        first = pool.submit(ann.post, "/api/configs/roll", json={"content": WEIGHTS})
+        time.sleep(0.5)  # well inside the seconds a roll takes
+        second = pool.submit(ann.post, "/api/configs/roll", json={"content": WEIGHTS})
+        other = pool.submit(bob.post, "/api/configs/roll", json={"content": WEIGHTS})
+        assert second.result().status_code == 429 and "not done yet" in second.result().json()["detail"]
+        assert first.result().status_code == 200 and other.result().status_code == 200
+    assert ann.post("/api/configs/roll", json={"content": WEIGHTS}).status_code == 200  # and again once it is done
 
 
 def test_in_a_mystery_round_everyone_joins_with_a_name_and_gets_what_the_weights_roll(admin, make_user):
