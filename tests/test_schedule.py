@@ -42,9 +42,10 @@ def test_a_planned_start_opens_the_game_and_times_the_race(ap_server, admin, mak
     # taking the plan back
     assert admin.patch(url, json={"start_at": None}).json()["start"] is None
 
-    # a start a few seconds away (moved in the database: a real one is at least a minute ahead)
+    # a start half a minute away (moved in the database: a real one is at least a minute ahead). The countdown begins
+    # ten seconds before it, which ends the "opened" stage: the rest is time for the server to open and be announced.
     admin.patch(url, json={"start_at": time.time() + 3600, "start_open_minutes": 1})
-    start = time.time() + 14
+    start = time.time() + 30
     conn = sqlite3.connect(ap_server.data_dir / "manager.sqlite3")
     with conn:
         conn.execute("UPDATE games SET start_at = ? WHERE id = ?", (start, gid))
@@ -54,7 +55,7 @@ def test_a_planned_start_opens_the_game_and_times_the_race(ap_server, admin, mak
     assert {"name": "Start", "value": f"<t:{int(start)}:R>", "inline": True} in online["fields"]
     assert wait_state(admin, gid, "running")["start"]["stage"] == "opened"
     # the countdown runs in every client and says GO at the start
-    wait_for(lambda: any("[Server]: GO" in line for line in log(admin, gid)), timeout=40, message="the countdown")
+    wait_for(lambda: any("[Server]: GO" in line for line in log(admin, gid)), timeout=60, message="the countdown")
     assert time.time() >= start - 1.5
     countdown = next(line for line in log(admin, gid) if re.search(r"Starting countdown of \d+s", line))
     assert 5 <= int(re.search(r"countdown of (\d+)s", countdown).group(1)) <= 10
