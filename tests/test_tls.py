@@ -34,7 +34,8 @@ def trusting(cert) -> ssl.SSLContext:
 @needs_openssl
 def test_a_certificate_is_checked_before_it_is_kept(plain_server, tmp_path):
     admin = plain_server.client()
-    assert admin.post("/api/auth/setup", json={"username": "admin", "password": "adminpass1"}).status_code == 200
+    assert admin.post("/api/auth/setup", json={"username": "admin", "password": "adminpass1",
+                                               "code": plain_server.setup_code()}).status_code == 200
     cert, key = make_certificate(tmp_path)
     other_cert, other_key = make_certificate(tmp_path, "other", host="elsewhere.example.test", days=5)
 
@@ -77,8 +78,8 @@ def secure(tmp_path_factory):
     from conftest import Server
     server = Server(tmp_path_factory.mktemp("secure") / "data", ap=True, extra_env={"SLEEP_MINUTE_SECONDS": "1"})
     server.start()
-    assert server.client().post("/api/auth/setup", json={"username": "admin", "password": "adminpass1"}
-                                ).status_code == 200
+    assert server.client().post("/api/auth/setup", json={"username": "admin", "password": "adminpass1",
+                                                         "code": server.setup_code()}).status_code == 200
     yield server
     server.stop()
 

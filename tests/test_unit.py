@@ -8,7 +8,7 @@ from archipelago_manager.config import CONFIG
 from archipelago_manager.generation import _player_file_errors, _summarize_failure
 from archipelago_manager.rooms import slot_rules
 from archipelago_manager.gamestore import classify
-from archipelago_manager.security import hash_password, verify_password, LoginThrottle
+from archipelago_manager.security import client_address, hash_password, verify_password, LoginThrottle
 from archipelago_manager.textclient import Session, concerns_me, render
 
 
@@ -71,6 +71,25 @@ class TestYamlInfo:
         with pytest.raises(yamlinfo.YamlError, match="too large"):
             yamlinfo.decode_text(b"x" * (yamlinfo.MAX_YAML_BYTES + 1))
 
+    def test_aliases_may_repeat_a_file_only_so_much(self):
+        def nested(levels: int) -> str:  # each level repeats the one before nine times
+            lines = ["name: A", "game: Zillion", "Zillion: {}", "x0: &a0 [lol, lol, lol, lol, lol, lol, lol, lol, lol]"]
+            lines += [f"x{i}: &a{i} [{', '.join([f'*a{i - 1}'] * 9)}]" for i in range(1, levels + 1)]
+            return "\n".join([*lines, f"description: *a{levels}"]) + "\n"
+
+        assert yamlinfo.analyze(nested(3), "x").games == ["Zillion"]
+        # 400 bytes that would be gigabytes once something prints or copies them
+        for levels in (5, 9):
+            with pytest.raises(yamlinfo.YamlError, match="repeat too much"):
+                yamlinfo.analyze(nested(levels), "x")
+        with pytest.raises(yamlinfo.YamlError, match="inside what it repeats"):
+            yamlinfo.analyze("name: A\ngame: Zillion\nZillion: &z {again: *z}\n", "x")
+        # an anchor used the way people do, to share options
+        info = yamlinfo.analyze("name: A\ngame: Zillion\nshared: &s {skill: hard}\nZillion: *s\n", "x")
+        assert info.problems == []
+        with pytest.raises(yamlinfo.YamlError, match="Invalid YAML"):
+            yamlinfo.analyze("name: A\ngame: Zillion\nZillion: *\n", "x")
+
     @pytest.mark.parametrize("raw, expected", [
         ("../../etc/passwd", "passwd"), ("a b.yaml", "a b.yaml"), ("we<ird>*.txt", "we_ird_.txt"),
         ("C:\\temp\\x.yaml", "x.yaml"), ("...", "file"), ("", "file"),
@@ -118,6 +137,18 @@ class TestSecurity:
         assert not throttle.blocked("other")
         throttle.clear("ip|user")
         assert not throttle.blocked("ip|user")
+
+    @pytest.mark.parametrize("host, counted_as", [
+        ("192.0.2.7", "192.0.2.7"),
+        # every address of a home connection's IPv6 network counts as one, so hopping between them buys no guesses
+        ("2001:db8:1:2:aaaa::1", "2001:db8:1:2::/64"), ("2001:db8:1:2:ffff:ffff:ffff:ffff", "2001:db8:1:2::/64"),
+        ("2001:db8:1:3::1", "2001:db8:1:3::/64"),
+        ("::ffff:192.0.2.7", "192.0.2.7"),  # IPv4 by way of an IPv6 socket
+        ("testclient", "testclient"),
+    ])
+    def test_failed_attempts_are_counted_per_address_or_ipv6_network(self, host, counted_as):
+        from starlette.requests import Request
+        assert client_address(Request({"type": "http", "client": (host, 50000)})) == counted_as
 
 
 class TestClassify:

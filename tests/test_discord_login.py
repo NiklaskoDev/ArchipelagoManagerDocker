@@ -92,7 +92,8 @@ def site(tmp_path, discord):
                                                              "DISCORD_AUTHORIZE_URL": f"{discord.url}/oauth2/authorize"})
     server.start()
     admin = server.client()
-    assert admin.post("/api/auth/setup", json={"username": "boss", "password": "bosspass123"}).status_code == 200
+    assert admin.post("/api/auth/setup", json={"username": "boss", "password": "bosspass123",
+                                               "code": server.setup_code()}).status_code == 200
     r = admin.patch("/api/settings", json={"site_url": SITE + "/", "discord_login": True, "discord_client_id": CLIENT_ID,
                                            "discord_client_secret": SECRET})
     assert r.status_code == 200, r.text
@@ -134,7 +135,8 @@ def test_settings_keep_the_secret_on_the_server(tmp_path, discord):
     server.start()
     try:
         admin = server.client()
-        admin.post("/api/auth/setup", json={"username": "boss", "password": "bosspass123"})
+        admin.post("/api/auth/setup", json={"username": "boss", "password": "bosspass123",
+                                            "code": server.setup_code()})
         r = admin.patch("/api/settings", json={"discord_login": True})
         assert r.status_code == 400 and "client ID" in r.json()["detail"]
         for bad in ({"discord_client_id": "not-a-number"}, {"discord_guild_id": "12"}, {"discord_client_secret": "a b"}):

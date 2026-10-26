@@ -51,7 +51,8 @@ def versioned(tmp_path_factory):
                     extra_env={"AP_SOURCE_URL": f"file://{releases}/{{version}}.tar.gz"})
     server.start()
     admin = server.client()
-    assert admin.post("/api/auth/setup", json={"username": "admin", "password": "adminpass1"}).status_code == 200
+    assert admin.post("/api/auth/setup", json={"username": "admin", "password": "adminpass1",
+                                               "code": server.setup_code()}).status_code == 200
     yield server, server.client("admin", "adminpass1")
     server.stop()
 
@@ -91,7 +92,9 @@ def test_a_game_runs_on_a_version_of_its_own(versioned):
     pid = server_pid(gid, server)
     cmdline = open(f"/proc/{pid}/cmdline", "rb").read().split(b"\0")
     assert cmdline[0] == str(folder / "venv" / "bin" / "python").encode()
-    assert cmdline[1] == str(folder / "archipelago" / "MultiServer.py").encode()
+    # the launcher that hands MultiServer.py its passwords, and that version's MultiServer.py
+    assert cmdline[1].endswith(b"/ap_server.py")
+    assert cmdline[2] == str(folder / "archipelago" / "MultiServer.py").encode()
     slot = game["slots"][0]["slot"]
     assert admin.get(f"/api/games/{gid}/slots/{slot}/tracker").status_code == 200
 

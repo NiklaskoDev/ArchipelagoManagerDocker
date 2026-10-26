@@ -1,0 +1,11 @@
+# The workflows use the actions of others by commit, not by a tag their owners could move to other code (a tag that
+# is taken over would get to push images). Dependabot proposes the newer commits, once a month in one pull request.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]

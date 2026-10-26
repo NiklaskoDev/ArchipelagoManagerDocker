@@ -2,6 +2,7 @@
 import io
 import socket
 import zipfile
+from pathlib import Path
 
 import pytest
 
@@ -22,6 +23,17 @@ def seed_game(admin):
         if c["player_names"] and c["player_names"][0] in (FIRST, SECOND):
             admin.delete(f"/api/configs/{c['id']}")
     return game_id
+
+
+def command_lines() -> list[str]:
+    """What `ps` shows of every process on the machine."""
+    lines = []
+    for path in Path("/proc").glob("[0-9]*/cmdline"):
+        try:
+            lines.append(path.read_bytes().replace(b"\0", b" ").decode(errors="replace"))
+        except OSError:  # gone meanwhile
+            pass
+    return lines
 
 
 def by_slot(game):
@@ -331,6 +343,10 @@ def test_play_a_game_end_to_end(admin, make_user):
         assert client.connected and len(client.response["checked_locations"]) == 4
     with APClient(port, "Aly", "ChecksFinder") as client:
         assert client.response["errors"] == ["InvalidPassword"]  # the password survived the restart
+    # it reached the server through its console: not on its command line, which everyone on the machine can read
+    server = [line for line in command_lines() if "MultiServer.py" in line and f"--port {port} " in line]
+    assert len(server) == 1 and "--port" in server[0] and "letmein" not in server[0]
+    assert not any("letmein" in l["text"] for l in admin.get(f"/api/games/{gid}/log").json()["lines"])
 
     # the console log is the admin's
     log = [l["text"] for l in admin.get(f"/api/games/{gid}/log").json()["lines"]]

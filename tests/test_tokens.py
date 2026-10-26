@@ -9,7 +9,8 @@ import pytest
 @pytest.fixture
 def setup(plain_server):
     admin = plain_server.client()
-    assert admin.post("/api/auth/setup", json={"username": "boss", "password": "bosspass123"}).status_code == 200
+    assert admin.post("/api/auth/setup", json={"username": "boss", "password": "bosspass123",
+                                               "code": plain_server.setup_code()}).status_code == 200
     admin = plain_server.client("boss", "bosspass123")
     assert admin.post("/api/users", json={"username": "ann", "password": "password123"}).status_code == 200
     return plain_server, admin, plain_server.client("ann", "password123")
@@ -61,6 +62,20 @@ def test_administrators_scripts_and_the_log(setup):
     entry = admin.get("/api/audit?action=settings").json()["entries"][0]
     assert entry["username"] == "boss" and entry["details"]["token"] == "nightly"
 
+    # but it does not manage accounts: it cannot change its owner's password, nor make an administrator of its own
+    script = bearer(server, token)
+    assert [u["username"] for u in script.get("/api/users").json()] == ["ann", "boss"]
+    boss, ann_id = (next(u["id"] for u in admin.get("/api/users").json() if u["username"] == name)
+                    for name in ("boss", "ann"))
+    for method, path, body in (("PATCH", f"/api/users/{boss}", {"password": "lockedout123"}),
+                               ("PATCH", f"/api/users/{ann_id}", {"role": "admin"}),
+                               ("POST", "/api/users", {"username": "backdoor", "password": "backdoor123", "role": "admin"}),
+                               ("DELETE", f"/api/users/{ann_id}", None)):
+        r = script.request(method, path, json=body)
+        assert r.status_code == 403 and "Sign in instead" in r.json()["detail"], (method, path, r.text)
+    assert [u["role"] for u in admin.get("/api/users").json()] == ["user", "admin"]
+    assert server.client("boss", "bosspass123").get("/api/auth/status").json()["user"]["username"] == "boss"
+
     # an administrator sees and revokes everybody's tokens; others only their own
     theirs = make_token(ann, name="ann's")
     assert [t["username"] for t in admin.get("/api/tokens?all=true").json()] == ["ann", "boss"]
@@ -105,6 +120,26 @@ def test_tokens_that_no_longer_work(setup):
     assert proxied.get("/api/auth/status").json()["user"]["username"] == "boss"
     del proxied.headers["X-Requested-With"]
     assert proxied.patch("/api/settings", json={"public_host": "y"}).status_code == 403
+
+
+def test_a_new_password_ends_the_tokens_made_with_the_old_one(setup):
+    # Someone who knew the old password could have made themselves tokens; changing it ends them unless asked not to
+    server, admin, ann = setup
+    kept, revoked = make_token(ann, name="bot"), make_token(ann, name="old")
+    r = ann.post("/api/auth/password", json={"current_password": "password123", "new_password": "password456",
+                                             "revoke_tokens": False})
+    assert r.json() == {"ok": True, "tokens_revoked": 0}
+    assert bearer(server, kept["token"]).get("/api/games").status_code == 200
+    r = ann.post("/api/auth/password", json={"current_password": "password456", "new_password": "password789"})
+    assert r.json() == {"ok": True, "tokens_revoked": 2}
+    for made in (kept, revoked):
+        assert bearer(server, made["token"]).get("/api/games").status_code == 401
+    assert ann.get("/api/tokens").json() == []
+    # so does a new password an administrator sets
+    made = make_token(ann)
+    ann_id = next(u["id"] for u in admin.get("/api/users").json() if u["username"] == "ann")
+    assert admin.patch(f"/api/users/{ann_id}", json={"password": "fresh-start1"}).status_code == 200
+    assert bearer(server, made["token"]).get("/api/games").status_code == 401
 
 
 def test_tokens_per_user_are_limited(setup):

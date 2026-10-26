@@ -1,7 +1,7 @@
 import { h, clear, icon, toast, openModal, action, confirmDialog } from "./util.js";
 import { api, state, refreshStatus, setUnauthorizedHandler, isAdmin, canGenerate, post, put, ApiError } from "./api.js";
 import { banner, loading, field, checkbox } from "./components.js";
-import { t, lang, LANGUAGES, setLanguage } from "./i18n.js";
+import { t, plural, lang, LANGUAGES, setLanguage } from "./i18n.js";
 
 const ROUTES = [
   [/^\/?$/, () => import("./views/dashboard.js"), "home"],
@@ -269,20 +269,24 @@ function passwordDialog() {
   const current = first ? null : h("input", { type: "password", class: "input", autocomplete: "current-password" });
   const next = h("input", { type: "password", class: "input", autocomplete: "new-password", minLength: 8 });
   const again = h("input", { type: "password", class: "input", autocomplete: "new-password" });
+  // on by default: whoever knew the old password may have made tokens with it
+  const revoke = checkbox(t("Also revoke my API tokens"), true, t("Scripts and bots then need new ones."));
   const title = first ? t("Set a password") : t("Change password");
   const save = h("button", { class: "btn primary", type: "button" }, title);
   save.onclick = action(async () => {
     if (next.value !== again.value) throw new Error(t("The new passwords do not match"));
-    await post("/api/auth/password", { current_password: current ? current.value : "", new_password: next.value });
+    const r = await post("/api/auth/password", { current_password: current ? current.value : "", new_password: next.value,
+      revoke_tokens: revoke.input.checked });
     modal.close();
     if (first) state.user = { ...state.user, has_password: true };
-    toast(first ? t("Password set. You can now also sign in with {name} and this password.", { name: state.user.username })
-      : t("Password changed"), "success");
+    const revoked = r.tokens_revoked ? ` ${plural(r.tokens_revoked, "{n} API token was revoked.", "{n} API tokens were revoked.")}` : "";
+    toast((first ? t("Password set. You can now also sign in with {name} and this password.", { name: state.user.username })
+      : t("Password changed")) + revoked, "success");
   });
   const modal = openModal({
     title,
     body: h("div", { class: "stack" }, current ? field(t("Current password"), current) : null,
-      field(t("New password"), next, t("At least 8 characters")), field(t("Repeat new password"), again)),
+      field(t("New password"), next, t("At least 8 characters")), field(t("Repeat new password"), again), revoke),
     actions: [h("button", { class: "btn", type: "button", onclick: () => modal.close() }, t("Cancel")), save],
   });
 }
@@ -329,7 +333,10 @@ function renderAuth(notice) {
   let mode = status.needs_setup ? "setup" : "login";
   const card = h("div", { class: "auth-card card" });
   const draw = () => {
-    const username = h("input", { class: "input", autocomplete: "username", required: true, autofocus: true });
+    // the first administrator needs the code the container writes to its log (routes/auth.py)
+    const code = mode === "setup" ? h("input", { class: "input", autocomplete: "off", autocapitalize: "characters",
+      required: true, autofocus: true, placeholder: "XXXX-XXXX-XXXX" }) : null;
+    const username = h("input", { class: "input", autocomplete: "username", required: true, autofocus: !code });
     const password = h("input", { class: "input", type: "password", required: true,
       autocomplete: mode === "login" ? "current-password" : "new-password", minLength: mode === "login" ? 1 : 8 });
     const confirm = mode === "login" ? null : h("input", { class: "input", type: "password", autocomplete: "new-password", required: true });
@@ -344,13 +351,14 @@ function renderAuth(notice) {
       submit.disabled = true;
       try {
         const path = { setup: "setup", login: "login", register: "register" }[mode];
-        await post(`/api/auth/${path}`, { username: username.value, password: password.value });
+        await post(`/api/auth/${path}`, { username: username.value, password: password.value, ...(code ? { code: code.value } : {}) });
         await boot();
       } catch (err) {
         error.textContent = err.message;
         submit.disabled = false;
       }
     } },
+    code ? field(t("Setup code"), code, t("It is in the container's log (on Unraid: the container's Logs), and in the file setup-code.txt in the data folder.")) : null,
     field(t("Username"), username),
     field(t("Password"), password, mode === "login" ? null : t("At least 8 characters")),
     confirm ? field(t("Repeat password"), confirm) : null,

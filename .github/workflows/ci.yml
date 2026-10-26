@@ -34,16 +34,21 @@ jobs:
 
       - name: Find the Archipelago version
         id: ap
+        env:
+          REQUESTED: ${{ inputs.ap_version }}  # handed over as data: inside the script it could add commands of its own
         run: |
-          version="${{ inputs.ap_version }}"
+          version="$REQUESTED"
           if [ -z "$version" ]; then
             version="$(sed -n 's/^ARG AP_VERSION=//p' Dockerfile | head -1)"
           fi
+          case "$version" in ''|*[!0-9.]*) echo "Not an Archipelago release: $version" >&2; exit 1 ;; esac
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "Testing against Archipelago $version"
 
       - name: Fetch Archipelago
-        run: git clone --depth 1 --branch "${{ steps.ap.outputs.version }}" https://github.com/ArchipelagoMW/Archipelago.git "$RUNNER_TEMP/archipelago"
+        env:
+          AP_VERSION: ${{ steps.ap.outputs.version }}
+        run: git clone --depth 1 --branch "$AP_VERSION" https://github.com/ArchipelagoMW/Archipelago.git "$RUNNER_TEMP/archipelago"
 
       # The same steps as the Dockerfile, so a broken requirement shows up here as well as in the image build.
       - name: Install Archipelago's requirements
@@ -109,24 +114,27 @@ jobs:
 
       - name: Work out names
         id: names
+        env:
+          REQUESTED: ${{ inputs.ap_version }}  # handed over as data: inside the script it could add commands of its own
         run: |
           echo "image=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
-          version="${{ inputs.ap_version }}"
+          version="$REQUESTED"
           if [ -z "$version" ]; then
             version="$(sed -n 's/^ARG AP_VERSION=//p' Dockerfile | head -1)"
           fi
+          case "$version" in ''|*[!0-9.]*) echo "Not an Archipelago release: $version" >&2; exit 1 ;; esac
           echo "ap_version=$version" >> "$GITHUB_OUTPUT"
 
-      - uses: docker/setup-buildx-action@v4
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069  # v4.4.1
 
       - name: Image labels
         id: meta
-        uses: docker/metadata-action@v6
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302  # v6.2.0
         with:
           images: ${{ steps.names.outputs.image }}
 
       - name: Build for testing
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc  # v7.4.0
         with:
           context: .
           platforms: linux/${{ matrix.arch }}
@@ -146,6 +154,9 @@ jobs:
           mkdir -p "$RUNNER_TEMP/smoke-config"
           docker run -d --name smoke -p 8080:8080 -p 38281-38300:38281-38300 \
             -v "$RUNNER_TEMP/smoke-config:/config" archipelago-manager:smoke
+          # the code for creating the first administrator, which the manager writes at startup (readable for root only)
+          for _ in $(seq 60); do docker exec smoke test -s /config/setup-code.txt && break; sleep 2; done
+          export SETUP_CODE="$(docker exec smoke cat /config/setup-code.txt)"
           if ! python3 tests/smoke.py http://127.0.0.1:8080 127.0.0.1; then
             docker logs smoke
             exit 1
@@ -166,7 +177,7 @@ jobs:
 
       - name: Log in to the registry
         if: env.PUBLISH == 'true'
-        uses: docker/login-action@v4
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6  # v4.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -175,7 +186,7 @@ jobs:
       - name: Push by digest
         id: push
         if: env.PUBLISH == 'true'
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc  # v7.4.0
         with:
           context: .
           platforms: linux/${{ matrix.arch }}
@@ -216,12 +227,15 @@ jobs:
 
       - name: Work out names
         id: names
+        env:
+          REQUESTED: ${{ inputs.ap_version }}  # handed over as data: inside the script it could add commands of its own
         run: |
           echo "image=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
-          version="${{ inputs.ap_version }}"
+          version="$REQUESTED"
           if [ -z "$version" ]; then
             version="$(sed -n 's/^ARG AP_VERSION=//p' Dockerfile | head -1)"
           fi
+          case "$version" in ''|*[!0-9.]*) echo "Not an Archipelago release: $version" >&2; exit 1 ;; esac
           echo "ap_version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Fetch the digests
@@ -231,11 +245,11 @@ jobs:
           pattern: digest-*
           merge-multiple: true
 
-      - uses: docker/setup-buildx-action@v4
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069  # v4.4.1
 
       - name: Image tags
         id: meta
-        uses: docker/metadata-action@v6
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302  # v6.2.0
         with:
           images: ${{ steps.names.outputs.image }}
           tags: |
@@ -246,7 +260,7 @@ jobs:
             type=sha,format=short
 
       - name: Log in to the registry
-        uses: docker/login-action@v4
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6  # v4.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}

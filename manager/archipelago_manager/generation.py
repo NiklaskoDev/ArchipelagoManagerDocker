@@ -120,9 +120,11 @@ def clean_meta(meta: str | None) -> str | None:
     if meta is None or not meta.strip():
         return None
     try:
-        # the player-file loader: it refuses merge keys, which can blow a tiny file up to gigabytes
+        # the player-file loader: it refuses merge keys and aliases that repeat too much, which can blow a tiny file up
+        # to gigabytes
+        yamlinfo.check_aliases(meta)
         doc = list(yaml.load_all(meta, Loader=yamlinfo.UniqueKeyLoader))[-1]
-    except yaml.YAMLError as e:
+    except (yaml.YAMLError, yamlinfo.YamlError) as e:
         raise JobRequestError(f"meta.yaml is not valid YAML: {e}") from None
     if not isinstance(doc, dict) or "meta_description" not in doc:
         raise JobRequestError("meta.yaml must contain a 'meta_description' entry, otherwise the generator rejects it")

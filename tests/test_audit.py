@@ -8,7 +8,8 @@ from helpers import player_yaml, upload_yaml
 
 def setup(server):
     client = server.client()
-    assert client.post("/api/auth/setup", json={"username": "boss", "password": "bosspass123"}).status_code == 200
+    assert client.post("/api/auth/setup", json={"username": "boss", "password": "bosspass123",
+                                                "code": server.setup_code()}).status_code == 200
     return client
 
 

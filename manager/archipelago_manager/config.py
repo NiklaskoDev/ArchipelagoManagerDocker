@@ -37,6 +37,7 @@ class Config:
     ap_dir: Path
     ap_python: str
     helper: Path
+    server_launcher: Path  # starts a game's MultiServer.py with its passwords from the console (ap_server.py)
     port_start: int
     port_end: int
     public_host: str
@@ -110,6 +111,7 @@ def load_config() -> Config:
         ap_dir=Path(os.environ.get("AP_DIR", "/opt/archipelago")).resolve(),
         ap_python=os.environ.get("AP_PYTHON", "/opt/venv-ap/bin/python"),
         helper=Path(__file__).resolve().parent.parent / "ap_helper.py",
+        server_launcher=Path(__file__).resolve().parent.parent / "ap_server.py",
         port_start=start,
         port_end=end,
         public_host=os.environ.get("PUBLIC_HOST", "").strip(),

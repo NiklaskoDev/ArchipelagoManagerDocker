@@ -43,10 +43,12 @@ _PASSWORD_OK = re.compile(r"[^\s\x00-\x1f\x7f]{1,64}")
 # crash reasons go to Discord.
 _SECRET_OPTION = re.compile(r"((?:/option|Set option)\s+(?:server_)?password\s+(?:to\s+)?|!admin\s+login\s+)\S+",
                             re.IGNORECASE)
+# and it names the room password when it starts: "Hosting game at 0.0.0.0:38281 (Password: hunter2)"
+_HOSTING = re.compile(r"(Hosting game at \S+ \(Password: ).*\)$")
 
 
 def mask_secrets(line: str) -> str:
-    return _SECRET_OPTION.sub(r"\1********", line)
+    return _HOSTING.sub(r"\1********)", _SECRET_OPTION.sub(r"\1********", line))
 
 
 # `/option password <word>` turns these into "no password", which would silently disable the one being set.
@@ -143,14 +145,14 @@ def _option_commands(game: Any) -> list[str]:
 
 
 def build_command(game: Any, certificate: tuple[str, str] | None = None) -> list[str]:
+    """The command that starts the server of a game. Its passwords are not in it: they go to the server's console first
+    (passwords_line), as everyone on the machine can read a command line."""
     opts = app_settings.clean_server_options(db.jloads(game["options"], {}))
-    cmd = apbridge.ap_command(
-        "MultiServer.py", str(gamepaths.multidata_path(game["id"])),
+    python, multiserver = apbridge.ap_command("MultiServer.py", version=game["ap_version"])
+    cmd = [
+        python, str(CONFIG.server_launcher), multiserver, str(gamepaths.multidata_path(game["id"])),
         "--host", "0.0.0.0",  # without a host the server tries to look up its public IP on the internet at startup
         "--port", str(game["port"]),
-        # in one argument each: a password that starts with "-" would otherwise be read as an option
-        f"--password={game['password'] or ''}",
-        f"--server_password={game['server_password'] or ''}",
         "--hint_cost", str(opts["hint_cost"]),
         "--location_check_points", str(opts["location_check_points"]),
         "--release_mode", opts["release_mode"],
@@ -160,8 +162,7 @@ def build_command(game: Any, certificate: tuple[str, str] | None = None) -> list
         "--auto_shutdown", "0",  # the manager puts the server to sleep itself (watch_idle), also over host.yaml
         "--compatibility", str(opts["compatibility"]),
         "--loglevel", opts["loglevel"],
-        version=game["ap_version"],
-    )
+    ]
     if opts["disable_item_cheat"]:
         cmd.append("--disable_item_cheat")
     if opts["use_embedded_options"]:
@@ -169,6 +170,11 @@ def build_command(game: Any, certificate: tuple[str, str] | None = None) -> list
     if certificate:
         cmd += [f"--cert={certificate[0]}", f"--cert_key={certificate[1]}"]
     return cmd
+
+
+def passwords_line(game: Any) -> str:
+    """The first line of the server's console: its passwords, which ap_server.py turns into its arguments."""
+    return json.dumps({"password": game["password"] or "", "server_password": game["server_password"] or ""})
 
 
 def player_list(game_id: int) -> str:
@@ -360,6 +366,7 @@ class RoomManager:
             raise RoomError(room.error) from e
 
         db.execute("UPDATE games SET desired_state = 'running', asleep = 0 WHERE id = ?", (room.game_id,))
+        self._write_stdin(room, passwords_line(game), echo=False)
         for command in _option_commands(game):
             self._write_stdin(room, command, echo=False)
         for coro in (self._pump(room, room.proc), self._watch(room, room.proc), self._wait_ready(room, room.proc)):

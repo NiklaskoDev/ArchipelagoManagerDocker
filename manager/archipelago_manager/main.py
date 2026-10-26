@@ -59,6 +59,7 @@ async def lifespan(_app: FastAPI):
     versions.reset()
     audit.prune()
     auth.bootstrap_admin()
+    auth.prepare_setup()
     ROOMS.reset()
     notify.start()
     await GENERATION.start()
@@ -175,12 +176,14 @@ def _warn_about_untrusted_proxy(request: Request) -> None:
 
 
 def _token_refusal(request: Request) -> JSONResponse | None:
-    """Why a request with an API token cannot go ahead, if it cannot. Tokens do not manage tokens, passwords, sign-ins
-    or Discord links: a leaked token must not be able to lock its owner out or make itself new tokens."""
+    """Why a request with an API token cannot go ahead, if it cannot. Tokens do not manage tokens, passwords, sign-ins,
+    Discord links or user accounts: a leaked token must not be able to lock its owner out, make itself new tokens or
+    make an administrator of its own."""
     path = request.url.path
     if user_for_request(request) is None:
         return JSONResponse(status_code=401, content={"detail": "This API token is not valid (any more)"})
-    if path.startswith("/api/tokens") or (path.startswith("/api/auth/") and path != "/api/auth/status"):
+    if path.startswith("/api/tokens") or (path.startswith("/api/auth/") and path != "/api/auth/status") or (
+            path.startswith("/api/users") and request.method not in SAFE_METHODS):
         return JSONResponse(status_code=403, content={"detail": "API tokens cannot be used for this. Sign in instead."})
     if request.method not in SAFE_METHODS and token_for_request(request)["access"] != "write":
         return JSONResponse(status_code=403, content={"detail": "This API token can only read"})

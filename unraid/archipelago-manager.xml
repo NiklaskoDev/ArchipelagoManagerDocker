@@ -17,7 +17,7 @@
 - Custom games (.apworld) are stored, and you are prompted to add them when one is missing&#xD;
 - Admin and player views, live server console, progress per slot&#xD;
 &#xD;
-Open the web UI after starting the container to create the administrator account. Every hosted game needs one port of the game port range, so publish the whole range.</Overview>
+Open the web UI after starting the container to create the administrator account, with the setup code from the container's log (or setup-code.txt in the appdata folder). Every hosted game needs one port of the game port range, so publish the whole range.</Overview>
   <Category>GameServers: Tools:</Category>
   <WebUI>http://[IP]:[PORT:8080]/</WebUI>
   <TemplateURL>https://raw.githubusercontent.com/NiklaskoDev/ArchipelagoManagerDocker/main/unraid/archipelago-manager.xml</TemplateURL>

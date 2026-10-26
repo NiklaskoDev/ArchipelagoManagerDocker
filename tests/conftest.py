@@ -148,13 +148,18 @@ class Server:
     def log(self) -> str:
         return self.log_path.read_text(errors="replace")
 
+    def setup_code(self) -> str:
+        """The code for creating the first administrator, as the manager keeps it in the data folder."""
+        return (self.data_dir / "setup-code.txt").read_text().strip()
+
 
 @pytest.fixture(scope="session")
 def ap_server(tmp_path_factory):
     server = Server(tmp_path_factory.mktemp("apdata") / "data", ap=True)
     server.start()
     admin = server.client()
-    assert admin.post("/api/auth/setup", json={"username": "admin", "password": "adminpass1"}).status_code == 200
+    assert admin.post("/api/auth/setup", json={"username": "admin", "password": "adminpass1",
+                                               "code": server.setup_code()}).status_code == 200
     yield server
     server.stop()
 

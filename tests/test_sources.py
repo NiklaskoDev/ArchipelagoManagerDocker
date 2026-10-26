@@ -110,7 +110,8 @@ def site(tmp_path_factory, github):
     server = Server(tmp_path_factory.mktemp("sources") / "data", ap=True, extra_env={"GITHUB_API_URL": github.url})
     server.start()
     admin = server.client()
-    assert admin.post("/api/auth/setup", json={"username": "boss", "password": "bosspass123"}).status_code == 200
+    assert admin.post("/api/auth/setup", json={"username": "boss", "password": "bosspass123",
+                                               "code": server.setup_code()}).status_code == 200
     hook = FakeWebhook()
     admin.patch("/api/settings", json={"discord_webhook_url": hook.url, "site_url": "http://manager.test"})
     for name in ("pia", "olaf"):

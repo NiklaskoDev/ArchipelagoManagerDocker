@@ -2,11 +2,15 @@
 from __future__ import annotations
 
 import asyncio
-import ipaddress
+import hmac
 import logging
+import os
+import re
+import secrets
 import shutil
 import sqlite3
 import time
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
@@ -15,9 +19,9 @@ from pydantic import BaseModel, Field
 from .. import __version__, audit, db, discord_auth, notify, settings as app_settings
 from ..config import CONFIG
 from ..security import (ROLES, SESSION_COOKIE, LoginThrottle, admin_user, check_password_policy, check_username,
-                        create_session, current_user, destroy_session, destroy_user_sessions, hash_password,
-                        https_in_use, is_organizer, login_throttle, organizer_user, set_session_cookie,
-                        user_for_request, verify_password)
+                        client_address, create_session, current_user, destroy_session, destroy_user_sessions,
+                        hash_password, https_in_use, is_organizer, login_throttle, organizer_user, revoke_user_tokens,
+                        set_session_cookie, user_for_request, verify_password)
 from ..security import ip_throttle
 
 router = APIRouter(prefix="/api")
@@ -33,8 +37,8 @@ def user_json(row: sqlite3.Row) -> dict:
 
 
 def _client_key(request: Request, username: str) -> str:
-    host = request.client.host if request.client else "?"
-    return f"{host}|{username.strip().casefold()}"  # as the lookup sees the name, so "admin " counts as "admin"
+    # the name as the lookup sees it, so "admin " counts as "admin"
+    return f"{client_address(request)}|{username.strip().casefold()}"
 
 
 def has_users() -> bool:
@@ -94,39 +98,77 @@ def _login_response(request: Request, response: Response, user_id: int) -> dict:
     return user_json(db.query_one("SELECT * FROM users WHERE id = ?", (user_id,)))
 
 
-_LOCAL_SUFFIXES = (".local", ".lan", ".home", ".internal", ".home.arpa", ".localdomain")
+# Until there is a first administrator, whoever reaches the web UI could make themselves one. So creating it takes a code
+# that only whoever runs the container can read: it is in the container's log and in a file in the data folder. A request
+# cannot fake it the way it can fake the address it was sent to.
+SETUP_CODE_FILE = "setup-code.txt"
+SETUP_CODE_LENGTH = 12
+_CODE_LETTERS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # none that look alike (0 and O, 1 and I)
+_setup_code: str | None = None
 
 
-def _opened_locally(request: Request) -> bool:
-    """Whether the page was opened by an address only the local network uses: an IP address, a name without dots or one
-    of the private suffixes, or the configured public host. A website on the internet can point its own name at this
-    server (DNS rebinding), but that name is never one of these."""
-    host = (request.url.hostname or "").rstrip(".").lower()
+def setup_code_path() -> Path:
+    return CONFIG.data_dir / SETUP_CODE_FILE
+
+
+def _normalized(code: str) -> str:
+    """A code as typed, without the dashes and spaces and in capitals."""
+    return re.sub(r"[^A-Z0-9]", "", code.upper())
+
+
+def _shown(code: str) -> str:
+    return "-".join(code[i:i + 4] for i in range(0, len(code), 4))
+
+
+def prepare_setup() -> None:
+    """At startup, while there is no user yet: the setup code. It is made once and stays until it is used, so it does
+    not change when the container restarts in between."""
+    global _setup_code
+    path = setup_code_path()
+    if has_users():
+        _setup_code = None
+        path.unlink(missing_ok=True)
+        return
     try:
-        ipaddress.ip_address(host)
-        return True
-    except ValueError:
-        pass
-    return bool(host) and ("." not in host or host.endswith(_LOCAL_SUFFIXES)
-                           or host == (CONFIG.public_host or "").lower())
+        code = _normalized(path.read_text(encoding="utf-8"))
+    except OSError:
+        code = ""
+    if len(code) != SETUP_CODE_LENGTH:
+        code = "".join(secrets.choice(_CODE_LETTERS) for _ in range(SETUP_CODE_LENGTH))
+        path.unlink(missing_ok=True)
+        with os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w", encoding="utf-8") as f:
+            f.write(_shown(code) + "\n")
+    _setup_code = code
+    log.warning("There is no administrator yet. Open the web UI and create the account with the setup code %s "
+                "(it is also in %s).", _shown(code), path)
+
+
+class SetupRequest(Credentials):
+    code: str = Field(default="", max_length=64)
 
 
 @router.post("/auth/setup")
-def setup(creds: Credentials, request: Request, response: Response) -> dict:
+def setup(body: SetupRequest, request: Request, response: Response) -> dict:
+    global _setup_code
     if has_users():
         raise HTTPException(409, "Setup has already been completed")
-    if not _opened_locally(request):
-        raise HTTPException(403, "For safety, the administrator account can only be created on this server's local "
-                                 "address: open this page by its IP address, e.g. http://192.168.1.20:8080, or set "
-                                 "ADMIN_USER and ADMIN_PASSWORD on the container.")
-    user_id = create_user(creds.username, creds.password, "admin")
+    ip_key = f"ip|{client_address(request)}"
+    if ip_throttle.blocked(ip_key):
+        raise HTTPException(429, "Too many failed logins. Try again in a few minutes.")
+    if _setup_code is None or not hmac.compare_digest(_normalized(body.code), _setup_code):
+        ip_throttle.fail(ip_key)
+        raise HTTPException(403, "Enter the setup code. It is in the container's log, and in the file setup-code.txt in "
+                                 "the data folder.")
+    user_id = create_user(body.username, body.password, "admin")
+    _setup_code = None
+    setup_code_path().unlink(missing_ok=True)
     return _login_response(request, response, user_id)
 
 
 @router.post("/auth/login")
 def login(creds: Credentials, request: Request, response: Response) -> dict:
     key = _client_key(request, creds.username)
-    ip_key = f"ip|{request.client.host if request.client else '?'}"
+    ip_key = f"ip|{client_address(request)}"
     if login_throttle.blocked(key) or ip_throttle.blocked(ip_key):
         raise HTTPException(429, "Too many failed logins. Try again in a few minutes.")
     row = db.query_one("SELECT * FROM users WHERE username = ?", (creds.username.strip(),))
@@ -167,6 +209,8 @@ def register(creds: Credentials, request: Request, response: Response) -> dict:
 class PasswordChange(BaseModel):
     current_password: str = Field(default="", max_length=256)
     new_password: str = Field(max_length=256)
+    # Whoever knew the old password may have made tokens with it, which would outlast the change
+    revoke_tokens: bool = True
 
 
 @router.post("/auth/password")
@@ -177,7 +221,7 @@ def change_password(body: PasswordChange, request: Request, user: sqlite3.Row = 
     check_password_policy(body.new_password)
     db.execute("UPDATE users SET password_hash = ? WHERE id = ?", (hash_password(body.new_password), user["id"]))
     destroy_user_sessions(user["id"], except_token=request.cookies.get(SESSION_COOKIE))
-    return {"ok": True}
+    return {"ok": True, "tokens_revoked": revoke_user_tokens(user["id"]) if body.revoke_tokens else 0}
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -202,7 +246,7 @@ _discord_starts = LoginThrottle(limit=30, window=10 * 60)
 @router.get("/auth/discord/login")
 def discord_login(request: Request, next: str = "") -> RedirectResponse:
     """Sends the browser to Discord. Opened as a page (not fetched), on the site_url address."""
-    key = request.client.host if request.client else "?"
+    key = client_address(request)
     if _discord_starts.blocked(key):
         return _back_to_app("#/?discord_error=busy")
     _discord_starts.fail(key)
@@ -350,10 +394,11 @@ def patch_user(user_id: int, body: UserPatch, request: Request, admin: sqlite3.R
         db.execute("UPDATE users SET disabled = ? WHERE id = ?", (int(body.disabled), user_id))
         if body.disabled:
             destroy_user_sessions(user_id)
-    if body.password:
+    if body.password:  # for someone who lost theirs, or whose account someone else used: they start afresh
         check_password_policy(body.password)
         db.execute("UPDATE users SET password_hash = ? WHERE id = ?", (hash_password(body.password), user_id))
         destroy_user_sessions(user_id)
+        revoke_user_tokens(user_id)
     if body.unlink_discord:
         db.execute("UPDATE users SET discord_id = NULL, discord_name = NULL WHERE id = ?", (user_id,))
         destroy_user_sessions(user_id)  # sessions that came from that Discord account end with it

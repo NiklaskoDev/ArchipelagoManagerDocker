@@ -99,7 +99,8 @@ def test_a_game_played_before_the_history_is_archived_at_the_next_start(tmp_path
     server = Server(tmp_path / "data", ap=True)
     server.start()
     try:
-        server.client().post("/api/auth/setup", json={"username": "admin", "password": "adminpass1"})
+        server.client().post("/api/auth/setup", json={"username": "admin", "password": "adminpass1",
+                                                      "code": server.setup_code()})
         admin = server.client("admin", "adminpass1")
         ids = [upload_yaml(admin, name, player_yaml(name)).json()["created"][0]["id"] for name in ("Old", "Timer")]
         gid = run_job(admin, ids)["game_id"]
