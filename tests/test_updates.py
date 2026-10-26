@@ -52,7 +52,8 @@ def start(tmp_path, github, **env):
     server = Server(tmp_path / "data", ap=True, extra_env={"AP_RELEASES_URL": github.url, "UPDATE_CHECK": "true", **env})
     server.start()
     admin = server.client()
-    admin.post("/api/auth/setup", json={"username": "boss", "password": "bosspass123"})
+    admin.post("/api/auth/setup", json={"username": "boss", "password": "bosspass123",
+                                        "code": server.setup_code()})
     return server, admin
 
 

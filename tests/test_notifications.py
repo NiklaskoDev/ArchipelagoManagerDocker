@@ -19,7 +19,8 @@ CHECKS_FINDER_BASE = 81000  # ChecksFinder's locations are "Tile 1" (81000) to "
 
 def setup_admin(server):
     client = server.client()
-    assert client.post("/api/auth/setup", json={"username": "boss", "password": "bosspass123"}).status_code == 200
+    assert client.post("/api/auth/setup", json={"username": "boss", "password": "bosspass123",
+                                                "code": server.setup_code()}).status_code == 200
     return client
 
 

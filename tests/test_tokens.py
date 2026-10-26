@@ -9,7 +9,8 @@ import pytest
 @pytest.fixture
 def setup(plain_server):
     admin = plain_server.client()
-    assert admin.post("/api/auth/setup", json={"username": "boss", "password": "bosspass123"}).status_code == 200
+    assert admin.post("/api/auth/setup", json={"username": "boss", "password": "bosspass123",
+                                               "code": plain_server.setup_code()}).status_code == 200
     admin = plain_server.client("boss", "bosspass123")
     assert admin.post("/api/users", json={"username": "ann", "password": "password123"}).status_code == 200
     return plain_server, admin, plain_server.client("ann", "password123")
@@ -60,6 +61,20 @@ def test_administrators_scripts_and_the_log(setup):
     assert r.status_code == 200, r.text
     entry = admin.get("/api/audit?action=settings").json()["entries"][0]
     assert entry["username"] == "boss" and entry["details"]["token"] == "nightly"
+
+    # but it does not manage accounts: it cannot change its owner's password, nor make an administrator of its own
+    script = bearer(server, token)
+    assert [u["username"] for u in script.get("/api/users").json()] == ["ann", "boss"]
+    boss, ann_id = (next(u["id"] for u in admin.get("/api/users").json() if u["username"] == name)
+                    for name in ("boss", "ann"))
+    for method, path, body in (("PATCH", f"/api/users/{boss}", {"password": "lockedout123"}),
+                               ("PATCH", f"/api/users/{ann_id}", {"role": "admin"}),
+                               ("POST", "/api/users", {"username": "backdoor", "password": "backdoor123", "role": "admin"}),
+                               ("DELETE", f"/api/users/{ann_id}", None)):
+        r = script.request(method, path, json=body)
+        assert r.status_code == 403 and "Sign in instead" in r.json()["detail"], (method, path, r.text)
+    assert [u["role"] for u in admin.get("/api/users").json()] == ["user", "admin"]
+    assert server.client("boss", "bosspass123").get("/api/auth/status").json()["user"]["username"] == "boss"
 
     # an administrator sees and revokes everybody's tokens; others only their own
     theirs = make_token(ann, name="ann's")

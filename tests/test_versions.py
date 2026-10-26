@@ -51,7 +51,8 @@ def versioned(tmp_path_factory):
                     extra_env={"AP_SOURCE_URL": f"file://{releases}/{{version}}.tar.gz"})
     server.start()
     admin = server.client()
-    assert admin.post("/api/auth/setup", json={"username": "admin", "password": "adminpass1"}).status_code == 200
+    assert admin.post("/api/auth/setup", json={"username": "admin", "password": "adminpass1",
+                                               "code": server.setup_code()}).status_code == 200
     yield server, server.client("admin", "adminpass1")
     server.stop()
 

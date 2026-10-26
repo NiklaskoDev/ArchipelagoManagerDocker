@@ -20,8 +20,8 @@ def sleepy(tmp_path_factory):
     server = Server(tmp_path_factory.mktemp("sleepy") / "data", ap=True,
                     extra_env={"SLEEP_MINUTE_SECONDS": str(MINUTE), "PORT_RANGE": f"{first}-{first + 1}"})
     server.start()
-    assert server.client().post("/api/auth/setup", json={"username": "admin", "password": "adminpass1"}
-                                ).status_code == 200
+    assert server.client().post("/api/auth/setup", json={"username": "admin", "password": "adminpass1",
+                                                         "code": server.setup_code()}).status_code == 200
     server.ports = (first, first + 1)
     yield server
     server.stop()

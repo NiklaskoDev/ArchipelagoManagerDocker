@@ -11,7 +11,8 @@ RACE = {"spoiler": 0, "race": True, "skip_prog_balancing": False, "plando": ["bo
 
 def setup(server):
     admin = server.client()
-    assert admin.post("/api/auth/setup", json={"username": "boss", "password": "bosspass123"}).status_code == 200
+    assert admin.post("/api/auth/setup", json={"username": "boss", "password": "bosspass123",
+                                               "code": server.setup_code()}).status_code == 200
     return admin
 
 

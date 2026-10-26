@@ -17,8 +17,8 @@ def reminding(tmp_path_factory):
     from conftest import Server
     server = Server(tmp_path_factory.mktemp("reminding") / "data", ap=True, extra_env={"REMINDER_DAY_SECONDS": str(DAY)})
     server.start()
-    assert server.client().post("/api/auth/setup", json={"username": "admin", "password": "adminpass1"}
-                                ).status_code == 200
+    assert server.client().post("/api/auth/setup", json={"username": "admin", "password": "adminpass1",
+                                                         "code": server.setup_code()}).status_code == 200
     hook = FakeWebhook()
     server.hook = hook
     yield server

@@ -61,7 +61,8 @@ def test_players_choose_their_mentions_and_sign_ups_mention_them(plain_server):
     hook = FakeWebhook()
     server = plain_server
     admin = server.client()
-    assert admin.post("/api/auth/setup", json={"username": "boss", "password": "bosspass123"}).status_code == 200
+    assert admin.post("/api/auth/setup", json={"username": "boss", "password": "bosspass123",
+                                               "code": server.setup_code()}).status_code == 200
     users = {}
     for name in ("ann", "cy", "dan", "eve", "fay"):
         r = admin.post("/api/users", json={"username": name, "password": "password123", "role": "user"})

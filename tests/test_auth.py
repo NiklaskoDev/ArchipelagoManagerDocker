@@ -9,7 +9,7 @@ def login(server, name, password):
 
 def setup_admin(server):
     c = server.client()
-    r = c.post("/api/auth/setup", json={"username": "boss", "password": "bosspass123"})
+    r = c.post("/api/auth/setup", json={"username": "boss", "password": "bosspass123", "code": server.setup_code()})
     assert r.status_code == 200, r.text
     return c
 
@@ -20,9 +20,11 @@ def test_first_run_setup_flow(plain_server):
     assert status["needs_setup"] is True and status["user"] is None
     assert c.get("/api/games").status_code == 401
 
-    assert c.post("/api/auth/setup", json={"username": "a", "password": "bosspass123"}).status_code == 400  # name too short
-    assert c.post("/api/auth/setup", json={"username": "boss", "password": "short"}).status_code == 400
-    r = c.post("/api/auth/setup", json={"username": "boss", "password": "bosspass123"})
+    code = plain_server.setup_code()
+    assert c.post("/api/auth/setup", json={"username": "a", "password": "bosspass123", "code": code}
+                  ).status_code == 400  # name too short
+    assert c.post("/api/auth/setup", json={"username": "boss", "password": "short", "code": code}).status_code == 400
+    r = c.post("/api/auth/setup", json={"username": "boss", "password": "bosspass123", "code": code})
     assert r.status_code == 200 and r.json()["role"] == "admin"
     assert c.get("/api/auth/status").json()["user"]["username"] == "boss"
     # setup is a one-time door
@@ -40,7 +42,7 @@ def test_state_changing_calls_need_the_csrf_header(plain_server):
 
 def test_session_cookie_flags(plain_server):
     c = plain_server.client()
-    r = c.post("/api/auth/setup", json={"username": "boss", "password": "bosspass123"})
+    r = c.post("/api/auth/setup", json={"username": "boss", "password": "bosspass123", "code": plain_server.setup_code()})
     cookie = r.headers["set-cookie"].lower()
     assert "httponly" in cookie and "samesite=lax" in cookie
 
@@ -184,7 +186,7 @@ def test_oversized_uploads_are_rejected_before_they_are_stored(tmp_path):
     server.start()
     try:
         admin = server.client()
-        admin.post("/api/auth/setup", json={"username": "boss", "password": "bosspass123"})
+        admin.post("/api/auth/setup", json={"username": "boss", "password": "bosspass123", "code": server.setup_code()})
         big = b"x" * (3 * 1024 * 1024)
         r = admin.post("/api/apworlds", files={"file": ("big.apworld", big)})  # upload endpoint: 1 MB + 1 MB overhead
         assert r.status_code == 413 and "too large" in r.json()["detail"]

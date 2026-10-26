@@ -11,6 +11,10 @@ import yaml
 
 MAX_YAML_BYTES = 1024 * 1024
 MAX_NAME_LENGTH = 16  # Generate.handle_name truncates slot names to this
+# Aliases (*name) repeat what an anchor (&name) marks. The loader shares the repeated part, but whatever prints or copies
+# it writes it out each time, so a few hundred bytes of nested aliases stand for gigabytes ("billion laughs"). A file
+# may repeat itself as long as, written out, it stays this large: one per value, plus the length of each text.
+MAX_EXPANDED_SIZE = 2 * MAX_YAML_BYTES
 
 
 class YamlError(ValueError):
@@ -91,9 +95,45 @@ def static_name(raw: str) -> str | None:
     return raw.strip()[:MAX_NAME_LENGTH].strip() or None
 
 
+def check_aliases(text: str) -> None:
+    """Raises YamlError if aliases make the file larger than MAX_EXPANDED_SIZE once written out, or make a value contain
+    itself. Reads the parser's events only, so nothing is built up on the way."""
+    if "*" not in text:  # no alias without one
+        return
+    sizes: dict[str, int] = {}  # the written-out size of what each anchor marks
+    stack: list[list] = []  # [anchor, size so far] of each mapping and list being read
+    total = 0
+    for event in yaml.parse(text, Loader=UniqueKeyLoader):
+        if isinstance(event, yaml.CollectionStartEvent):
+            stack.append([event.anchor, 1])
+            continue
+        if isinstance(event, yaml.ScalarEvent):
+            size = 1 + len(event.value)
+            if event.anchor:
+                sizes[event.anchor] = size
+        elif isinstance(event, yaml.AliasEvent):
+            if any(anchor == event.anchor for anchor, _size in stack):
+                raise YamlError(f"The alias *{event.anchor} is inside what it repeats")
+            size = sizes.get(event.anchor, 1)  # an unknown one: the loader says so
+        elif isinstance(event, yaml.CollectionEndEvent):
+            anchor, size = stack.pop()
+            if anchor:
+                sizes[anchor] = size
+        else:
+            continue
+        if stack:
+            stack[-1][1] += size
+        else:
+            total += size
+        if (stack[-1][1] if stack else total) > MAX_EXPANDED_SIZE:
+            raise YamlError(f"The aliases (*name) in this file repeat too much: written out, it would be larger than "
+                            f"{MAX_EXPANDED_SIZE // (1024 * 1024)} MB")
+
+
 def load_documents(text: str) -> list[Any]:
     """The documents of a yaml file, as Archipelago reads them. Raises YamlError with the line of a syntax error."""
     try:
+        check_aliases(text)
         return list(yaml.load_all(text.lstrip("﻿"), Loader=UniqueKeyLoader))
     except yaml.MarkedYAMLError as e:
         mark = e.problem_mark

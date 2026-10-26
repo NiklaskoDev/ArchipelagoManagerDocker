@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """End-to-end smoke test for a running Archipelago Manager (typically the freshly built Docker image).
 
-    python tests/smoke.py http://localhost:8080 [game-host]
+    SETUP_CODE=$(docker exec <container> cat /config/setup-code.txt) python tests/smoke.py http://localhost:8080 [game-host]
 
-Needs an instance with no users yet. It creates an administrator, generates a two-player multiworld, hosts it and checks
-that the game server answers on its published port. Uses only the standard library.
+Needs an instance with no users yet, and its setup code. It creates an administrator, generates a two-player multiworld,
+hosts it and checks that the game server answers on its published port. Uses only the standard library.
 """
 import http.cookiejar
 import json
+import os
 import socket
 import sys
 import time
@@ -60,7 +61,8 @@ step(f"manager {ready['version']} is ready with Archipelago {ready['archipelago'
 
 status = call("GET", "/api/auth/status")
 assert status["needs_setup"], "this smoke test needs an instance without users"
-call("POST", "/api/auth/setup", {"username": "smoke", "password": "smoke-password-1"})
+call("POST", "/api/auth/setup", {"username": "smoke", "password": "smoke-password-1",
+                                 "code": os.environ.get("SETUP_CODE", "")})
 step("administrator created")
 
 system = call("GET", "/api/system")

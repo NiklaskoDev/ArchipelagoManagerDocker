@@ -71,6 +71,25 @@ class TestYamlInfo:
         with pytest.raises(yamlinfo.YamlError, match="too large"):
             yamlinfo.decode_text(b"x" * (yamlinfo.MAX_YAML_BYTES + 1))
 
+    def test_aliases_may_repeat_a_file_only_so_much(self):
+        def nested(levels: int) -> str:  # each level repeats the one before nine times
+            lines = ["name: A", "game: Zillion", "Zillion: {}", "x0: &a0 [lol, lol, lol, lol, lol, lol, lol, lol, lol]"]
+            lines += [f"x{i}: &a{i} [{', '.join([f'*a{i - 1}'] * 9)}]" for i in range(1, levels + 1)]
+            return "\n".join([*lines, f"description: *a{levels}"]) + "\n"
+
+        assert yamlinfo.analyze(nested(3), "x").games == ["Zillion"]
+        # 400 bytes that would be gigabytes once something prints or copies them
+        for levels in (5, 9):
+            with pytest.raises(yamlinfo.YamlError, match="repeat too much"):
+                yamlinfo.analyze(nested(levels), "x")
+        with pytest.raises(yamlinfo.YamlError, match="inside what it repeats"):
+            yamlinfo.analyze("name: A\ngame: Zillion\nZillion: &z {again: *z}\n", "x")
+        # an anchor used the way people do, to share options
+        info = yamlinfo.analyze("name: A\ngame: Zillion\nshared: &s {skill: hard}\nZillion: *s\n", "x")
+        assert info.problems == []
+        with pytest.raises(yamlinfo.YamlError, match="Invalid YAML"):
+            yamlinfo.analyze("name: A\ngame: Zillion\nZillion: *\n", "x")
+
     @pytest.mark.parametrize("raw, expected", [
         ("../../etc/passwd", "passwd"), ("a b.yaml", "a b.yaml"), ("we<ird>*.txt", "we_ird_.txt"),
         ("C:\\temp\\x.yaml", "x.yaml"), ("...", "file"), ("", "file"),

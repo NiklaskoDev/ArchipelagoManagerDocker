@@ -1,7 +1,8 @@
 // Browser walkthrough of the web UI against a running manager that has Archipelago and NO users yet, started with
 // SLEEP_MINUTE_SECONDS=2 (so a game that falls asleep after a minute does so after two seconds).
 //
-//   BASE=http://127.0.0.1:8080 FIXTURES=/path/to/fixtures SHOTS=/tmp/shots node tests/ui/flows.mjs
+//   BASE=http://127.0.0.1:8080 SETUP_CODE=$(cat $DATA_DIR/setup-code.txt) FIXTURES=/path/to/fixtures SHOTS=/tmp/shots \
+//     node tests/ui/flows.mjs
 //
 // FIXTURES must contain customchecks.apworld (with options of its own: build_apworld(..., with_options=True)) and a
 // pregenerated zip named pregenerated.zip (see tests/helpers.py for how the integration tests build them). Playwright is resolved from NODE_PATH or the global node_modules.
@@ -67,6 +68,8 @@ await admin.goto(BASE);
 await admin.waitForSelector("form");
 await expectText(admin, "Create the administrator account");
 log("first run asks for an administrator");
+const setupCode = admin.locator("input[placeholder='XXXX-XXXX-XXXX']");
+await setupCode.fill("AAAA-AAAA-AAAA");
 await admin.fill("input[autocomplete=username]", "boss");
 const pw = admin.locator("input[type=password]");
 await pw.nth(0).fill("bosspass123");
@@ -75,9 +78,12 @@ await admin.click("button[type=submit]");
 await expectText(admin, "do not match");
 await pw.nth(1).fill("bosspass123");
 await admin.click("button[type=submit]");
+await expectText(admin, "Enter the setup code");
+await setupCode.fill(process.env.SETUP_CODE || "");
+await admin.click("button[type=submit]");
 await admin.waitForSelector(".topbar");
 await expectText(admin, "Welcome, boss");
-log("administrator created, password mismatch rejected first");
+log("administrator created, password mismatch and a wrong setup code rejected first");
 
 // users ---------------------------------------------------------------------------------------------------------------
 await nav(admin, "#/admin/users");

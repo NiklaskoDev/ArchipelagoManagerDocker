@@ -2,11 +2,15 @@
 from __future__ import annotations
 
 import asyncio
-import ipaddress
+import hmac
 import logging
+import os
+import re
+import secrets
 import shutil
 import sqlite3
 import time
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
@@ -94,32 +98,70 @@ def _login_response(request: Request, response: Response, user_id: int) -> dict:
     return user_json(db.query_one("SELECT * FROM users WHERE id = ?", (user_id,)))
 
 
-_LOCAL_SUFFIXES = (".local", ".lan", ".home", ".internal", ".home.arpa", ".localdomain")
+# Until there is a first administrator, whoever reaches the web UI could make themselves one. So creating it takes a code
+# that only whoever runs the container can read: it is in the container's log and in a file in the data folder. A request
+# cannot fake it the way it can fake the address it was sent to.
+SETUP_CODE_FILE = "setup-code.txt"
+SETUP_CODE_LENGTH = 12
+_CODE_LETTERS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # none that look alike (0 and O, 1 and I)
+_setup_code: str | None = None
 
 
-def _opened_locally(request: Request) -> bool:
-    """Whether the page was opened by an address only the local network uses: an IP address, a name without dots or one
-    of the private suffixes, or the configured public host. A website on the internet can point its own name at this
-    server (DNS rebinding), but that name is never one of these."""
-    host = (request.url.hostname or "").rstrip(".").lower()
+def setup_code_path() -> Path:
+    return CONFIG.data_dir / SETUP_CODE_FILE
+
+
+def _normalized(code: str) -> str:
+    """A code as typed, without the dashes and spaces and in capitals."""
+    return re.sub(r"[^A-Z0-9]", "", code.upper())
+
+
+def _shown(code: str) -> str:
+    return "-".join(code[i:i + 4] for i in range(0, len(code), 4))
+
+
+def prepare_setup() -> None:
+    """At startup, while there is no user yet: the setup code. It is made once and stays until it is used, so it does
+    not change when the container restarts in between."""
+    global _setup_code
+    path = setup_code_path()
+    if has_users():
+        _setup_code = None
+        path.unlink(missing_ok=True)
+        return
     try:
-        ipaddress.ip_address(host)
-        return True
-    except ValueError:
-        pass
-    return bool(host) and ("." not in host or host.endswith(_LOCAL_SUFFIXES)
-                           or host == (CONFIG.public_host or "").lower())
+        code = _normalized(path.read_text(encoding="utf-8"))
+    except OSError:
+        code = ""
+    if len(code) != SETUP_CODE_LENGTH:
+        code = "".join(secrets.choice(_CODE_LETTERS) for _ in range(SETUP_CODE_LENGTH))
+        path.unlink(missing_ok=True)
+        with os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w", encoding="utf-8") as f:
+            f.write(_shown(code) + "\n")
+    _setup_code = code
+    log.warning("There is no administrator yet. Open the web UI and create the account with the setup code %s "
+                "(it is also in %s).", _shown(code), path)
+
+
+class SetupRequest(Credentials):
+    code: str = Field(default="", max_length=64)
 
 
 @router.post("/auth/setup")
-def setup(creds: Credentials, request: Request, response: Response) -> dict:
+def setup(body: SetupRequest, request: Request, response: Response) -> dict:
+    global _setup_code
     if has_users():
         raise HTTPException(409, "Setup has already been completed")
-    if not _opened_locally(request):
-        raise HTTPException(403, "For safety, the administrator account can only be created on this server's local "
-                                 "address: open this page by its IP address, e.g. http://192.168.1.20:8080, or set "
-                                 "ADMIN_USER and ADMIN_PASSWORD on the container.")
-    user_id = create_user(creds.username, creds.password, "admin")
+    ip_key = f"ip|{request.client.host if request.client else '?'}"
+    if ip_throttle.blocked(ip_key):
+        raise HTTPException(429, "Too many failed logins. Try again in a few minutes.")
+    if _setup_code is None or not hmac.compare_digest(_normalized(body.code), _setup_code):
+        ip_throttle.fail(ip_key)
+        raise HTTPException(403, "Enter the setup code. It is in the container's log, and in the file setup-code.txt in "
+                                 "the data folder.")
+    user_id = create_user(body.username, body.password, "admin")
+    _setup_code = None
+    setup_code_path().unlink(missing_ok=True)
     return _login_response(request, response, user_id)
 
 

@@ -113,8 +113,8 @@ def moving(tmp_path_factory):
     fake = FakeArchipelagoGG()
     server = Server(tmp_path_factory.mktemp("moving") / "data", ap=True, extra_env={"ARCHIPELAGO_GG_URL": fake.url})
     server.start()
-    assert server.client().post("/api/auth/setup", json={"username": "admin", "password": "adminpass1"}
-                                ).status_code == 200
+    assert server.client().post("/api/auth/setup", json={"username": "admin", "password": "adminpass1",
+                                                         "code": server.setup_code()}).status_code == 200
     server.fake = fake
     yield server
     server.stop()

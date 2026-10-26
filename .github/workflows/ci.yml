@@ -146,6 +146,9 @@ jobs:
           mkdir -p "$RUNNER_TEMP/smoke-config"
           docker run -d --name smoke -p 8080:8080 -p 38281-38300:38281-38300 \
             -v "$RUNNER_TEMP/smoke-config:/config" archipelago-manager:smoke
+          # the code for creating the first administrator, which the manager writes at startup (readable for root only)
+          for _ in $(seq 60); do docker exec smoke test -s /config/setup-code.txt && break; sleep 2; done
+          export SETUP_CODE="$(docker exec smoke cat /config/setup-code.txt)"
           if ! python3 tests/smoke.py http://127.0.0.1:8080 127.0.0.1; then
             docker logs smoke
             exit 1

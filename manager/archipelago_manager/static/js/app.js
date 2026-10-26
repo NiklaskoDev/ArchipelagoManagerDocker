@@ -329,7 +329,10 @@ function renderAuth(notice) {
   let mode = status.needs_setup ? "setup" : "login";
   const card = h("div", { class: "auth-card card" });
   const draw = () => {
-    const username = h("input", { class: "input", autocomplete: "username", required: true, autofocus: true });
+    // the first administrator needs the code the container writes to its log (routes/auth.py)
+    const code = mode === "setup" ? h("input", { class: "input", autocomplete: "off", autocapitalize: "characters",
+      required: true, autofocus: true, placeholder: "XXXX-XXXX-XXXX" }) : null;
+    const username = h("input", { class: "input", autocomplete: "username", required: true, autofocus: !code });
     const password = h("input", { class: "input", type: "password", required: true,
       autocomplete: mode === "login" ? "current-password" : "new-password", minLength: mode === "login" ? 1 : 8 });
     const confirm = mode === "login" ? null : h("input", { class: "input", type: "password", autocomplete: "new-password", required: true });
@@ -344,13 +347,14 @@ function renderAuth(notice) {
       submit.disabled = true;
       try {
         const path = { setup: "setup", login: "login", register: "register" }[mode];
-        await post(`/api/auth/${path}`, { username: username.value, password: password.value });
+        await post(`/api/auth/${path}`, { username: username.value, password: password.value, ...(code ? { code: code.value } : {}) });
         await boot();
       } catch (err) {
         error.textContent = err.message;
         submit.disabled = false;
       }
     } },
+    code ? field(t("Setup code"), code, t("It is in the container's log (on Unraid: the container's Logs), and in the file setup-code.txt in the data folder.")) : null,
     field(t("Username"), username),
     field(t("Password"), password, mode === "login" ? null : t("At least 8 characters")),
     confirm ? field(t("Repeat password"), confirm) : null,
