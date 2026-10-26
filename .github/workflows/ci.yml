@@ -147,12 +147,13 @@ jobs:
           cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
 
       # Runs the image as users of Unraid do (unprivileged user 99:100, game ports published) and plays through a
-      # whole generate-host-connect cycle.
+      # whole generate-host-connect cycle. The game ports are below 32768: above, Linux hands out ports for outgoing
+      # connections, and one the runner happens to hold makes publishing the range fail.
       - name: Smoke test the image
         run: |
           docker image inspect --format 'architecture: {{.Architecture}}' archipelago-manager:smoke
           mkdir -p "$RUNNER_TEMP/smoke-config"
-          docker run -d --name smoke -p 8080:8080 -p 38281-38300:38281-38300 \
+          docker run -d --name smoke -p 8080:8080 -p 28281-28300:28281-28300 -e PORT_RANGE=28281-28300 \
             -v "$RUNNER_TEMP/smoke-config:/config" archipelago-manager:smoke
           # the code for creating the first administrator, which the manager writes at startup (readable for root only)
           for _ in $(seq 60); do docker exec smoke test -s /config/setup-code.txt && break; sleep 2; done
