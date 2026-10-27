@@ -160,7 +160,7 @@ def test_messages_can_be_in_german(plain_server, hook):
     opened = hook.wait_for("Anmeldung geöffnet: Freitags*runde", timeout=20)
     assert opened["description"] == f"Reiche deine YAML bis <t:{deadline}:F> ein (<t:{deadline}:R>)."
     assert {"name": "Spiele", "value": "A\\_Game, Clique", "inline": False} in opened["fields"]  # still escaped
-    assert {"name": "Configs pro Spieler", "value": "1", "inline": True} in opened["fields"]
+    assert {"name": "Slots pro Spieler", "value": "1", "inline": True} in opened["fields"]
     assert admin.post(f"/api/signups/{signup['id']}/close").status_code == 200
     closed = hook.wait_for("Anmeldung geschlossen: Freitags*runde", timeout=20)
     assert closed["description"] == "0 Anmeldungen. Niemand hat sich angemeldet."
