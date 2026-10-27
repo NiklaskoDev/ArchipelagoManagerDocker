@@ -1724,7 +1724,11 @@
   "You already have a template called {0}": "Du hast schon eine Vorlage namens {0}",
   "A template needs a name and its options": "Eine Vorlage braucht einen Namen und ihre Optionen",
   "You have {0} templates already. Delete one you no longer use.": "Du hast schon {0} Vorlagen. Lösche eine, die du nicht mehr brauchst.",
-  "Only organizers and administrators share templates": "Nur Organisatoren und Administratoren teilen Vorlagen"
+  "Only organizers and administrators share templates": "Nur Organisatoren und Administratoren teilen Vorlagen",
+  "A username needs at least one letter or digit": "Ein Benutzername braucht mindestens einen Buchstaben oder eine Ziffer",
+  "Document #{0}: the player name has no visible characters, so nobody can read it": "Dokument #{0}: Der Spielername hat keine sichtbaren Zeichen, niemand kann ihn lesen",
+  "Document #{0}: the player name contains characters that change the direction of the text, so it shows differently from how it is spelled": "Dokument #{0}: Der Spielername enthält Zeichen, die die Schreibrichtung ändern, deshalb wird er anders angezeigt, als er geschrieben ist",
+  "A username may use only one alphabet, so that it cannot look like someone else's": "Ein Benutzername darf nur ein Alphabet verwenden, damit er nicht wie der eines anderen aussehen kann"
  },
  "server_extra": [
   " (line {0})",
@@ -1795,6 +1799,8 @@
   "API tokens cannot be used for this. Sign in instead.",
   "This API token can only read",
   "Enter the certificate with its full path in the container, e.g. /config/tls/fullchain.pem",
-  "Enter the key with its full path in the container, e.g. /config/tls/privkey.pem"
+  "Enter the key with its full path in the container, e.g. /config/tls/privkey.pem",
+  "Document #{0}: the player name has no visible characters, so nobody can read it",
+  "Document #{0}: the player name contains characters that change the direction of the text, so it shows differently from how it is spelled"
  ]
 }

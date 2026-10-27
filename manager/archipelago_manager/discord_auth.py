@@ -24,6 +24,7 @@ import secrets
 import sqlite3
 import threading
 import time
+import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -31,6 +32,7 @@ from dataclasses import dataclass
 
 from . import __version__, db, settings as app_settings
 from .config import CONFIG
+from .security import one_alphabet
 
 log = logging.getLogger(__name__)
 
@@ -40,6 +42,9 @@ STATE_COOKIE = "apm_oauth"
 CALLBACK_PATH = "/api/auth/discord/callback"
 # Where the browser may be sent after signing in: pages of this app only, never another site
 _SAFE_NEXT = re.compile(r"^#/[A-Za-z0-9/_\-]*$")
+# Discord's image server, and what a picture's name there looks like (a_ for an animated one)
+AVATAR_HOST = "https://cdn.discordapp.com"
+_AVATAR = re.compile(r"(a_)?[0-9a-f]{32}")
 
 
 class DiscordError(Exception):
@@ -130,7 +135,8 @@ def _request(path: str, *, data: dict | None = None, token: str | None = None) -
 
 
 def fetch_identity(code: str) -> dict:
-    """Swaps the one-time code for the Discord account behind it: {"id", "name"}. Checks server membership if required."""
+    """Swaps the one-time code for the Discord account behind it: {"id", "username", "name", "avatar"}. Checks server
+    membership if required."""
     cfg = app_settings.get_settings()
     grant = _request("/oauth2/token", data={
         "grant_type": "authorization_code", "code": code, "redirect_uri": redirect_uri(),
@@ -154,7 +160,19 @@ def fetch_identity(code: str) -> dict:
         except DiscordError as e:
             log.info("Revoking a Discord token failed: %s", e)
     name = str(me.get("global_name") or me.get("username") or "")[:64]
-    return {"id": str(me["id"]), "username": str(me.get("username") or ""), "name": name}
+    avatar = me.get("avatar")  # only ever used as part of an address on Discord's image server, so checked strictly
+    return {"id": str(me["id"]), "username": str(me.get("username") or ""), "name": name,
+            "avatar": avatar if isinstance(avatar, str) and _AVATAR.fullmatch(avatar) else ""}
+
+
+def avatar_url(row: sqlite3.Row) -> str | None:
+    """The picture of a user's linked Discord account, at twice the size the top bar shows it. Discord's default
+    picture for an account without one of its own; None while it is not known (linked before the manager kept it)."""
+    if not row["discord_id"] or row["discord_avatar"] is None:
+        return None
+    if row["discord_avatar"]:
+        return f"{AVATAR_HOST}/avatars/{row['discord_id']}/{row['discord_avatar']}.png?size=64"
+    return f"{AVATAR_HOST}/embed/avatars/{(int(row['discord_id']) >> 22) % 6}.png"
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -168,13 +186,14 @@ def link(user_id: int, identity: dict) -> None:
     other = user_for(identity["id"])
     if other is not None and other["id"] != user_id:
         raise DiscordError("taken")
-    db.execute("UPDATE users SET discord_id = ?, discord_name = ? WHERE id = ?",
-               (identity["id"], identity["name"], user_id))
+    db.execute("UPDATE users SET discord_id = ?, discord_name = ?, discord_avatar = ? WHERE id = ?",
+               (identity["id"], identity["name"], identity["avatar"], user_id))
 
 
 def _free_username(wanted: str) -> str:
-    base = re.sub(r"[^A-Za-z0-9._ -]", "", wanted).strip()[:28]
-    base = base if len(base) >= 2 else "player"
+    base = re.sub(r"[^\w. -]", "", unicodedata.normalize("NFC", wanted)).strip()[:28].strip()
+    if len(base) < 2 or not any(c.isalnum() for c in base) or not one_alphabet(base):  # the rules of check_username
+        base = "player"
     name, counter = base, 2
     while db.query_one("SELECT 1 FROM users WHERE username = ?", (name,)):
         name, counter = f"{base}-{counter}", counter + 1
@@ -187,9 +206,9 @@ def sign_up(identity: dict) -> int:
         username = _free_username(identity["username"] or identity["name"])
         try:
             # An empty password hash matches no password: the account signs in with Discord until a password is set.
-            return db.execute("INSERT INTO users(username, password_hash, role, created_at, discord_id, discord_name) "
-                              "VALUES (?, '', 'user', ?, ?, ?)",
-                              (username, time.time(), identity["id"], identity["name"]))
+            return db.execute("INSERT INTO users(username, password_hash, role, created_at, discord_id, discord_name, "
+                              "discord_avatar) VALUES (?, '', 'user', ?, ?, ?, ?)",
+                              (username, time.time(), identity["id"], identity["name"], identity["avatar"]))
         except sqlite3.IntegrityError:  # the same name or Discord account was taken a moment ago
             existing = user_for(identity["id"])
             if existing is not None:

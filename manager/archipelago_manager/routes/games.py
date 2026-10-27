@@ -17,7 +17,7 @@ from .. import (activity, apbridge, audit, backups, db, gamepaths, gamestore, gg
                schedule, spectate, tls, versions, visits, settings as app_settings, textclient)
 from ..config import CONFIG
 from ..rooms import ROOMS, STATUS_GOAL, RoomError, mask_secrets, sleep_minutes, slot_rules, valid_password
-from ..security import current_user, is_admin, manages, organizer_user
+from ..security import current_user, is_admin, manages, normal_username, organizer_user
 from ..textclient import TEXT_CLIENTS
 
 router = APIRouter(prefix="/api")
@@ -913,7 +913,8 @@ async def set_handover(game_id: int, slot: int, body: SlotHandover, request: Req
         raise HTTPException(400, f"Keep the note to {STATUS_NOTE_LENGTH} characters")
     to = None
     if body.to and body.to.strip():
-        to = db.query_one("SELECT id, username FROM users WHERE username = ? AND disabled = 0", (body.to.strip(),))
+        to = db.query_one("SELECT id, username FROM users WHERE username = ? AND disabled = 0",
+                          (normal_username(body.to),))
         if not to:
             raise HTTPException(404, "There is no user of that name")
         if to["id"] == target["user_id"]:

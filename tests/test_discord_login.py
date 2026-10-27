@@ -54,7 +54,7 @@ class FakeDiscord:
                 if account is None:
                     return self.answer(401, {"message": "401: Unauthorized"})
                 if self.path == "/api/users/@me":
-                    return self.answer(200, {k: account[k] for k in ("id", "username", "global_name")})
+                    return self.answer(200, {k: account[k] for k in ("id", "username", "global_name", "avatar")})
                 if self.path == "/api/users/@me/guilds":
                     return self.answer(200, [{"id": g, "name": "a server"} for g in account.get("guilds", [])])
                 return self.answer(404, {})
@@ -66,9 +66,10 @@ class FakeDiscord:
         self.url = f"http://127.0.0.1:{self.server.server_address[1]}"
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
 
-    def code_for(self, discord_id: str, username: str, guilds=()) -> str:
+    def code_for(self, discord_id: str, username: str, guilds=(), avatar=None) -> str:
         code = f"code-{len(self.codes)}-{discord_id}-{len(self.requests)}"
-        self.codes[code] = {"id": discord_id, "username": username, "global_name": username.title(), "guilds": list(guilds)}
+        self.codes[code] = {"id": discord_id, "username": username, "global_name": username.title(), "guilds": list(guilds),
+                            "avatar": avatar}
         return code
 
     def token_requests(self) -> int:
@@ -249,6 +250,30 @@ def test_linking_is_only_for_the_signed_in_user(site, discord):
     assert anna.post("/api/auth/discord/unlink").json()["discord_name"] is None
     browser = server.client()
     assert "discord_error=not_linked" in finish(browser, start(browser), discord.code_for("55555", "annad"))
+
+
+def test_the_discord_picture_comes_along(site, discord):
+    server, admin = site
+    admin.patch("/api/settings", json={"discord_signup": True})
+    picture, discord_id = "a_" + "0123456789abcdef" * 2, "88888888888888888"
+    browser = server.client()
+    finish(browser, start(browser), discord.code_for(discord_id, "pic", avatar=picture))
+    assert me(browser)["discord_avatar"] == f"https://cdn.discordapp.com/avatars/{discord_id}/{picture}.png?size=64"
+    # each sign-in brings the current one; without a picture of their own, Discord's default one for the account
+    browser = server.client()
+    finish(browser, start(browser), discord.code_for(discord_id, "pic"))
+    default = f"https://cdn.discordapp.com/embed/avatars/{(int(discord_id) >> 22) % 6}.png"
+    assert me(browser)["discord_avatar"] == default
+    # what is not the name of a picture never becomes part of an address
+    browser = server.client()
+    finish(browser, start(browser), discord.code_for(discord_id, "pic", avatar="../../evil.example/x"))
+    assert me(browser)["discord_avatar"] == default
+    # the page may show pictures from Discord's image server, and from nowhere else outside this site
+    assert "img-src 'self' data: https://cdn.discordapp.com;" in browser.get("/").headers["content-security-policy"]
+    # without the link, no picture
+    assert browser.post("/api/auth/password", json={"new_password": "picpass1234"}).status_code == 200
+    assert browser.post("/api/auth/discord/unlink").json()["discord_avatar"] is None
+    assert [u["discord_avatar"] for u in admin.get("/api/users").json() if u["username"] == "pic"] == [None]
 
 
 def test_discord_only_accounts_set_a_password_before_unlinking(site, discord):

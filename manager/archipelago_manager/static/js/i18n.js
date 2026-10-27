@@ -48,8 +48,13 @@ if (lang !== "en") {
   }
 }
 
+// A value that changes the direction of the text (a player name with such characters, say) is kept to itself, so it
+// cannot turn the rest of the sentence around. Other values go in as they are.
+const DIRECTION_CHANGES = /[\u202a-\u202e\u2066-\u2069]/;
+const isolated = (value) => (DIRECTION_CHANGES.test(value) ? `\u2068${value}\u2069` : value);
+
 function fill(text, vars) {
-  return vars ? text.replace(/\{(\w+)\}/g, (match, name) => (name in vars ? String(vars[name]) : match)) : text;
+  return vars ? text.replace(/\{(\w+)\}/g, (match, name) => (name in vars ? isolated(String(vars[name])) : match)) : text;
 }
 
 export function t(text, vars) {

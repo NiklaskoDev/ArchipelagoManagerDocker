@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from archipelago_manager import apbridge, settings, yamlform, yamlinfo
+from archipelago_manager import apbridge, configstore, settings, yamlform, yamlinfo
 from archipelago_manager.config import CONFIG
 from archipelago_manager.generation import _player_file_errors, _summarize_failure
 from archipelago_manager.rooms import slot_rules
@@ -51,6 +51,20 @@ class TestYamlInfo:
         info = yamlinfo.analyze(f"name: {name}\ngame: Zillion\n", "x")
         assert info.player_names == []
 
+    @pytest.mark.parametrize("name, expected", [("'%%'", "%"), ("a%%b", "a%b"), ("100%% run", "100% run"),
+                                                ("x%%number%%", "x%number%")])
+    def test_a_double_percent_is_one_as_in_the_generator(self, name, expected):
+        # Generate.handle_name turns %% into %; slots are matched to their owners by the name it makes
+        assert yamlinfo.analyze(f"name: {name}\ngame: Zillion\n", "x").player_names == [expected]
+
+    @pytest.mark.parametrize("name, warning", [('"\\u200b\\u200b"', "no visible characters"), ('"\\u202eabc"', "direction"),
+                                               ('"★★★"', None), ('"名前"', None), ('"!!!"', None)])
+    def test_names_that_read_differently_are_pointed_out(self, name, warning):
+        info = yamlinfo.analyze(f"name: {name}\ngame: Zillion\nZillion: {{}}\n", "x")
+        assert info.player_names and info.problems == []  # Archipelago takes them; the player is told
+        found = [w for w in info.warnings if "player name" in w]
+        assert (warning in found[0]) if warning else not found, found
+
     @pytest.mark.parametrize("text, message", [
         ("name: x\n", "no 'game'"),
         ("game: [unclosed\n", "Invalid YAML"),
@@ -93,9 +107,24 @@ class TestYamlInfo:
     @pytest.mark.parametrize("raw, expected", [
         ("../../etc/passwd", "passwd"), ("a b.yaml", "a b.yaml"), ("we<ird>*.txt", "we_ird_.txt"),
         ("C:\\temp\\x.yaml", "x.yaml"), ("...", "file"), ("", "file"),
+        # letters of every language stay; é typed as e + ´ becomes é; symbols alone leave nothing to call it by
+        ("Ölfeld.yaml", "Ölfeld.yaml"), ("名前.yaml", "名前.yaml"), ("Ame\u0301thyste", "Améthyste"), ("★★★", "file"),
+        ("🎮 \u202e", "file"),
     ])
     def test_safe_filename(self, raw, expected):
         assert yamlinfo.safe_filename(raw) == expected
+
+    def test_discord_text_keeps_names_to_themselves(self):
+        from archipelago_manager.notify import md
+        assert md("**x**") == "\\*\\*x\\*\\*" and md("Ölfeld") == "Ölfeld"
+        assert md("\u202eabc") == "\u2068\u202eabc\u2069"  # cannot turn the rest of the message around
+
+    @pytest.mark.parametrize("raw, expected", [
+        ("Ölfeld.yaml", "Ölfeld.yaml"), ("名前", "名前.yaml"), ("★★★.yaml", "config.yaml"), ("....yaml", "config.yaml"),
+        ("🎮.yml", "config.yml"), ("<b>.YAML", "_b_.YAML"), ("", "config.yaml"), ("notes.txt", "notes.txt.yaml"),
+    ])
+    def test_config_names(self, raw, expected):
+        assert configstore.normalize_name(raw) == expected
 
 
 class TestServerOptions:

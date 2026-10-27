@@ -8,6 +8,7 @@ import ipaddress
 import secrets
 import sqlite3
 import time
+import unicodedata
 from collections import defaultdict, deque
 
 from fastapi import Depends, HTTPException, Request, Response
@@ -53,12 +54,39 @@ def check_password_policy(password: str) -> None:
         raise HTTPException(400, "Password is too long")
 
 
+def normal_username(username: str) -> str:
+    """A username as stored and looked up: without surrounding spaces, and é typed as e + ´ the same as é (NFC)."""
+    return unicodedata.normalize("NFC", username.strip())
+
+
+# Scripts that are written together: a Japanese, Korean or Chinese name uses them as one alphabet
+_WRITTEN_TOGETHER = ({"HAN", "HIRAGANA", "KATAKANA"}, {"HAN", "HANGUL"}, {"HAN", "BOPOMOFO"})
+
+
+def _alphabet(letter: str) -> str:
+    """The alphabet a letter belongs to, the first word of its Unicode name: LATIN, CYRILLIC, GREEK, HAN, HIRAGANA, ...
+    Width variants (FULLWIDTH, HALFWIDTH) count as alphabets of their own, as they look like the plain letters."""
+    word = unicodedata.name(letter, "").replace("-", " ").split(" ")[0]
+    return "HAN" if word in ("CJK", "IDEOGRAPHIC") else word  # 々 and 〆 belong to Han names
+
+
+def one_alphabet(name: str) -> bool:
+    """Whether the letters of a name come from one alphabet, so that it cannot pass for another name: "аdmin" with a
+    Cyrillic а looks like "admin". Digits and . _ - do not count."""
+    alphabets = {_alphabet(c) for c in name if c.isalpha()}
+    return len(alphabets) <= 1 or any(alphabets <= together for together in _WRITTEN_TOGETHER)
+
+
 def check_username(username: str) -> str:
-    username = username.strip()
+    username = normal_username(username)
     if not (2 <= len(username) <= 32):
         raise HTTPException(400, "Username must be 2-32 characters long")
     if not all(c.isalnum() or c in "._- " for c in username):
         raise HTTPException(400, "Username may only contain letters, numbers, spaces and . _ -")
+    if not any(c.isalnum() for c in username):  # ".." or "- -" would be hard to tell apart and to talk about
+        raise HTTPException(400, "A username needs at least one letter or digit")
+    if not one_alphabet(username):
+        raise HTTPException(400, "A username may use only one alphabet, so that it cannot look like someone else's")
     return username
 
 
