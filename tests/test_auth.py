@@ -131,9 +131,17 @@ def test_admin_password_reset_and_delete(plain_server):
 
 def test_username_rules(plain_server):
     admin = setup_admin(plain_server)
-    for bad in ["x", "a" * 33, "bad/name", "semi;colon", "<script>"]:
+    for bad in ["x", "a" * 33, "bad/name", "semi;colon", "<script>", "★★", "a\u200bb", "\u202eabc", "..", "- -", "__"]:
         assert admin.post("/api/users", json={"username": bad, "password": "password123"}).status_code == 400, bad
-    assert admin.post("/api/users", json={"username": "Good Name_1.x", "password": "password123"}).status_code == 200
+    assert "letter or digit" in admin.post("/api/users", json={"username": "-.-", "password": "password123"}).json()["detail"]
+    for good in ["Good Name_1.x", "名前", "Ölfeld"]:
+        assert admin.post("/api/users", json={"username": good, "password": "password123"}).status_code == 200, good
+    # é typed as e and a combining accent is the same é, when the account is made and when signing in
+    r = admin.post("/api/users", json={"username": "Rene\u0301e", "password": "password123"})
+    assert r.status_code == 200 and r.json()["username"] == "Renée"
+    for typed in ("Renée", "Rene\u0301e"):
+        assert plain_server.client(typed, "password123").get("/api/auth/status").json()["user"]["username"] == "Renée"
+    assert admin.post("/api/users", json={"username": "Rene\u0301e", "password": "password123"}).status_code == 409
 
 
 def test_env_bootstrap_admin(tmp_path):
@@ -220,6 +228,7 @@ def test_a_database_from_the_first_version_is_upgraded(tmp_path):
     conn.execute("ALTER TABLE users DROP COLUMN discord_id")
     conn.execute("ALTER TABLE users DROP COLUMN discord_name")
     conn.execute("ALTER TABLE users DROP COLUMN discord_pings")
+    conn.execute("ALTER TABLE users DROP COLUMN discord_avatar")
     conn.execute("ALTER TABLE games DROP COLUMN discord_webhook_url")
     conn.execute("ALTER TABLE configs DROP COLUMN shared_at")
     for column in ("start_at", "start_open_minutes", "start_countdown", "start_stage"):
@@ -256,7 +265,7 @@ def test_a_database_from_the_first_version_is_upgraded(tmp_path):
         games = admin.get("/api/games").json()
         assert [(g["name"], g["single_claim"], g["finished_at"]) for g in games] == [("Old game", False, None)]
         conn = sqlite3.connect(db_path)
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 20
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 21
         conn.close()
         # tables added since then exist and work
         r = admin.post("/api/signups", json={"name": "After the upgrade"})
@@ -300,6 +309,7 @@ def test_entries_from_before_slots_were_counted_are_counted(tmp_path):
     conn = sqlite3.connect(tmp_path / "data" / "manager.sqlite3")
     conn.execute("ALTER TABLE signup_entries DROP COLUMN slots")  # what a v19 database looks like
     conn.execute("ALTER TABLE signups RENAME COLUMN slots_per_user TO configs_per_user")
+    conn.execute("ALTER TABLE users DROP COLUMN discord_avatar")  # added after v19, in v21
     conn.execute("PRAGMA user_version = 19")
     conn.commit()
     conn.close()

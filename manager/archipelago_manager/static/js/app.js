@@ -127,7 +127,7 @@ function renderShell() {
   ];
   view = h("main", { id: "view", class: "view", tabindex: "-1" });
   const userButton = h("button", { class: "btn ghost user-btn", type: "button", "aria-haspopup": "menu" },
-    icon("user", 16), h("span", {}, state.user.username), isAdmin() ? h("span", { class: "badge accent" }, t("admin"))
+    userPicture(), h("span", {}, state.user.username), isAdmin() ? h("span", { class: "badge accent" }, t("admin"))
       : state.user.role === "organizer" ? h("span", { class: "badge accent" }, t("organizer")) : null);
   const menu = h("div", { class: "menu", hidden: true, role: "menu" });
   menuKeys(menu);
@@ -183,6 +183,16 @@ window.addEventListener("resize", () => {
   fitPending = true;
   requestAnimationFrame(() => { fitPending = false; fitNav(); });
 });
+
+// The picture of the user's linked Discord account, else the outline of a person. It comes from Discord's image server,
+// which is not told which page asked; if it cannot be loaded, the outline stands in.
+function userPicture() {
+  const url = state.user.discord_avatar;
+  if (!url) return icon("user", 16);
+  const picture = h("img", { class: "avatar", referrerpolicy: "no-referrer", src: url, alt: "", width: 22, height: 22 });
+  picture.addEventListener("error", () => picture.replaceWith(icon("user", 16)), { once: true });
+  return picture;
+}
 
 function drawUserMenu(menu) {
   const user = state.user;
@@ -313,6 +323,7 @@ async function unlinkDiscord() {
     { title: t("Unlink Discord?"), confirmText: t("Unlink") }))) return;
   try {
     state.user = await post("/api/auth/discord/unlink");
+    app.querySelector(".user-btn .avatar")?.replaceWith(userPicture());
     toast(t("Discord unlinked"), "success");
   } catch (err) {
     toast(err.message, "error");

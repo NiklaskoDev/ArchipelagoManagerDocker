@@ -20,8 +20,8 @@ from .. import __version__, audit, db, discord_auth, notify, settings as app_set
 from ..config import CONFIG
 from ..security import (ROLES, SESSION_COOKIE, LoginThrottle, admin_user, check_password_policy, check_username,
                         client_address, create_session, current_user, destroy_session, destroy_user_sessions,
-                        hash_password, https_in_use, is_organizer, login_throttle, organizer_user, revoke_user_tokens,
-                        set_session_cookie, user_for_request, verify_password)
+                        hash_password, https_in_use, is_organizer, login_throttle, normal_username, organizer_user,
+                        revoke_user_tokens, set_session_cookie, user_for_request, verify_password)
 from ..security import ip_throttle
 
 router = APIRouter(prefix="/api")
@@ -32,6 +32,7 @@ def user_json(row: sqlite3.Row) -> dict:
     return {"id": row["id"], "username": row["username"], "role": row["role"], "disabled": bool(row["disabled"]),
             "created_at": row["created_at"], "last_login": row["last_login"],
             "discord_name": row["discord_name"] if row["discord_id"] else None,
+            "discord_avatar": discord_auth.avatar_url(row),
             "discord_pings": db.jloads(row["discord_pings"], []),
             "has_password": bool(row["password_hash"])}
 
@@ -171,7 +172,7 @@ def login(creds: Credentials, request: Request, response: Response) -> dict:
     ip_key = f"ip|{client_address(request)}"
     if login_throttle.blocked(key) or ip_throttle.blocked(ip_key):
         raise HTTPException(429, "Too many failed logins. Try again in a few minutes.")
-    row = db.query_one("SELECT * FROM users WHERE username = ?", (creds.username.strip(),))
+    row = db.query_one("SELECT * FROM users WHERE username = ?", (normal_username(creds.username),))
     # Verify even for unknown users and for accounts without a password (Discord only), so the response time does not
     # reveal which usernames exist or how they sign in.
     dummy = "scrypt$16384$8$1$AAAAAAAAAAAAAAAAAAAAAA==$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
@@ -295,7 +296,8 @@ async def discord_callback(request: Request, state: str = "", code: str = "", er
             raise discord_auth.DiscordError("disabled_user")
         else:
             user_id = user["id"]
-            db.execute("UPDATE users SET discord_name = ? WHERE id = ?", (identity["name"], user_id))
+            db.execute("UPDATE users SET discord_name = ?, discord_avatar = ? WHERE id = ?",
+                       (identity["name"], identity["avatar"], user_id))
     except discord_auth.DiscordError as e:
         log.info("Discord sign-in refused: %s", e)
         return _back_to_app(f"#/?discord_error={e.code}")
@@ -308,7 +310,8 @@ async def discord_callback(request: Request, state: str = "", code: str = "", er
 def discord_unlink(user: sqlite3.Row = Depends(current_user)) -> dict:
     if not user["password_hash"]:
         raise HTTPException(409, "Set a password first, or you could not sign in any more")
-    db.execute("UPDATE users SET discord_id = NULL, discord_name = NULL WHERE id = ?", (user["id"],))
+    db.execute("UPDATE users SET discord_id = NULL, discord_name = NULL, discord_avatar = NULL WHERE id = ?",
+               (user["id"],))
     return user_json(db.query_one("SELECT * FROM users WHERE id = ?", (user["id"],)))
 
 
@@ -400,7 +403,8 @@ def patch_user(user_id: int, body: UserPatch, request: Request, admin: sqlite3.R
         destroy_user_sessions(user_id)
         revoke_user_tokens(user_id)
     if body.unlink_discord:
-        db.execute("UPDATE users SET discord_id = NULL, discord_name = NULL WHERE id = ?", (user_id,))
+        db.execute("UPDATE users SET discord_id = NULL, discord_name = NULL, discord_avatar = NULL WHERE id = ?",
+                   (user_id,))
         destroy_user_sessions(user_id)  # sessions that came from that Discord account end with it
     audit.note(request, **{key: value for key, value in (
         ("role", body.role), ("disabled", body.disabled), ("password", "changed" if body.password else None),

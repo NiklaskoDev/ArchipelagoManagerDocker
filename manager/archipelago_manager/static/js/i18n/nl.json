@@ -1724,7 +1724,10 @@
   "You already have a template called {0}": "Je hebt al een sjabloon met de naam {0}",
   "A template needs a name and its options": "Een sjabloon heeft een naam en zijn opties nodig",
   "You have {0} templates already. Delete one you no longer use.": "Je hebt al {0} sjablonen. Verwijder er een dat je niet meer gebruikt.",
-  "Only organizers and administrators share templates": "Alleen organisatoren en beheerders delen sjablonen"
+  "Only organizers and administrators share templates": "Alleen organisatoren en beheerders delen sjablonen",
+  "A username needs at least one letter or digit": "Een gebruikersnaam heeft minstens één letter of cijfer nodig",
+  "Document #{0}: the player name has no visible characters, so nobody can read it": "Document #{0}: de spelersnaam heeft geen zichtbare tekens, dus niemand kan hem lezen",
+  "Document #{0}: the player name contains characters that change the direction of the text, so it shows differently from how it is spelled": "Document #{0}: de spelersnaam bevat tekens die de schrijfrichting veranderen, dus hij wordt anders getoond dan hij gespeld is"
  },
  "server_extra": [
   " (line {0})",
@@ -1795,6 +1798,8 @@
   "API tokens cannot be used for this. Sign in instead.",
   "This API token can only read",
   "Enter the certificate with its full path in the container, e.g. /config/tls/fullchain.pem",
-  "Enter the key with its full path in the container, e.g. /config/tls/privkey.pem"
+  "Enter the key with its full path in the container, e.g. /config/tls/privkey.pem",
+  "Document #{0}: the player name has no visible characters, so nobody can read it",
+  "Document #{0}: the player name contains characters that change the direction of the text, so it shows differently from how it is spelled"
  ]
 }

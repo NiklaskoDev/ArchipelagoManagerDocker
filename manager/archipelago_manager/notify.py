@@ -64,11 +64,14 @@ STATE = _State()
 # message building
 # ----------------------------------------------------------------------------------------------------------------------
 _MARKDOWN = re.compile(r"([\\*_~`|>\[\]])")
+_DIRECTION_CHANGES = re.compile("[\u202a-\u202e\u2066-\u2069]")
 
 
 def md(text: Any) -> str:
-    """User-supplied text (game, player and user names) with Discord's markdown characters escaped."""
-    return _MARKDOWN.sub(r"\\\1", str(text))
+    """User-supplied text (game, player and user names) with Discord's markdown characters escaped. A name that changes
+    the direction of the text is kept to itself, so it cannot turn the rest of the message around."""
+    text = _MARKDOWN.sub(r"\\\1", str(text))
+    return f"\u2068{text}\u2069" if _DIRECTION_CHANGES.search(text) else text
 
 
 _MESSAGES = {"de": notify_de.MESSAGES, "fr": notify_fr.MESSAGES, "nl": notify_nl.MESSAGES}

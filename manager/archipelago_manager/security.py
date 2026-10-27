@@ -8,6 +8,7 @@ import ipaddress
 import secrets
 import sqlite3
 import time
+import unicodedata
 from collections import defaultdict, deque
 
 from fastapi import Depends, HTTPException, Request, Response
@@ -53,12 +54,19 @@ def check_password_policy(password: str) -> None:
         raise HTTPException(400, "Password is too long")
 
 
+def normal_username(username: str) -> str:
+    """A username as stored and looked up: without surrounding spaces, and é typed as e + ´ the same as é (NFC)."""
+    return unicodedata.normalize("NFC", username.strip())
+
+
 def check_username(username: str) -> str:
-    username = username.strip()
+    username = normal_username(username)
     if not (2 <= len(username) <= 32):
         raise HTTPException(400, "Username must be 2-32 characters long")
     if not all(c.isalnum() or c in "._- " for c in username):
         raise HTTPException(400, "Username may only contain letters, numbers, spaces and . _ -")
+    if not any(c.isalnum() for c in username):  # ".." or "- -" would be hard to tell apart and to talk about
+        raise HTTPException(400, "A username needs at least one letter or digit")
     return username
 
 

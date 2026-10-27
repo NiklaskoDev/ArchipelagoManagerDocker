@@ -15,8 +15,11 @@ def config_path(user_id: int, config_id: int) -> Path:
 
 
 def normalize_name(name: str) -> str:
-    name = yamlinfo.safe_filename(name, "config.yaml")
-    return name if name.lower().endswith((".yaml", ".yml")) else name + ".yaml"
+    """A config's name: a safe file name ending in .yaml. One without a letter or digit (★★★.yaml, say) is config.yaml."""
+    base = os.path.basename(name.replace("\\", "/"))
+    ext = next((e for e in (".yaml", ".yml") if base.lower().endswith(e)), "")
+    stem = base[:len(base) - len(ext)]
+    return yamlinfo.safe_filename(stem, "config") + (base[len(stem):] if ext else ".yaml")
 
 
 def unique_name(user_id: int, name: str, ignore_id: int | None = None) -> str:

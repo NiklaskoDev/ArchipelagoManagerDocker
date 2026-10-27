@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -89,10 +90,26 @@ def _weighted_keys(value: Any) -> list[str]:
 
 
 def static_name(raw: str) -> str | None:
-    """The slot name for a yaml `name`, or None if placeholders make it unpredictable."""
-    if any(token in raw for token in ("{", "}", "%number%", "%player%")):
+    """The slot name Generate.handle_name makes of a yaml `name`, or None if placeholders make it unpredictable. As
+    there, "%%" stands for a single "%"."""
+    pieces = raw.split("%%")
+    if any(token in piece for piece in pieces for token in ("{", "}", "%number%", "%player%")):
         return None
-    return raw.strip()[:MAX_NAME_LENGTH].strip() or None
+    return "%".join(pieces).strip()[:MAX_NAME_LENGTH].strip() or None
+
+
+# Characters that turn the direction of the text around (embeddings, overrides and isolates)
+_DIRECTION_CHANGES = re.compile("[\u202a-\u202e\u2066-\u2069]")
+
+
+def _name_warning(index: int, name: str) -> str | None:
+    """What makes a player name hard to read: Archipelago takes it, but the players see something else."""
+    if not any(unicodedata.category(c)[0] not in "CZ" for c in name):  # only spaces, controls and zero-width ones
+        return f"Document #{index}: the player name has no visible characters, so nobody can read it"
+    if _DIRECTION_CHANGES.search(name):
+        return (f"Document #{index}: the player name contains characters that change the direction of the text, so it "
+                f"shows differently from how it is spelled")
+    return None
 
 
 def check_aliases(text: str) -> None:
@@ -188,6 +205,8 @@ def analyze(text: str, fallback_name: str) -> YamlInfo:
         else:
             raise YamlError(f"Document #{index}: 'name' must be text")
 
+        if name and (warning := _name_warning(index, name)):
+            info.warnings.append(warning)
         description = doc.get("description")
         info.docs.append(YamlDoc(
             raw_name=raw_name, name=name, games=games,
@@ -229,11 +248,12 @@ def with_player_name(text: str, name: str) -> str:
     return result
 
 
-_UNSAFE = re.compile(r"[^A-Za-z0-9._ -]+")
+_UNSAFE = re.compile(r"[^\w. -]+")  # \w: the letters and digits of every language, and _
 
 
 def safe_filename(name: str, default: str = "file") -> str:
-    """A file name that is safe to use on disk and in download headers."""
-    name = os.path.basename(name.replace("\\", "/"))
-    name = _UNSAFE.sub("_", name).strip(" .")
-    return (name or default)[:120]
+    """A file name that is safe to use on disk and in download headers: letters and digits (of any language), spaces
+    and . _ -. One without a letter or digit, only symbols or emoji say, becomes `default`."""
+    name = os.path.basename(unicodedata.normalize("NFC", name).replace("\\", "/"))  # é typed as e + ´ is still é
+    name = _UNSAFE.sub("_", name).strip(" .")[:120]
+    return name if any(c.isalnum() for c in name) else default

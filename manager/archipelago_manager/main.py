@@ -25,7 +25,9 @@ log = logging.getLogger("archipelago_manager")
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
-CONTENT_SECURITY_POLICY = ("default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; "
+# Images may also come from Discord's image server: the pictures of linked Discord accounts (discord_auth.avatar_url)
+CONTENT_SECURITY_POLICY = ("default-src 'self'; img-src 'self' data: https://cdn.discordapp.com; "
+                           "style-src 'self' 'unsafe-inline'; "
                            "frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
 
 

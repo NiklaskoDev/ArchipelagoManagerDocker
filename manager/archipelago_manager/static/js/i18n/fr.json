@@ -1724,7 +1724,10 @@
   "You already have a template called {0}": "Vous avez déjà un modèle nommé {0}",
   "A template needs a name and its options": "Un modèle a besoin d'un nom et de ses options",
   "You have {0} templates already. Delete one you no longer use.": "Vous avez déjà {0} modèles. Supprimez-en un que vous n'utilisez plus.",
-  "Only organizers and administrators share templates": "Seuls les organisateurs et les administrateurs partagent des modèles"
+  "Only organizers and administrators share templates": "Seuls les organisateurs et les administrateurs partagent des modèles",
+  "A username needs at least one letter or digit": "Un nom d'utilisateur doit contenir au moins une lettre ou un chiffre",
+  "Document #{0}: the player name has no visible characters, so nobody can read it": "Document n° {0} : le nom de joueur n'a aucun caractère visible, personne ne peut le lire",
+  "Document #{0}: the player name contains characters that change the direction of the text, so it shows differently from how it is spelled": "Document n° {0} : le nom de joueur contient des caractères qui changent le sens du texte, il s'affiche donc autrement qu'il ne s'écrit"
  },
  "server_extra": [
   " (line {0})",
@@ -1795,6 +1798,8 @@
   "API tokens cannot be used for this. Sign in instead.",
   "This API token can only read",
   "Enter the certificate with its full path in the container, e.g. /config/tls/fullchain.pem",
-  "Enter the key with its full path in the container, e.g. /config/tls/privkey.pem"
+  "Enter the key with its full path in the container, e.g. /config/tls/privkey.pem",
+  "Document #{0}: the player name has no visible characters, so nobody can read it",
+  "Document #{0}: the player name contains characters that change the direction of the text, so it shows differently from how it is spelled"
  ]
 }
