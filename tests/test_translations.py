@@ -1,4 +1,5 @@
-"""The German web UI: every text the code marks for translation is in the dictionary, with the same placeholders.
+"""The web UI in other languages: every text the code marks for translation is in each dictionary (i18n/<language>.json),
+with the same placeholders.
 
 The browser translates the server's English messages too (i18n.js, tServer). For those the messages are collected
 from the code: the detail of each HTTPException and the message of the errors the API passes on.
@@ -8,9 +9,12 @@ import json
 import re
 from pathlib import Path
 
+import pytest
+
 PACKAGE = Path(__file__).resolve().parents[1] / "manager" / "archipelago_manager"
 STATIC = PACKAGE / "static" / "js"
-DICTIONARY = json.loads((STATIC / "i18n" / "de.json").read_text(encoding="utf-8"))
+DICTIONARIES = {path.stem: json.loads(path.read_text(encoding="utf-8")) for path in sorted((STATIC / "i18n").glob("*.json"))}
+each_language = pytest.mark.parametrize("language", sorted(DICTIONARIES))
 
 # t("..."), and both forms of plural(n, "...", "...")
 _STRING = r'"((?:[^"\\\n]|\\.)*)"'
@@ -74,30 +78,42 @@ def placeholders(text: str) -> set[str]:
     return set(re.findall(r"\{(\w+)\}", text))
 
 
-def test_every_marked_text_is_translated():
-    strings = DICTIONARY["strings"]
+def test_every_language_can_be_chosen():
+    # the languages the browser offers (i18n.js) and the ones there are dictionaries for
+    source = (STATIC / "i18n.js").read_text(encoding="utf-8")
+    offered = set(re.findall(r"(\w+): \"", re.search(r"export const LANGUAGES = \{(.*?)\};", source).group(1)))
+    assert offered == {"en", *DICTIONARIES}
+
+
+@each_language
+def test_every_marked_text_is_translated(language):
+    strings = DICTIONARIES[language]["strings"]
     missing = [f"{key!r} ({where})" for key, where in js_keys().items() if key not in strings]
-    assert not missing, "Not in i18n/de.json \"strings\":\n" + "\n".join(missing)
+    assert not missing, f"Not in i18n/{language}.json \"strings\":\n" + "\n".join(missing)
 
 
-def test_every_server_message_is_translated():
-    server = DICTIONARY["server"]
+@each_language
+def test_every_server_message_is_translated(language):
+    server = DICTIONARIES[language]["server"]
     missing = [f"{key!r} ({where})" for key, where in server_messages().items() if key not in server]
-    assert not missing, "Not in i18n/de.json \"server\":\n" + "\n".join(missing)
+    assert not missing, f"Not in i18n/{language}.json \"server\":\n" + "\n".join(missing)
 
 
-def test_translations_keep_their_placeholders():
-    wrong = [f"{key!r} -> {value!r}" for part in ("strings", "server") for key, value in DICTIONARY[part].items()
+@each_language
+def test_translations_keep_their_placeholders(language):
+    wrong = [f"{key!r} -> {value!r}" for part in ("strings", "server") for key, value in DICTIONARIES[language][part].items()
              if placeholders(key) != placeholders(value) or not value.strip()]
     assert not wrong, "\n".join(wrong)
 
 
-def test_the_dictionary_has_no_leftovers():
+@each_language
+def test_the_dictionary_has_no_leftovers(language):
     # Texts that are no longer in the code would pile up unnoticed
+    dictionary = DICTIONARIES[language]
     used, messages = js_keys(), server_messages()
-    unused = [key for key in DICTIONARY["strings"] if key not in used]
+    unused = [key for key in dictionary["strings"] if key not in used]
     assert not unused, "No longer used in the web UI: " + ", ".join(map(repr, unused))
-    extra = set(DICTIONARY.get("server_extra", []))
-    unused = [key for key in DICTIONARY["server"] if key not in messages and key not in extra]
+    extra = set(dictionary.get("server_extra", []))
+    unused = [key for key in dictionary["server"] if key not in messages and key not in extra]
     assert not unused, "Not a server message (list ones the server sends some other way in \"server_extra\"): " + \
         ", ".join(map(repr, unused))

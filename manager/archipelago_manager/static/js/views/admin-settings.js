@@ -1,7 +1,7 @@
 import { h, clear, icon, toast, action, confirmDialog, fmtBytes, fmtDate } from "../util.js";
 import { get, patch, put, post, del, refreshStatus } from "../api.js";
 import { pageHeader, field, checkbox, banner, adminTabs, serverOptionsForm, updateBanner, updateStatus, copyField, select, romsCard, deliveryStatus, tlsBanner } from "../components.js";
-import { t, tServer, plural } from "../i18n.js";
+import { t, tServer, plural, LANGUAGES } from "../i18n.js";
 
 const CALLBACK_PATH = "/api/auth/discord/callback";
 
@@ -221,7 +221,7 @@ const EVENTS = [
 function notificationsCard(settings) {
   const webhook = h("input", { class: "input", type: "url", value: settings.discord_webhook_url, autocomplete: "off",
     placeholder: "https://discord.com/api/webhooks/…" });
-  const language = select([["en", "English"], ["de", "Deutsch"]], settings.notify_language);
+  const language = select(Object.entries(LANGUAGES), settings.notify_language);
   const boxes = EVENTS.map(([key, label, hint]) => ({ key, box: checkbox(label, settings.notify_events.includes(key), hint) }));
   const mentions = checkbox(t("Let players be mentioned"), settings.notify_mentions,
     t("Players who linked their Discord account choose in their user menu what they want to be mentioned for, such as their game going online. Nobody else is ever mentioned, not @everyone and no role."));

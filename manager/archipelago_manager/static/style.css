@@ -277,6 +277,19 @@ table.table { width: 100%; border-collapse: collapse; }
 .btn.discord { background: #5865f2; border-color: #5865f2; color: #fff; }
 .btn.discord:hover { background: #4752c4; border-color: #4752c4; }
 .menu-sep { border-top: 1px solid var(--border); margin: 6px 0; }
+.menu-value { margin-left: auto; padding-left: 12px; display: inline-flex; align-items: center; gap: 4px; color: var(--muted); font-size: .85rem; }
+.menu-back { font-weight: 600; }
+
+/* the languages (app.js languageOptions): a badge with the code, the language's own name, its name in the current one */
+.lang-option { gap: 10px; }
+.lang-code { flex: none; width: 30px; padding: 2px 0; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-2);
+  color: var(--muted); font-size: .7rem; font-weight: 700; letter-spacing: .05em; text-align: center; }
+.lang-option[aria-checked="true"] .lang-code { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.lang-names { display: flex; flex-direction: column; line-height: 1.25; margin-right: auto; }
+.lang-picker { position: relative; align-self: center; }
+/* opens upwards from the bottom of the sign-in card, on a phone too (where other menus hang from the top bar) */
+.lang-picker .lang-menu { position: absolute; top: auto; bottom: calc(100% + 6px); left: 50%; right: auto; transform: translateX(-50%);
+  min-width: 230px; }
 .menu-note { padding: 4px 10px 6px; color: var(--muted); font-size: .8rem; overflow-wrap: anywhere; }
 
 .slot-name { font-weight: 600; }

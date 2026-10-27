@@ -1,5 +1,6 @@
 """Discord notifications. A local fake stands in for Discord, so nothing leaves the machine."""
 import ast
+import importlib
 import json
 import os
 import signal
@@ -132,13 +133,14 @@ def fields(text: str) -> set[str]:
     return {name for _literal, name, _spec, _conversion in string.Formatter().parse(text) if name is not None}
 
 
-def test_the_german_texts_fit_the_code():
-    from archipelago_manager.notify_de import MESSAGES
+@pytest.mark.parametrize("language", ["de", "fr", "nl"])
+def test_the_translated_texts_fit_the_code(language):
+    MESSAGES = importlib.import_module(f"archipelago_manager.notify_{language}").MESSAGES
     wrong = [f"{key!r} -> {value!r}" for key, value in MESSAGES.items() if fields(key) != fields(value)]
     assert not wrong, "Other placeholders than the English text:\n" + "\n".join(wrong)
     used = tr_texts()
     missing = [f"{text!r} ({where})" for text, where in used.items() if text not in MESSAGES]
-    assert not missing, "Not in notify_de.py:\n" + "\n".join(missing)
+    assert not missing, f"Not in notify_{language}.py:\n" + "\n".join(missing)
     unused = [key for key in MESSAGES if key not in used]
     assert not unused, "No longer used: " + ", ".join(map(repr, unused))
 
@@ -146,7 +148,7 @@ def test_the_german_texts_fit_the_code():
 def test_messages_can_be_in_german(plain_server, hook):
     admin = setup_admin(plain_server)
     assert admin.get("/api/settings").json()["notify_language"] == "en"
-    assert admin.patch("/api/settings", json={"notify_language": "fr"}).status_code == 400
+    assert admin.patch("/api/settings", json={"notify_language": "es"}).status_code == 400
     r = admin.patch("/api/settings", json={"notify_language": "de", "discord_webhook_url": hook.url})
     assert r.status_code == 200 and r.json()["notify_language"] == "de"
 
@@ -164,6 +166,12 @@ def test_messages_can_be_in_german(plain_server, hook):
     assert admin.post(f"/api/signups/{signup['id']}/close").status_code == 200
     closed = hook.wait_for("Anmeldung geschlossen: Freitags*runde", timeout=20)
     assert closed["description"] == "0 Anmeldungen. Niemand hat sich angemeldet."
+
+    # French and Dutch too
+    for language, title in (("fr", "Message de test"), ("nl", "Testbericht")):
+        assert admin.patch("/api/settings", json={"notify_language": language}).status_code == 200
+        assert admin.post("/api/settings/test-notification", json={}).status_code == 200
+        assert hook.embeds[-1]["title"] == title
 
     # and back to English
     assert admin.patch("/api/settings", json={"notify_language": "en"}).json()["notify_language"] == "en"

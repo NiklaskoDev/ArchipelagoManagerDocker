@@ -17,7 +17,7 @@ from collections.abc import Collection
 from datetime import UTC, datetime
 from typing import Any
 
-from . import __version__, db, notify_de, settings as app_settings
+from . import __version__, db, notify_de, notify_fr, notify_nl, settings as app_settings
 
 log = logging.getLogger(__name__)
 
@@ -71,13 +71,16 @@ def md(text: Any) -> str:
     return _MARKDOWN.sub(r"\\\1", str(text))
 
 
+_MESSAGES = {"de": notify_de.MESSAGES, "fr": notify_fr.MESSAGES, "nl": notify_nl.MESSAGES}
+
+
 def tr(text: str, **values: Any) -> str:
     """A message text in the language the admin chose for notifications, with the values filled in.
 
-    The English text is the key (notify_de.py has the German ones). Values go in as they are: escape names with md().
+    The English text is the key (notify_de.py has the German ones, and so on). Values go in as they are: escape names
+    with md().
     """
-    if app_settings.get_setting("notify_language") == "de":
-        text = notify_de.MESSAGES.get(text, text)
+    text = _MESSAGES.get(app_settings.get_setting("notify_language"), {}).get(text, text)
     return text.format(**values)
 
 
