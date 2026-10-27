@@ -32,6 +32,7 @@ from dataclasses import dataclass
 
 from . import __version__, db, settings as app_settings
 from .config import CONFIG
+from .security import one_alphabet
 
 log = logging.getLogger(__name__)
 
@@ -191,7 +192,8 @@ def link(user_id: int, identity: dict) -> None:
 
 def _free_username(wanted: str) -> str:
     base = re.sub(r"[^\w. -]", "", unicodedata.normalize("NFC", wanted)).strip()[:28].strip()
-    base = base if len(base) >= 2 and any(c.isalnum() for c in base) else "player"  # the rules of check_username
+    if len(base) < 2 or not any(c.isalnum() for c in base) or not one_alphabet(base):  # the rules of check_username
+        base = "player"
     name, counter = base, 2
     while db.query_one("SELECT 1 FROM users WHERE username = ?", (name,)):
         name, counter = f"{base}-{counter}", counter + 1

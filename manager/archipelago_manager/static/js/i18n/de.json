@@ -1727,7 +1727,8 @@
   "Only organizers and administrators share templates": "Nur Organisatoren und Administratoren teilen Vorlagen",
   "A username needs at least one letter or digit": "Ein Benutzername braucht mindestens einen Buchstaben oder eine Ziffer",
   "Document #{0}: the player name has no visible characters, so nobody can read it": "Dokument #{0}: Der Spielername hat keine sichtbaren Zeichen, niemand kann ihn lesen",
-  "Document #{0}: the player name contains characters that change the direction of the text, so it shows differently from how it is spelled": "Dokument #{0}: Der Spielername enthält Zeichen, die die Schreibrichtung ändern, deshalb wird er anders angezeigt, als er geschrieben ist"
+  "Document #{0}: the player name contains characters that change the direction of the text, so it shows differently from how it is spelled": "Dokument #{0}: Der Spielername enthält Zeichen, die die Schreibrichtung ändern, deshalb wird er anders angezeigt, als er geschrieben ist",
+  "A username may use only one alphabet, so that it cannot look like someone else's": "Ein Benutzername darf nur ein Alphabet verwenden, damit er nicht wie der eines anderen aussehen kann"
  },
  "server_extra": [
   " (line {0})",

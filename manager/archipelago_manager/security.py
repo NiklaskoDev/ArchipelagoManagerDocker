@@ -59,6 +59,24 @@ def normal_username(username: str) -> str:
     return unicodedata.normalize("NFC", username.strip())
 
 
+# Scripts that are written together: a Japanese, Korean or Chinese name uses them as one alphabet
+_WRITTEN_TOGETHER = ({"HAN", "HIRAGANA", "KATAKANA"}, {"HAN", "HANGUL"}, {"HAN", "BOPOMOFO"})
+
+
+def _alphabet(letter: str) -> str:
+    """The alphabet a letter belongs to, the first word of its Unicode name: LATIN, CYRILLIC, GREEK, HAN, HIRAGANA, ...
+    Width variants (FULLWIDTH, HALFWIDTH) count as alphabets of their own, as they look like the plain letters."""
+    word = unicodedata.name(letter, "").replace("-", " ").split(" ")[0]
+    return "HAN" if word in ("CJK", "IDEOGRAPHIC") else word  # 々 and 〆 belong to Han names
+
+
+def one_alphabet(name: str) -> bool:
+    """Whether the letters of a name come from one alphabet, so that it cannot pass for another name: "аdmin" with a
+    Cyrillic а looks like "admin". Digits and . _ - do not count."""
+    alphabets = {_alphabet(c) for c in name if c.isalpha()}
+    return len(alphabets) <= 1 or any(alphabets <= together for together in _WRITTEN_TOGETHER)
+
+
 def check_username(username: str) -> str:
     username = normal_username(username)
     if not (2 <= len(username) <= 32):
@@ -67,6 +85,8 @@ def check_username(username: str) -> str:
         raise HTTPException(400, "Username may only contain letters, numbers, spaces and . _ -")
     if not any(c.isalnum() for c in username):  # ".." or "- -" would be hard to tell apart and to talk about
         raise HTTPException(400, "A username needs at least one letter or digit")
+    if not one_alphabet(username):
+        raise HTTPException(400, "A username may use only one alphabet, so that it cannot look like someone else's")
     return username
 
 

@@ -136,6 +136,13 @@ def test_username_rules(plain_server):
     assert "letter or digit" in admin.post("/api/users", json={"username": "-.-", "password": "password123"}).json()["detail"]
     for good in ["Good Name_1.x", "名前", "Ölfeld"]:
         assert admin.post("/api/users", json={"username": good, "password": "password123"}).status_code == 200, good
+    # one alphabet per name, so none can pass for another: "аdmin" with a Cyrillic а, a fullwidth Ａ, a bold 𝐀
+    for mixed in ["аdmin", "Ivanов", "Ａdmin", "𝐀dmin", "Mario名前", "Ελένη Smith"]:
+        r = admin.post("/api/users", json={"username": mixed, "password": "password123"})
+        assert r.status_code == 400 and "one alphabet" in r.json()["detail"], mixed
+    # names in other alphabets, and Japanese, Korean and Chinese ones written the way they are, with digits too
+    for name in ["Иван", "Ελένη", "佐々木", "やまだ太郎", "カタカナー", "김민준", "王小明", "דוד", "Иван_2"]:
+        assert admin.post("/api/users", json={"username": name, "password": "password123"}).status_code == 200, name
     # é typed as e and a combining accent is the same é, when the account is made and when signing in
     r = admin.post("/api/users", json={"username": "Rene\u0301e", "password": "password123"})
     assert r.status_code == 200 and r.json()["username"] == "Renée"

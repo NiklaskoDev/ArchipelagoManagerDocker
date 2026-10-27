@@ -628,6 +628,10 @@ approve pull requests*. You can also run the workflow by hand (*Actions → Arch
   the sender's to choose, the code is not.
 - Player files may use anchors and aliases (`&name`, `*name`), but not so that a small file stands for a huge one once
   written out ("billion laughs"): such files are refused wherever they come in.
+- Usernames are letters and digits of any language plus spaces and `. _ -`, with at least one letter or digit, and
+  from one alphabet only (Japanese, Korean and Chinese names use their scripts together, as usual), so that no name can
+  pass for another one: `аdmin` with a Cyrillic `а` is refused. Names in player files may be anything Archipelago
+  takes; one that changes the direction of the text cannot turn the text around it on the page or in Discord.
 
 ## Troubleshooting
 

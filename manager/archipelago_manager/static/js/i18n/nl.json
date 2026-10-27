@@ -1727,7 +1727,8 @@
   "Only organizers and administrators share templates": "Alleen organisatoren en beheerders delen sjablonen",
   "A username needs at least one letter or digit": "Een gebruikersnaam heeft minstens één letter of cijfer nodig",
   "Document #{0}: the player name has no visible characters, so nobody can read it": "Document #{0}: de spelersnaam heeft geen zichtbare tekens, dus niemand kan hem lezen",
-  "Document #{0}: the player name contains characters that change the direction of the text, so it shows differently from how it is spelled": "Document #{0}: de spelersnaam bevat tekens die de schrijfrichting veranderen, dus hij wordt anders getoond dan hij gespeld is"
+  "Document #{0}: the player name contains characters that change the direction of the text, so it shows differently from how it is spelled": "Document #{0}: de spelersnaam bevat tekens die de schrijfrichting veranderen, dus hij wordt anders getoond dan hij gespeld is",
+  "A username may use only one alphabet, so that it cannot look like someone else's": "Een gebruikersnaam mag maar één alfabet gebruiken, zodat hij niet op die van iemand anders kan lijken"
  },
  "server_extra": [
   " (line {0})",
