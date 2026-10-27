@@ -256,7 +256,7 @@ def test_a_database_from_the_first_version_is_upgraded(tmp_path):
         games = admin.get("/api/games").json()
         assert [(g["name"], g["single_claim"], g["finished_at"]) for g in games] == [("Old game", False, None)]
         conn = sqlite3.connect(db_path)
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 19
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 20
         conn.close()
         # tables added since then exist and work
         r = admin.post("/api/signups", json={"name": "After the upgrade"})
@@ -278,6 +278,37 @@ def test_a_database_from_the_first_version_is_upgraded(tmp_path):
         assert boss["username"] == "boss" and boss["role"] == "admin"
         r = admin.post("/api/users", json={"username": "planner", "password": "password123", "role": "organizer"})
         assert r.status_code == 200 and r.json()["role"] == "organizer" and r.json()["id"] > boss["id"]
+    finally:
+        server.stop()
+
+
+def test_entries_from_before_slots_were_counted_are_counted(tmp_path):
+    """Schema v20 limits a sign-up round's slots per player instead of its files. Entries made before have no count:
+    the manager counts the players in their files when it starts."""
+    import sqlite3
+    from conftest import Server
+    from helpers import player_yaml, upload_yaml
+    server = Server(tmp_path / "data", ap=False)
+    server.start()
+    try:
+        admin = setup_admin(server)
+        sid = admin.post("/api/signups", json={"name": "Old round", "slots_per_user": 3}).json()["id"]
+        pair = upload_yaml(admin, "pair", player_yaml("One") + "---\n" + player_yaml("Two")).json()["created"][0]["id"]
+        assert admin.post(f"/api/signups/{sid}/entries", json={"config_id": pair}).status_code == 200
+    finally:
+        server.stop()
+    conn = sqlite3.connect(tmp_path / "data" / "manager.sqlite3")
+    conn.execute("ALTER TABLE signup_entries DROP COLUMN slots")  # what a v19 database looks like
+    conn.execute("ALTER TABLE signups RENAME COLUMN slots_per_user TO configs_per_user")
+    conn.execute("PRAGMA user_version = 19")
+    conn.commit()
+    conn.close()
+
+    server.start()
+    try:
+        signup = server.client("boss", "bosspass123").get(f"/api/signups/{sid}").json()
+        assert signup["slots_per_user"] == 3 and signup["my_slot_count"] == 2
+        assert [e["slots"] for e in signup["entries"]] == [2]
     finally:
         server.stop()
 

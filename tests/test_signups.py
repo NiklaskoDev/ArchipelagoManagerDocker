@@ -75,12 +75,12 @@ def test_a_round_from_sign_up_to_game(admin, make_user, discord):
 def test_the_rules_of_a_round(admin, make_user):
     _a, ann = make_user("ann")
     _b, bo = make_user("bo")
-    sid = new_round(admin, allowed_games=["ChecksFinder"], configs_per_user=1)["id"]
+    sid = new_round(admin, allowed_games=["ChecksFinder"], slots_per_user=1)["id"]
     first = config(ann, "Taken")
     assert enter(ann, sid, first).status_code == 200
     assert enter(ann, sid, first).status_code == 409  # the same config twice
     r = enter(ann, sid, config(ann, "Second"))
-    assert r.status_code == 409 and "1 config in this round" in r.json()["detail"]
+    assert r.status_code == 409 and "1 slot in this round. Withdraw an entry first." in r.json()["detail"]
     r = enter(bo, sid, config(bo, "taken"))  # names clash regardless of case
     assert r.status_code == 409 and "already taken" in r.json()["detail"]
     r = enter(bo, sid, config(bo, "Quester", "APQuest"))
@@ -96,7 +96,7 @@ def test_the_rules_of_a_round(admin, make_user):
     assert bo.post(f"/api/signups/{sid}/generate").status_code == 403
     assert bo.delete(f"/api/signups/{sid}").status_code == 403
     for body, message in (({"name": " "}, "name"), ({"name": "x", "deadline": time.time() - 60}, "past"),
-                          ({"name": "x", "configs_per_user": 0}, "between"),
+                          ({"name": "x", "slots_per_user": 0}, "between"),
                           ({"name": "x", "options": {"spoiler": 7}}, "Spoiler"),
                           ({"name": "x", "options": {"plando": ["everything"]}}, "plando"),
                           ({"name": "x", "options": {"turbo": True}}, "Unknown option")):
@@ -107,6 +107,45 @@ def test_the_rules_of_a_round(admin, make_user):
     r = admin.post(f"/api/signups/{sid}/generate")
     assert r.status_code == 409 and "Close the sign-ups" in r.json()["detail"]
     admin.delete(f"/api/signups/{sid}")
+
+
+def test_a_file_with_several_players_takes_a_slot_for_each(admin, make_user):
+    """A round limits slots, not files: two players in one file do not get past a round of one per player."""
+    _a, ann = make_user("ann")
+    pair = player_yaml("AnnOne") + "---\n" + player_yaml("AnnTwo")
+    single = new_round(admin, slots_per_user=1)
+    assert single["slots_per_user"] == 1 and single["configs_per_user"] == 1  # its old name, for scripts
+    r = enter(ann, single["id"], config(ann, "Pair", content=pair))
+    assert r.status_code == 400 and "1 slot in this round, and 'Pair-" in r.json()["detail"]
+    assert "has 2: one for each player in the file" in r.json()["detail"]
+    assert ann.get(f"/api/signups/{single['id']}").json()["entries"] == []
+
+    # in a round of three, the pair takes two: room for one more player, not for another pair
+    sid = new_round(admin, slots_per_user=3)["id"]
+    r = enter(ann, sid, config(ann, "Pair", content=pair))
+    assert r.status_code == 200 and r.json()["my_slot_count"] == 2 and r.json()["my_entry_count"] == 1
+    assert r.json()["entries"][0]["slots"] == 2 and r.json()["entries"][0]["player_names"] == ["AnnOne", "AnnTwo"]
+    r = enter(ann, sid, config(ann, "Pair two", content=player_yaml("AnnThree") + "---\n" + player_yaml("AnnFour")))
+    assert r.status_code == 409 and "has 2: there is room for 1 more" in r.json()["detail"]
+    alone = config(ann, "AnnFive")
+    r = enter(ann, sid, alone)
+    assert r.status_code == 200 and r.json()["my_slot_count"] == 3
+    r = enter(ann, sid, config(ann, "AnnSix"))
+    assert r.status_code == 409 and "3 slots in this round. Withdraw an entry first." in r.json()["detail"]
+
+    # an updated entry counts as its new version
+    entry = next(e for e in ann.get(f"/api/signups/{sid}").json()["entries"] if e["player_names"] == ["AnnFive"])
+    content = player_yaml("AnnFive") + "---\n" + player_yaml("AnnSeven")
+    assert ann.put(f"/api/configs/{alone}", json={"content": content}).status_code == 200
+    r = ann.post(f"/api/signups/{sid}/entries/{entry['id']}/refresh")
+    assert r.status_code == 409 and "room for 1 more" in r.json()["detail"]
+    # scripts can still set the limit by its old name
+    r = admin.patch(f"/api/signups/{sid}", json={"configs_per_user": 4})
+    assert r.status_code == 200 and r.json()["slots_per_user"] == 4
+    r = ann.post(f"/api/signups/{sid}/entries/{entry['id']}/refresh")
+    assert r.status_code == 200 and r.json()["my_slot_count"] == 4
+    admin.delete(f"/api/signups/{sid}")
+    admin.delete(f"/api/signups/{single['id']}")
 
 
 def test_entries_are_copies_that_players_can_update_or_withdraw(admin, make_user, ap_server):

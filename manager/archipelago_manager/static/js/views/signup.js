@@ -39,7 +39,7 @@ export async function openSignupForm({ signup = null, onSaved }) {
     d.setHours(20, 0, 0, 0);
     deadline.value = toLocalInput(d.getTime() / 1000);
   }
-  const perUser = h("input", { class: "input", type: "number", min: 1, max: 20, value: signup?.configs_per_user ?? 1 });
+  const perUser = h("input", { class: "input", type: "number", min: 1, max: 20, value: signup?.slots_per_user ?? 1 });
 
   // allowed games: a list of chips, filled from an input that suggests the installed games
   const allowed = [...(signup?.allowed_games || [])];
@@ -175,7 +175,7 @@ export async function openSignupForm({ signup = null, onSaved }) {
       if (!when) throw new Error(t("Pick a deadline, or choose “No deadline”"));
     }
     const body = {
-      name: name.value, description: description.value, deadline: when, configs_per_user: Number(perUser.value),
+      name: name.value, description: description.value, deadline: when, slots_per_user: Number(perUser.value),
       allowed_games: allowed, auto_generate: autoGenerate.input.checked, mystery: mysteryBox.input.checked,
       ...(mysteryBox.input.checked && weights.value !== weightsText ? { mystery_weights: weights.value } : {}),
       options: { spoiler: Number(spoiler.value), race: race.input.checked, skip_prog_balancing: skipBalance.input.checked,
@@ -201,7 +201,7 @@ export async function openSignupForm({ signup = null, onSaved }) {
       field(t("Description"), description),
       h("div", { class: "form-grid" },
         field(t("Deadline"), deadline, signup?.status === "closed" ? t("Reopen the round to take entries again.") : t("Sign-ups close automatically at this time.")),
-        field(t("Configs per player"), perUser)),
+        field(t("Slots per player"), perUser, t("A file with several players takes one slot for each of them."))),
       noDeadline,
       mysteryBox, builder, weightsField, allowedField,
       h("datalist", { id: listId }, known.map((g) => h("option", { value: g }))),
@@ -376,7 +376,7 @@ export default async function render({ root, params, cleanup, isCurrent }) {
           h("span", {}, t("Everyone joins with a player name and plays what the round's weights roll for them, out of these games:")),
           chips(signup.mystery_games), h("a", { href: `/api/signups/${id}/mystery.yaml` }, icon("download", 14), " ", t("The weights")))]
           : [h("dt", {}, t("Games")), h("dd", {}, signup.allowed_games.length ? chips(signup.allowed_games) : h("span", { class: "muted" }, t("Any game installed on this server")))],
-        h("dt", {}, t("Configs per player")), h("dd", {}, String(signup.configs_per_user)),
+        h("dt", {}, t("Slots per player")), h("dd", {}, String(signup.slots_per_user)),
         h("dt", {}, t("Entries")), h("dd", {}, plural(signup.user_count, "{entries} from {n} player", "{entries} from {n} players", { entries: signup.entry_count })),
         h("dt", {}, t("Settings")), h("dd", { class: "muted" }, extras.join(" · "))));
   }
@@ -386,7 +386,7 @@ export default async function render({ root, params, cleanup, isCurrent }) {
     const mine = signup.entries.filter((e) => e.mine);
     // Admins can still fix entries after the deadline, until the game is generated
     const editable = signup.open || (manager && signup.status === "closed");
-    const canEnter = editable && mine.length < signup.configs_per_user;
+    const canEnter = editable && signup.my_slot_count < signup.slots_per_user;  // a file with several players fills several
     if (!mine.length && !editable) return null;
     const entered = new Set(mine.map((e) => e.config_id));
     const choices = configs.filter((c) => !entered.has(c.id));
@@ -416,7 +416,7 @@ export default async function render({ root, params, cleanup, isCurrent }) {
       mine.length ? h("div", { class: "stack" }, mine.map((e) => h("div", { class: "stack tight" },
         h("div", { class: "row spread" },
           h("div", {}, h("span", { class: "slot-name" }, e.player_names.join(", ") || e.name), " ", chips(e.games, e.missing_games),
-            h("div", { class: "muted small" }, `${e.name} · ${t("entered {ago}", { ago: fmtAgo(e.created_at) })}`,
+            h("div", { class: "muted small" }, `${e.name}${e.slots > 1 ? ` · ${t("{n} slots", { n: e.slots })}` : ""} · ${t("entered {ago}", { ago: fmtAgo(e.created_at) })}`,
               e.updated_at > e.created_at + 1 ? `, ${t("updated {ago}", { ago: fmtAgo(e.updated_at) })}` : "")),
           h("div", { class: "row" },
             h("a", { class: "btn sm", href: `/api/signups/${id}/entries/${e.id}/download` }, icon("download", 14), "YAML"),
@@ -469,6 +469,7 @@ export default async function render({ root, params, cleanup, isCurrent }) {
       h("thead", {}, h("tr", {}, [t("Player"), t("Games"), t("Entered by"), t("When"), ""].map((text) => h("th", {}, text)))),
       h("tbody", {}, signup.entries.map((e) => h("tr", {},
         h("td", {}, h("span", { class: "slot-name" }, e.player_names.join(", ") || h("span", { class: "muted" }, t("name from file"))),
+          e.slots > 1 ? h("span", { class: "muted small" }, ` (${t("{n} slots", { n: e.slots })})`) : null,
           e.issues.map((issue) => h("div", { class: "form-error small" }, tServer(issue))), manager ? generationError(e, "small") : null),
         h("td", {}, chips(e.games, e.missing_games)),
         h("td", {}, e.username, e.mine ? h("span", { class: "muted" }, " ", t("(you)")) : null),

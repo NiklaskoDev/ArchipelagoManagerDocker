@@ -27,7 +27,7 @@ log = logging.getLogger(__name__)
 
 TICK_SECONDS = 20
 REMIND_BEFORE = 24 * 3600
-MAX_CONFIGS_PER_USER = 20
+MAX_SLOTS_PER_USER = 20
 DEFAULT_OPTIONS = {"spoiler": 1, "race": False, "skip_prog_balancing": False,
                    "plando": ["bosses", "connections", "texts"], "host_after": True,
                    "server_options": None}  # the game's server settings; None: the defaults for new games
@@ -110,12 +110,19 @@ def _check_entry(signup: sqlite3.Row, info: yamlinfo.YamlInfo, label: str, *, us
         other = [g for g in info.games if g not in allowed]
         if other:
             raise SignupError(f"This round only allows {', '.join(allowed)}. '{label}' uses {', '.join(other)}.")
-    own = conn.execute("SELECT COUNT(*) FROM signup_entries WHERE signup_id = ? AND user_id = ? AND id != ?",
-                       (signup["id"], user_id, ignore_entry or 0)).fetchone()[0]
-    if own >= signup["configs_per_user"]:
-        limit = signup["configs_per_user"]
-        raise SignupError(f"Each player can enter {limit} config{'s' if limit != 1 else ''} in this round. "
-                          "Withdraw one first.", 409)
+    # The limit is on slots, not files: a file with several players (documents between ---) takes one for each
+    limit, slots = signup["slots_per_user"], len(info.docs)
+    if slots > limit:
+        raise SignupError(f"Each player can enter {limit} slot{'s' if limit != 1 else ''} in this round, and '{label}' "
+                          f"has {slots}: one for each player in the file.")
+    own = conn.execute("SELECT COALESCE(SUM(slots), 0) FROM signup_entries WHERE signup_id = ? AND user_id = ? "
+                       "AND id != ?", (signup["id"], user_id, ignore_entry or 0)).fetchone()[0]
+    if own + slots > limit:
+        if own >= limit:
+            raise SignupError(f"Each player can enter {limit} slot{'s' if limit != 1 else ''} in this round. "
+                              "Withdraw an entry first.", 409)
+        raise SignupError(f"Each player can enter {limit} slots in this round, and '{label}' has {slots}: there is "
+                          f"room for {limit - own} more.", 409)
     taken: dict[str, str] = {}
     for row in conn.execute("SELECT e.player_names, u.username FROM signup_entries e JOIN users u ON u.id = e.user_id "
                             "WHERE e.signup_id = ? AND e.id != ?", (signup["id"], ignore_entry or 0)):
@@ -161,10 +168,10 @@ def add_entry(signup_id: int, config: sqlite3.Row, *, by_admin: bool = False) ->
             raise SignupError(f"'{config['name']}' is already entered in this round", 409)
         _check_entry(signup, info, config["name"], user_id=config["user_id"], ignore_entry=None, conn=conn)
         entry_id = conn.execute(
-            "INSERT INTO signup_entries(signup_id, user_id, config_id, name, player_names, games, sha256, created_at, "
-            "updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO signup_entries(signup_id, user_id, config_id, name, player_names, games, slots, sha256, "
+            "created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
             (signup_id, config["user_id"], config["id"], config["name"], db.jdumps(info.player_names),
-             db.jdumps(info.games), hashlib.sha256(data).hexdigest(), now, now)).lastrowid
+             db.jdumps(info.games), len(info.docs), hashlib.sha256(data).hexdigest(), now, now)).lastrowid
         configstore.write_atomic(entry_path(signup_id, entry_id), data)
     return {"id": entry_id, "warnings": _warnings(info)}
 
@@ -180,9 +187,10 @@ def refresh_entry(signup_id: int, entry: sqlite3.Row, *, by_admin: bool = False)
         if not _takes_entries(signup, by_admin=by_admin):
             raise SignupError("Sign-ups for this round are closed", 409)
         _check_entry(signup, info, config["name"], user_id=entry["user_id"], ignore_entry=entry["id"], conn=conn)
-        conn.execute("UPDATE signup_entries SET name = ?, player_names = ?, games = ?, sha256 = ?, updated_at = ? "
-                     "WHERE id = ?", (config["name"], db.jdumps(info.player_names), db.jdumps(info.games),
-                                      hashlib.sha256(data).hexdigest(), time.time(), entry["id"]))
+        conn.execute("UPDATE signup_entries SET name = ?, player_names = ?, games = ?, slots = ?, sha256 = ?, "
+                     "updated_at = ? WHERE id = ?",
+                     (config["name"], db.jdumps(info.player_names), db.jdumps(info.games), len(info.docs),
+                      hashlib.sha256(data).hexdigest(), time.time(), entry["id"]))
         configstore.write_atomic(entry_path(signup_id, entry["id"]), data)
     return {"id": entry["id"], "warnings": _warnings(info)}
 
@@ -255,12 +263,23 @@ def add_mystery_entry(signup_id: int, user_id: int, player: str, *, by_admin: bo
             raise SignupError("This is not a mystery round", 409)
         _check_entry(signup, info, player, user_id=user_id, ignore_entry=None, conn=conn)
         entry_id = conn.execute(
-            "INSERT INTO signup_entries(signup_id, user_id, config_id, name, player_names, games, sha256, created_at, "
-            "updated_at) VALUES (?,?,NULL,?,?,?,?,?,?)",
+            "INSERT INTO signup_entries(signup_id, user_id, config_id, name, player_names, games, slots, sha256, "
+            "created_at, updated_at) VALUES (?,?,NULL,?,?,?,?,?,?,?)",
             (signup_id, user_id, "mystery.yaml", db.jdumps(info.player_names), db.jdumps(info.games),
-             hashlib.sha256(data).hexdigest(), now, now)).lastrowid
+             len(info.docs), hashlib.sha256(data).hexdigest(), now, now)).lastrowid
         configstore.write_atomic(entry_path(signup_id, entry_id), data)
     return {"id": entry_id, "warnings": _warnings(info)}
+
+
+def count_slots() -> None:
+    """Counts the slots of entries made before rounds limited slots instead of files (schema v20). Blocking."""
+    for row in db.query("SELECT id, signup_id FROM signup_entries WHERE slots IS NULL"):
+        try:
+            _text, info = configstore.analyze_bytes(entry_path(row["signup_id"], row["id"]).read_bytes(), "entry")
+            slots = len(info.docs)
+        except (OSError, yamlinfo.YamlError):
+            slots = 1  # the file is gone or unreadable: it can no longer be generated anyway
+        db.execute("UPDATE signup_entries SET slots = ? WHERE id = ?", (slots, row["id"]))
 
 
 def remove_entry(signup_id: int, entry_id: int) -> None:
@@ -507,10 +526,10 @@ def announce_open(signup_id: int, *, reopened: bool = False) -> None:
     else:
         text += notify.tr("Enter your YAML until an administrator closes the sign-ups.")
     allowed = db.jloads(signup["allowed_games"], [])
-    limit = signup["configs_per_user"]
+    limit = signup["slots_per_user"]
     fields = [(notify.tr("Games"), notify.md(", ".join(allowed)) if allowed
                else notify.tr("Any game installed on the server"), False),
-              (notify.tr("Configs per player"), str(limit), True)]
+              (notify.tr("Slots per player"), str(limit), True)]
     notify.emit("signup", notify.tr("Sign-ups reopened: {name}" if reopened else "Sign-ups open: {name}",
                                     name=signup["name"]), text,
                 url=notify.link(f"/signups/{signup_id}"), fields=fields, color="info", ping="signup_open")

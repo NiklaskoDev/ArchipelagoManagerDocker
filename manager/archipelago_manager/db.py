@@ -13,7 +13,7 @@ from .config import CONFIG
 
 log = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 19
+SCHEMA_VERSION = 20
 
 # Added in schema version 3
 _SIGNUPS = """
@@ -202,6 +202,12 @@ CREATE TABLE generation_presets (
 CREATE INDEX generation_presets_user ON generation_presets(user_id);
 """
 
+# Added in schema version 20: a round limits the slots of each player, not their files, since one file can hold
+# several players. The slots of an entry are NULL for entries made before, until they are counted at start
+# (signups.count_slots).
+_SLOTS = ("ALTER TABLE signups RENAME COLUMN configs_per_user TO slots_per_user; "
+          "ALTER TABLE signup_entries ADD COLUMN slots INTEGER;")
+
 SCHEMA = _USERS + _USERS_INDEX + """
 CREATE TABLE sessions (
     token_hash TEXT PRIMARY KEY,
@@ -341,7 +347,7 @@ CREATE TABLE job_players (
 );
 CREATE INDEX job_players_job ON job_players(job_id);
 """ + _SIGNUPS + _SOURCES + "ALTER TABLE apworld_sources ADD COLUMN latest_asset TEXT; " + \
-    "ALTER TABLE signups ADD COLUMN test_job_id INTEGER;" + _PROGRESS + _AUDIT + _VISITS + _AP_VERSIONS + _API_TOKENS + _SPECTATE_REMINDERS + _MYSTERY + _PRESETS
+    "ALTER TABLE signups ADD COLUMN test_job_id INTEGER;" + _PROGRESS + _AUDIT + _VISITS + _AP_VERSIONS + _API_TOKENS + _SPECTATE_REMINDERS + _MYSTERY + _PRESETS + _SLOTS
 
 
 # Upgrades for databases created by older versions: MIGRATIONS[n] turns schema n - 1 into schema n. New databases get
@@ -397,6 +403,7 @@ MIGRATIONS: dict[int, str] = {
         + _USERS_INDEX + _SPECTATE_REMINDERS,
     18: _MYSTERY,
     19: _PRESETS,
+    20: _SLOTS,
 }
 
 
