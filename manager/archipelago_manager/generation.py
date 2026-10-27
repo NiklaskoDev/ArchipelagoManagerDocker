@@ -18,7 +18,7 @@ from typing import Any
 
 import yaml
 
-from . import apbridge, configstore, db, gamestore, notify, versions, yamlinfo
+from . import apbridge, configstore, db, gamestore, limits, notify, versions, yamlinfo
 from .config import CONFIG
 from .rooms import ROOMS, RoomError, player_list, slot_owners
 
@@ -449,9 +449,12 @@ class GenerationManager:
         started = False
         if job["host_after"]:
             try:
-                await ROOMS.start(game_id)
+                async with limits.starting(db.query_one("SELECT * FROM games WHERE id = ?", (game_id,)), None):
+                    await ROOMS.start(game_id)
                 self._log(job_id, "Server started")
                 started = True
+            except limits.LimitError as e:  # a player who already has a game running
+                self._log(job_id, f"The server was not started: {e.message}")
             except RoomError as e:
                 self._log(job_id, f"Could not start the server: {e}")
 

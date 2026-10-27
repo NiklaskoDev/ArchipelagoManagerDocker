@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from .. import apbridge, audit, db, versions, settings as app_settings
+from .. import apbridge, audit, db, limits, versions, settings as app_settings
 from ..generation import GENERATION, JobRequestError, create_job, job_dir, prepare_players
 from ..security import current_user, is_admin, is_organizer
 
@@ -86,12 +86,16 @@ async def start_job(body: JobCreate, request: Request, user: sqlite3.Row = Depen
     except apbridge.APBridgeError as e:
         raise HTTPException(503, f"Archipelago {version} is unavailable: {e}") from None
     try:
-        players = prepare_players(body.config_ids, user, is_admin=admin, version=version)
-        job_id = create_job(user, players, name=body.name, spoiler=body.spoiler, race=body.race, seed=body.seed,
-                            skip_prog_balancing=body.skip_prog_balancing, plando=body.plando, meta=body.meta,
-                            host_after=body.host_after, ap_version=version, server_options=server_options)
+        async with limits.GENERATING:  # a player's limits (limits.py), counted and taken in one step
+            players = prepare_players(body.config_ids, user, is_admin=admin, version=version)
+            limits.check_generation(user, sum(len(p.info.docs) for p in players))
+            job_id = create_job(user, players, name=body.name, spoiler=body.spoiler, race=body.race, seed=body.seed,
+                                skip_prog_balancing=body.skip_prog_balancing, plando=body.plando, meta=body.meta,
+                                host_after=body.host_after, ap_version=version, server_options=server_options)
     except JobRequestError as e:
         return JSONResponse(status_code=e.status, content={"detail": e.message, "missing_games": e.missing_games})
+    except limits.LimitError as e:
+        raise HTTPException(409, e.message) from None
     GENERATION.enqueue(job_id)
     audit.note(request, target=("job", job_id, body.name or None), configs=len(body.config_ids))
     return job_json(_get_job(job_id, user))

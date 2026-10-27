@@ -35,6 +35,7 @@ ACTIONS: dict[tuple[str, str], str] = {
     ("POST", "/api/games/{game_id}/start"): "game.start",
     ("POST", "/api/games/{game_id}/stop"): "game.stop",
     ("POST", "/api/games/{game_id}/restart"): "game.restart",
+    ("POST", "/api/games/{game_id}/archive"): "game.archive",
     ("POST", "/api/games/{game_id}/reset-save"): "game.reset",
     ("POST", "/api/games/{game_id}/import-gg"): "game.import",
     ("POST", "/api/games/{game_id}/backups"): "game.backup",
@@ -101,7 +102,7 @@ SKIP = {("POST", "/api/configs"), ("POST", "/api/configs/text"), ("POST", "/api/
         ("POST", "/api/signups/{signup_id}/entries"), ("POST", "/api/signups/{signup_id}/entries/{entry_id}/refresh"),
         ("POST", "/api/signups/{signup_id}/mystery-entries"), ("POST", "/api/mystery-weights")}
 # Recorded for everyone, not only administrators
-FOR_EVERYONE = {"game.start", "game.stop", "game.restart", "slot.action", "slot.handover_accept"}
+FOR_EVERYONE = {"game.start", "game.stop", "game.restart", "game.archive", "slot.action", "slot.handover_accept"}
 
 # What a request acts on, from its path, and how to find its name
 _TARGETS = [

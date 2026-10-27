@@ -13,7 +13,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPExcepti
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from .. import (activity, apbridge, audit, backups, db, gamepaths, gamestore, ggimport, history, notify, reminders,
+from .. import (activity, apbridge, audit, backups, db, gamepaths, gamestore, ggimport, history, limits, notify, reminders,
                schedule, spectate, tls, versions, visits, settings as app_settings, textclient)
 from ..config import CONFIG
 from ..rooms import ROOMS, STATUS_GOAL, RoomError, mask_secrets, sleep_minutes, slot_rules, valid_password
@@ -62,6 +62,18 @@ def managed_game(game_id: int, user: sqlite3.Row) -> sqlite3.Row:
 def can_control(game: sqlite3.Row, user: sqlite3.Row) -> bool:
     return manages(game, user) or (app_settings.get_setting("users_can_start_rooms")
                                    and is_participant(game["id"], user["id"]))
+
+
+def can_archive(game: sqlite3.Row, user: sqlite3.Row) -> bool:
+    """Who moves a game to the archive and back: whoever runs it, and the player who generated it (limits.py)."""
+    return manages(game, user) or game["created_by"] == user["id"]
+
+
+def outcome(game: sqlite3.Row, players: list[sqlite3.Row]) -> str | None:
+    """How a game in the archive ended: "finished" when every player reached their goal, else "aborted"."""
+    if game["finished_at"] is None:
+        return None
+    return "finished" if players and all(s["goal_at"] is not None for s in players) else "aborted"
 
 
 def file_visible(f: sqlite3.Row, game: sqlite3.Row, user: sqlite3.Row) -> bool:
@@ -130,7 +142,7 @@ def game_summary(row: sqlite3.Row, slots: list[sqlite3.Row], user: sqlite3.Row, 
         "player_count": len(players), "claimed_count": sum(1 for s in players if s["user_id"] is not None),
         "visibility": row["visibility"], "claimable": bool(row["claimable"]),
         "single_claim": bool(row["single_claim"]),
-        "play_started_at": row["play_started_at"], "finished_at": row["finished_at"],
+        "play_started_at": row["play_started_at"], "finished_at": row["finished_at"], "outcome": outcome(row, players),
         # a planned start: when, when the server opens, whether a countdown runs, and how far it got
         "start": {"at": row["start_at"], "opens_at": row["start_at"] - row["start_open_minutes"] * 60,
                   "open_minutes": row["start_open_minutes"], "countdown": bool(row["start_countdown"]),
@@ -147,6 +159,7 @@ def game_summary(row: sqlite3.Row, slots: list[sqlite3.Row], user: sqlite3.Row, 
             "WHERE f.game_id = ? AND f.kind = 'patch' AND s.user_id = ?", (row["id"], user["id"]))["n"] if mine else 0,
         "can_control": bool(can_control(row, user)),
         "can_manage": manages(row, user),
+        "can_archive": can_archive(row, user),
     }
 
 
@@ -424,6 +437,26 @@ async def patch_game(game_id: int, body: GamePatch, request: Request, user: sqli
     return {**await _detail(game_id, user, request), "restart_required": restart_required}
 
 
+class Archive(BaseModel):
+    archived: bool
+
+
+@router.post("/games/{game_id}/archive")
+async def archive_game(game_id: int, body: Archive, request: Request, user: sqlite3.Row = Depends(current_user)) -> dict:
+    """Moves a game to the archive (finished, or aborted before everyone reached their goal), or back out of it."""
+    row = get_game(game_id, user)
+    if not can_archive(row, user):
+        raise HTTPException(403, "Only whoever runs this game, or the player who generated it, can move it to the archive")
+    if not body.archived and row["finished_at"] is not None:
+        try:
+            limits.check_unarchive(row, user)
+        except limits.LimitError as e:
+            raise HTTPException(409, e.message) from None
+    history.finish(game_id, body.archived)
+    audit.note(request, archived=body.archived)
+    return await _detail(game_id, user, request)
+
+
 @router.delete("/games/{game_id}")
 async def remove_game(game_id: int, user: sqlite3.Row = Depends(current_user)) -> dict:
     managed_game(game_id, user)
@@ -483,7 +516,10 @@ async def start_game(game_id: int, request: Request, user: sqlite3.Row = Depends
     if row["start_at"] and row["start_stage"] is None and not manages(row, user):
         raise HTTPException(409, "This game opens at its planned time. An administrator can open it earlier.")
     try:
-        await ROOMS.start(game_id, announce=True)
+        async with limits.starting(row, user):
+            await ROOMS.start(game_id, announce=True)
+    except limits.LimitError as e:
+        raise HTTPException(409, e.message) from None
     except RoomError as e:
         raise HTTPException(409, str(e)) from None
     return await _detail(game_id, user, request)
@@ -513,9 +549,12 @@ async def stop_game(game_id: int, request: Request, user: sqlite3.Row = Depends(
 
 @router.post("/games/{game_id}/restart")
 async def restart_game(game_id: int, request: Request, user: sqlite3.Row = Depends(current_user)) -> dict:
-    _controllable(game_id, user)
+    row = _controllable(game_id, user)
     try:
-        await ROOMS.restart(game_id)
+        async with limits.starting(row, user):  # restarting a stopped game starts it
+            await ROOMS.restart(game_id)
+    except limits.LimitError as e:
+        raise HTTPException(409, e.message) from None
     except RoomError as e:
         raise HTTPException(409, str(e)) from None
     return await _detail(game_id, user, request)

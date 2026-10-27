@@ -7,6 +7,7 @@ const ROUTES = [
   [/^\/?$/, () => import("./views/dashboard.js"), "home"],
   [/^\/games$/, () => import("./views/games.js"), "games"],
   [/^\/games\/(\d+)$/, () => import("./views/game.js"), "games"],
+  [/^\/archive$/, () => import("./views/archive.js"), "games"],
   [/^\/configs$/, () => import("./views/configs.js"), "configs"],
   [/^\/configs\/new$/, () => import("./views/config-edit.js"), "configs"],
   [/^\/configs\/(\d+)$/, () => import("./views/config-edit.js"), "configs"],

@@ -24,7 +24,7 @@ export default async function render({ root, cleanup, isCurrent }) {
   const missingHost = h("div");
   const drawMissing = (items) => clear(missingHost).append(missingGamesPanel(items, load) || "");
   const drawGames = (all) => {
-    const list = all.filter((g) => !g.finished_at);  // finished ones are in the archive under Games
+    const list = all.filter((g) => !g.finished_at);  // those over are in the archive (views/archive.js)
     const archived = all.length - list.length;
     const mine = list.filter((g) => g.my_slots.length);
     const others = list.filter((g) => !g.my_slots.length);
@@ -67,8 +67,8 @@ export default async function render({ root, cleanup, isCurrent }) {
         h("div", { class: "grid" }, others.slice(0, 6).map((g) => gameCard(g, onUpdate)))));
     }
     if (archived) {
-      gridHost.append(h("p", { class: "muted small" }, h("a", { href: "#/games" },
-        plural(archived, "{n} finished game is in the archive", "{n} finished games are in the archive"))));
+      gridHost.append(h("p", { class: "muted small" }, h("a", { href: "#/archive" },
+        plural(archived, "{n} game is in the archive", "{n} games are in the archive"))));
     }
   };
   async function load() {

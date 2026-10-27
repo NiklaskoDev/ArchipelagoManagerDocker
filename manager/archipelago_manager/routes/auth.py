@@ -16,7 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
-from .. import __version__, audit, db, discord_auth, notify, settings as app_settings
+from .. import __version__, audit, db, discord_auth, limits, notify, settings as app_settings
 from ..config import CONFIG
 from ..security import (ROLES, SESSION_COOKIE, LoginThrottle, admin_user, check_password_policy, check_username,
                         client_address, create_session, current_user, destroy_session, destroy_user_sessions,
@@ -90,6 +90,8 @@ def status(request: Request) -> dict:
         },
         # what players can ask to be mentioned for on Discord
         "ping_kinds": notify.ping_kinds_offered(cfg) if user else [],
+        # what a player may have of the games they generate (limits.py); None for organizers and administrators
+        "limits": limits.summary(user) if user else None,
     }
 
 
