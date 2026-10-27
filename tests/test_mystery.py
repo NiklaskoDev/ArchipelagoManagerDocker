@@ -81,7 +81,7 @@ def test_in_a_mystery_round_everyone_joins_with_a_name_and_gets_what_the_weights
     r = org.post("/api/signups", json={"name": name, "mystery": True, "mystery_weights": "name: A\n---\nname: B\n"})
     assert r.status_code == 400
     r = org.post("/api/signups", json={"name": name, "mystery": True, "mystery_weights": WEIGHTS,
-                                       "allowed_games": ["Clique"], "configs_per_user": 2})
+                                       "allowed_games": ["Clique"], "slots_per_user": 2})
     assert r.status_code == 200, r.text
     signup = r.json()
     sid = signup["id"]

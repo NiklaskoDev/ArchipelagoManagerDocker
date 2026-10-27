@@ -7,7 +7,7 @@ import time
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, Field
 
 from .. import apbridge, audit, db, mystery, signups, yamlinfo
 from ..security import current_user, is_admin, manages, organizer_user
@@ -41,12 +41,14 @@ def signup_json(row: sqlite3.Row, user: sqlite3.Row, rows: list[sqlite3.Row] | N
         "id": row["id"], "name": row["name"], "description": row["description"], "status": row["status"],
         "open": signups.is_open(row), "deadline": row["deadline"], "created_at": row["created_at"],
         "closed_at": row["closed_at"], "creator": creator["username"] if creator else None,
-        "configs_per_user": row["configs_per_user"], "allowed_games": db.jloads(row["allowed_games"], []),
+        "slots_per_user": row["slots_per_user"], "allowed_games": db.jloads(row["allowed_games"], []),
+        "configs_per_user": row["slots_per_user"],  # its name before it counted slots, for scripts written against that
         "auto_generate": bool(row["auto_generate"]), "options": signups.clean_options(db.jloads(row["options"], {})),
         "game_id": row["game_id"], "job_id": row["job_id"] if manager else None,
         "error": row["error"] if manager else None, "can_manage": manager,
         "entry_count": len(rows), "user_count": len({r["user_id"] for r in rows}),
         "my_entry_count": sum(1 for r in rows if r["user_id"] == user["id"]),
+        "my_slot_count": sum(r["slots"] for r in rows if r["user_id"] == user["id"]),
         # a mystery round (mystery.py): everyone gets what one file of weights rolls, out of these games
         "mystery": bool(row["mystery"]), "mystery_games": signups.weights_games(row) if row["mystery"] else [],
     }
@@ -57,7 +59,7 @@ def entry_json(row: sqlite3.Row, user: sqlite3.Row, issues: list[str], error: st
     games = db.jloads(row["games"], [])
     result = {
         "id": row["id"], "user_id": row["user_id"], "username": row["username"], "mine": mine,
-        "player_names": db.jloads(row["player_names"], []), "games": games,
+        "player_names": db.jloads(row["player_names"], []), "games": games, "slots": row["slots"],
         "missing_games": apbridge.missing_games(games), "missing_roms": apbridge.missing_files(games),
         "issues": issues,
         "created_at": row["created_at"], "updated_at": row["updated_at"],
@@ -88,7 +90,8 @@ class SignupBody(BaseModel):
     name: str | None = Field(default=None, max_length=120)
     description: str | None = Field(default=None, max_length=2000)
     deadline: float | None = None
-    configs_per_user: int | None = None
+    # the most slots each player can enter; its name before it counted slots still works
+    slots_per_user: int | None = Field(default=None, validation_alias=AliasChoices("slots_per_user", "configs_per_user"))
     allowed_games: list[str] | None = Field(default=None, max_length=200)
     auto_generate: bool | None = None
     options: dict | None = None
@@ -121,10 +124,10 @@ def _clean(body: SignupBody, *, creating: bool) -> dict:
         values["description"] = (values["description"] or "").strip() or None
     if values.get("deadline") is not None and values["deadline"] <= time.time():
         raise HTTPException(400, "The deadline is in the past")
-    if "configs_per_user" in values:
-        limit = values["configs_per_user"]
-        if limit is None or not 1 <= limit <= signups.MAX_CONFIGS_PER_USER:
-            raise HTTPException(400, f"Configs per player must be between 1 and {signups.MAX_CONFIGS_PER_USER}")
+    if "slots_per_user" in values:
+        limit = values["slots_per_user"]
+        if limit is None or not 1 <= limit <= signups.MAX_SLOTS_PER_USER:
+            raise HTTPException(400, f"Slots per player must be between 1 and {signups.MAX_SLOTS_PER_USER}")
     if "auto_generate" in values and values["auto_generate"] is None:
         del values["auto_generate"]
     try:
@@ -153,10 +156,10 @@ async def create_signup(body: SignupBody, request: Request, user: sqlite3.Row = 
             return _error(e)
         values["allowed_games"] = "[]"  # the weights say which games
     signup_id = db.execute(
-        "INSERT INTO signups(name, description, created_by, created_at, deadline, configs_per_user, allowed_games, "
+        "INSERT INTO signups(name, description, created_by, created_at, deadline, slots_per_user, allowed_games, "
         "auto_generate, options, mystery) VALUES (?,?,?,?,?,?,?,?,?,?)",
         (values["name"], values.get("description"), user["id"], time.time(), values.get("deadline"),
-         values.get("configs_per_user", 1), values.get("allowed_games", "[]"), values.get("auto_generate", 1),
+         values.get("slots_per_user", 1), values.get("allowed_games", "[]"), values.get("auto_generate", 1),
          values["options"], int(is_mystery)))
     if is_mystery:
         signups.set_weights(signup_id, weights)

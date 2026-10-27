@@ -94,7 +94,7 @@ MESSAGES = {
         "Reiche deine YAML ein, bis ein Admin die Anmeldung schließt.",
     "Games": "Spiele",
     "Any game installed on the server": "Jedes auf dem Server installierte Spiel",
-    "Configs per player": "Configs pro Spieler",
+    "Slots per player": "Slots pro Spieler",
     "Sign-ups closed: {name}": "Anmeldung geschlossen: {name}",
     "{n} entry. {next_step}": "{n} Anmeldung. {next_step}",
     "{n} entries. {next_step}": "{n} Anmeldungen. {next_step}",

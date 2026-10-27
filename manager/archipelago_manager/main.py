@@ -56,6 +56,7 @@ async def init_archipelago() -> None:
 async def lifespan(_app: FastAPI):
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     db.init_db()
+    signups.count_slots()
     versions.reset()
     audit.prune()
     auth.bootstrap_admin()
