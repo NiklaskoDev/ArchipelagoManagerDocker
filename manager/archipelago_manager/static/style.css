@@ -83,6 +83,7 @@ code, .mono { font-family: var(--mono); font-size: .9em; }
 .user-btn { gap: 8px; }
 /* Names come from players: one that changes the text direction stays inside its own element (see i18n.js fill) */
 span, code, strong, em, a, bdi { unicode-bidi: isolate; }
+.archive-search { min-width: 200px; max-width: 320px; }
 .avatar { flex: none; width: 22px; height: 22px; border-radius: 50%; object-fit: cover; background: var(--surface-2); }
 .menu { position: absolute; right: 0; top: calc(100% + 6px); min-width: 190px; background: var(--surface); border: 1px solid var(--border);
   border-radius: var(--radius); box-shadow: var(--shadow); padding: 6px; z-index: 30; }

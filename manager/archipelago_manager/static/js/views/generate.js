@@ -10,8 +10,8 @@ const PLANDO = [["bosses", t("Bosses")], ["connections", t("Connections")], ["te
 export default async function render({ root, cleanup, isCurrent, query }) {
   const admin = isAdmin();
   const presets = presetBar({ read: readOptions, apply: applyOptions });
-  const [configs, jobs, apVersions, presetData] = await Promise.all([get(`/api/configs${admin ? "?all=true" : ""}`), get("/api/jobs"),
-    get("/api/ap-versions"), presets.load()]);
+  const [configs, jobs, apVersions, presetData, status] = await Promise.all([get(`/api/configs${admin ? "?all=true" : ""}`), get("/api/jobs"),
+    get("/api/ap-versions"), presets.load(), get("/api/auth/status")]);
   const selected = new Set(query.getAll("config").map(Number));
 
   // ?from=<job>: generate again with the configs and options of an earlier job
@@ -105,6 +105,14 @@ export default async function render({ root, cleanup, isCurrent, query }) {
     else if (o.server_options) left.push(t("Its settings for the new game apply only when an organizer generates."));
     return left.join(" ");
   }
+  // what a player (not an organizer) may have of the games they generate (limits.py)
+  const limits = status.limits;
+  const limitsNote = !limits ? null : limits.unfinished_now >= limits.unfinished
+    ? banner("warn", icon("alert", 16), h("div", { class: "grow" },
+      t("You have {games} unfinished games of your own, the most you can have at a time. Move one to the archive to generate another.", { games: limits.unfinished }),
+      " ", h("a", { href: "#/games" }, t("Your games"))))
+    : h("p", { class: "muted small", style: { margin: 0 } }, t("A game you generate can have up to {worlds} worlds. You can have {games} unfinished games of your own at a time, one of them running: {left} more for now.",
+      { worlds: limits.worlds, games: limits.unfinished, left: limits.unfinished - limits.unfinished_now }));
   const errorHost = h("div");
   const submit = h("button", { class: "btn primary", type: "button" }, icon("zap", 14), t("Generate"));
   submit.onclick = action(async () => {
@@ -169,6 +177,7 @@ export default async function render({ root, cleanup, isCurrent, query }) {
         t("Its configs and options are filled in. The configs are used as they are now, with a new seed."),
         unavailable.length ? h("div", { class: "small" }, t("No longer available, so not selected: {players}",
           { players: unavailable.map((p) => (p.names.join(", ") || p.filename) + (admin && p.owner ? ` (${p.owner})` : "")).join(", ") })) : null)) : null,
+      limitsNote,
       missingHost,
       h("div", { class: "card flush" },
         h("div", { class: "row spread", style: { padding: "14px 16px" } }, h("div", { class: "grow" }, filter), countLabel),

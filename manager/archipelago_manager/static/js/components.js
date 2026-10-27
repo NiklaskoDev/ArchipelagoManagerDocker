@@ -593,6 +593,14 @@ export function tlsBanner(status) {
     h("div", { class: "small" }, t("Players' clients refuse an expired certificate. Renew it: running servers take the new one over by themselves once nobody is connected."))));
 }
 
+// The games being played, and those over: finished by everyone, or aborted before that (views/archive.js)
+export function gamesTabs(current, archived) {
+  return h("div", { class: "tabs", role: "navigation" },
+    h("a", { class: "tab", href: "#/games", "aria-current": current === "games" ? "page" : undefined }, t("Current games")),
+    h("a", { class: "tab", href: "#/archive", "aria-current": current === "archive" ? "page" : undefined },
+      archived ? t("Archive ({n})", { n: archived }) : t("Archive")));
+}
+
 export function adminTabs(current) {
   return h("div", { class: "tabs", role: "navigation" },
     [["users", t("Users")], ["settings", t("Settings")], ["log", t("Log")]].map(([key, label]) =>

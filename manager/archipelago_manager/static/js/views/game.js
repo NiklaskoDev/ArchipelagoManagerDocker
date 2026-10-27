@@ -349,7 +349,7 @@ export default async function render({ root, params, cleanup, isCurrent, query }
     syncTracker();
     syncTextClient();
     syncActivity();
-    if (manage) drawArchive();
+    if (game.can_archive) drawArchive();
     loadHistory().catch(() => {});  // progress, a goal or the archive changed
   }
 
@@ -378,15 +378,20 @@ export default async function render({ root, params, cleanup, isCurrent, query }
   const historyTimer = setInterval(() => { if (!document.hidden) loadHistory().catch(() => {}); }, 30000);
   cleanup(() => clearInterval(historyTimer));
 
-  // Games finish by themselves when everyone reached their goal; an admin can archive one by hand
+  // Games finish by themselves when everyone reached their goal. Whoever runs one, and the player who generated it, can
+  // move it to the archive by hand: aborted, if not everyone got there.
   function drawArchive() {
+    const aborting = !game.finished_at && game.goal_count < game.player_count;
     clear(archiveHost).append(h("div", { class: "card row spread" },
       h("div", {}, h("strong", {}, game.finished_at ? t("In the archive since {date}", { date: fmtDate(game.finished_at) }) : t("Archive")),
+        game.outcome ? [" ", game.outcome === "finished" ? badge(t("Finished"), "ok") : badge(t("Aborted"), "muted")] : null,
         h("div", { class: "muted small" }, game.finished_at
-          ? t("Finished games are listed apart from the running ones. Taking a game back out does not change its progress.")
+          ? t("Games that are over are listed in the archive. Taking a game back out does not change its progress.")
           : t("A game moves to the archive by itself once every player has reached their goal. Move one there by hand when it will not be played to the end."))),
       h("button", { class: "btn", type: "button", onclick: action(async () => {
-        applyGame(await patch(`/api/games/${id}`, { finished: !game.finished_at }));
+        if (aborting && !(await confirmDialog(t("Not every player has reached their goal, so it is listed as aborted. The server keeps running until it is stopped; you can take the game back out later."),
+          { title: t("Move this game to the archive?"), confirmText: t("Move to the archive") }))) return;
+        applyGame(await post(`/api/games/${id}/archive`, { archived: !game.finished_at }));
       }) }, game.finished_at ? t("Back to the running games") : t("Move to the archive"))));
   }
 
@@ -910,6 +915,8 @@ export default async function render({ root, params, cleanup, isCurrent, query }
   // -------------------------------------------------------------------------------------------------------------------
   root.append(headerHost, awayHost, infoHost, trackerHost, textClientHost, activityHost, progressHost, slotsHost, adminHost);
   drawLive();
+  // a player who generated the game (and so may archive it) without running it sees the archive on its own
+  if (!manage && game.can_archive) adminHost.append(archiveHost);
   if (manage) {
     adminHost.append(settingsSection(), archiveHost, spectateSection(), filesSection(), consoleSection(), backupsSection(), importSection(),
       dangerSection());
