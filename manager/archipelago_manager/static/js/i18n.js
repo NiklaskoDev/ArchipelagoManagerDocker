@@ -15,8 +15,18 @@ function stored() {
 export const lang = LANGUAGES[stored()] ? stored() : (navigator.language || "").toLowerCase().startsWith("de") ? "de" : "en";
 document.documentElement.lang = lang;
 
-// For dates and numbers: German formats in German; in English the browser's own English variant, else plain "en"
-export const locale = lang === "de" ? "de-DE" : (navigator.language || "").toLowerCase().startsWith("en") ? navigator.language : "en";
+// For dates and numbers: German formats in German; in English the browser's own English variant, else plain "en".
+// Some systems report tags Intl refuses ("en-US@posix"), which would break every date on the page.
+function englishVariant() {
+  const tag = navigator.language || "";
+  if (!tag.toLowerCase().startsWith("en")) return "en";
+  try {
+    return Intl.getCanonicalLocales(tag)[0];
+  } catch {
+    return "en";
+  }
+}
+export const locale = lang === "de" ? "de-DE" : englishVariant();
 
 let strings = {}, server = {};
 const patterns = [];

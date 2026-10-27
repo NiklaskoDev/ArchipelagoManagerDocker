@@ -36,6 +36,35 @@ export function clear(el) {
   return el;
 }
 
+// On a phone a table shows each row as a card of "label: value" lines (style.css). The labels are the column headers,
+// copied into every cell as data-label whenever a table or a row appears, so the views need not repeat them.
+function labelCells(table) {
+  const heads = [...table.querySelectorAll(":scope > thead > tr > th")]
+    .flatMap((th) => Array(th.colSpan).fill(th.textContent.trim()));
+  for (const row of table.querySelectorAll(":scope > tbody > tr")) {
+    let column = 0;
+    for (const cell of row.cells) {
+      const label = cell.colSpan === 1 ? heads[column] : "";  // a cell across the row (a note) has no column
+      if (label) cell.dataset.label = label;
+      else delete cell.dataset.label;
+      column += cell.colSpan;
+    }
+  }
+}
+
+new MutationObserver((records) => {
+  const tables = new Set();
+  for (const record of records) {
+    for (const node of record.addedNodes) {
+      if (node.nodeType !== Node.ELEMENT_NODE) continue;
+      const around = node.closest("table.table");
+      if (around) tables.add(around);
+      for (const inside of node.querySelectorAll("table.table")) tables.add(inside);
+    }
+  }
+  tables.forEach(labelCells);
+}).observe(document.documentElement, { childList: true, subtree: true });
+
 // A translated sentence with elements in it, such as a game name in <strong>: withNodes(text, { game: h("strong", {}, name) })
 // puts the element where the text has {game}. Translate the text without values, so its placeholders are still there.
 export function withNodes(text, nodes) {
@@ -78,6 +107,7 @@ const ICONS = {
   login: '<path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/>',
   dice: '<rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.2" fill="currentColor"/><circle cx="15.5" cy="15.5" r="1.2" fill="currentColor"/><circle cx="12" cy="12" r="1.2" fill="currentColor"/>',
   link: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
+  menu: '<line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>',
 };
 
 export function icon(name, size = 16) {

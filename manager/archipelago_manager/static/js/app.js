@@ -85,10 +85,26 @@ async function route() {
 }
 
 function highlightNav(section) {
+  let current = null;
   for (const link of document.querySelectorAll("[data-section]")) {
-    if (link.dataset.section === section) link.setAttribute("aria-current", "page");
-    else link.removeAttribute("aria-current");
+    if (link.dataset.section === section) {
+      link.setAttribute("aria-current", "page");
+      current = link;
+    } else link.removeAttribute("aria-current");
   }
+  // on a phone the menu button names the section the page belongs to
+  const label = app.querySelector(".nav-toggle-label");
+  if (label) label.textContent = current ? current.title : t("Menu");
+  setNavOpen(false);
+}
+
+// On a phone the sections are a list that the menu button opens, with their names: a row of icons has no room for all
+// of them, and the ones that do not fit would be out of sight.
+function setNavOpen(open) {
+  const topbar = app.querySelector(".topbar");
+  if (!topbar) return;
+  topbar.classList.toggle("nav-open", open);
+  topbar.querySelector(".nav-toggle")?.setAttribute("aria-expanded", String(open));
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -116,14 +132,31 @@ function renderShell() {
   const menu = h("div", { class: "menu", hidden: true, role: "menu" });
   userButton.onclick = (e) => {
     e.stopPropagation();
+    setNavOpen(false);
     if (menu.hidden) drawUserMenu(menu);
     menu.hidden = !menu.hidden;
   };
-  document.addEventListener("click", () => { menu.hidden = true; });
+  const navToggle = h("button", { class: "btn ghost nav-toggle", type: "button", "aria-expanded": "false",
+    "aria-controls": "main-nav" }, icon("menu", 18), h("span", { class: "nav-toggle-label" }, t("Menu")));
+  navToggle.onclick = (e) => {
+    e.stopPropagation();
+    menu.hidden = true;
+    setNavOpen(!navToggle.closest(".topbar").classList.contains("nav-open"));
+  };
+  document.addEventListener("click", () => {
+    menu.hidden = true;
+    setNavOpen(false);
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    menu.hidden = true;
+    setNavOpen(false);
+  });
   const topbar = h("header", { class: "topbar" },
       h("div", { class: "topbar-inner" },
         h("a", { class: "brand", href: "#/" }, h("img", { class: "brand-mark", src: "favicon.svg", alt: "" }), h("span", { class: "brand-name" }, "Archipelago Manager")),
-        h("nav", { class: "nav", "aria-label": t("Main") }, links),
+        navToggle,
+        h("nav", { class: "nav", id: "main-nav", "aria-label": t("Main") }, links),
         h("div", { class: "user-menu" }, userButton, menu)));
   clear(app).append(topbar, view, h("footer", { class: "footer muted small" }, `Archipelago Manager ${state.status.version}`));
   fitNav();
@@ -137,6 +170,7 @@ function fitNav() {
   const nav = topbar?.querySelector(".nav");
   if (!nav) return;
   topbar.classList.remove("no-brand", "icons-only");
+  if (getComputedStyle(topbar.querySelector(".nav-toggle")).display !== "none") return;  // a phone: the menu button's list
   for (const step of ["no-brand", "icons-only"]) {
     if (nav.scrollWidth <= nav.clientWidth) return;
     topbar.classList.add(step);
