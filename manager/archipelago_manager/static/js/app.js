@@ -1,7 +1,7 @@
 import { h, clear, icon, toast, openModal, action, confirmDialog } from "./util.js";
 import { api, state, refreshStatus, setUnauthorizedHandler, isAdmin, canGenerate, post, put, ApiError } from "./api.js";
 import { banner, loading, field, checkbox } from "./components.js";
-import { t, plural, lang, LANGUAGES, setLanguage } from "./i18n.js";
+import { t, plural, lang, locale, LANGUAGES, setLanguage } from "./i18n.js";
 
 const ROUTES = [
   [/^\/?$/, () => import("./views/dashboard.js"), "home"],
@@ -130,6 +130,7 @@ function renderShell() {
     icon("user", 16), h("span", {}, state.user.username), isAdmin() ? h("span", { class: "badge accent" }, t("admin"))
       : state.user.role === "organizer" ? h("span", { class: "badge accent" }, t("organizer")) : null);
   const menu = h("div", { class: "menu", hidden: true, role: "menu" });
+  menuKeys(menu);
   userButton.onclick = (e) => {
     e.stopPropagation();
     setNavOpen(false);
@@ -187,7 +188,6 @@ function drawUserMenu(menu) {
   const user = state.user;
   const item = (iconName, label, onclick) => h("button", { class: "menu-item", type: "button", role: "menuitem",
     onclick: (e) => { e.stopPropagation(); menu.hidden = true; onclick(); } }, icon(iconName, 14), label);
-  const other = lang === "de" ? "en" : "de";
   clear(menu).append(
     item("key", user.has_password ? t("Change password") : t("Set a password"), passwordDialog),
     user.discord_name
@@ -196,12 +196,81 @@ function drawUserMenu(menu) {
     (user.discord_name || state.status.discord_login) && state.status.ping_kinds.length
       ? item("bell", t("Discord mentions…"), pingsDialog) : null,
     item("key", t("API tokens"), () => { location.hash = "#/tokens"; }),
-    item("globe", LANGUAGES[other], () => {
-      if (dirtyCheck?.() && !confirm(t("You have unsaved changes. Leave this page anyway?"))) return;
-      setLanguage(other);
-    }),
+    h("button", { class: "menu-item", type: "button", role: "menuitem", "aria-haspopup": "menu",
+      onclick: (e) => { e.stopPropagation(); drawLanguageMenu(menu); } },
+      icon("globe", 14), t("Language"), h("span", { class: "menu-value" }, LANGUAGES[lang], icon("chevron", 12))),
     h("div", { class: "menu-sep" }),
     item("logout", t("Sign out"), logout));
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// language
+// ---------------------------------------------------------------------------------------------------------------------
+// Every language by its own name, with its code and, below, its name in the current language (Deutsch · German)
+function languageOptions() {
+  let names = null;
+  try { names = new Intl.DisplayNames([locale], { type: "language" }); } catch { /* an older browser: own names only */ }
+  return Object.entries(LANGUAGES).map(([code, own]) => {
+    const here = names?.of(code);
+    return h("button", { class: "menu-item lang-option", type: "button", role: "menuitemradio", "aria-checked": String(code === lang),
+      onclick: (e) => { e.stopPropagation(); switchLanguage(code); } },
+      h("span", { class: "lang-code", "aria-hidden": "true" }, code.toUpperCase()),
+      h("span", { class: "lang-names" }, h("span", { lang: code }, own),
+        here && here.toLowerCase() !== own.toLowerCase() ? h("span", { class: "muted small" }, here) : null),
+      code === lang ? icon("check", 14) : null);
+  });
+}
+
+function switchLanguage(code) {
+  if (code === lang) return;
+  if (dirtyCheck?.() && !confirm(t("You have unsaved changes. Leave this page anyway?"))) return;
+  setLanguage(code);
+}
+
+// Up and down move between the entries of a menu
+function menuKeys(menu) {
+  menu.addEventListener("keydown", (e) => {
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+    const items = [...menu.querySelectorAll(".menu-item")];
+    const at = items.indexOf(document.activeElement);
+    items[(at + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length]?.focus();
+    e.preventDefault();
+  });
+}
+
+// The user menu's second page: the languages, and the way back to the first
+function drawLanguageMenu(menu) {
+  clear(menu).append(
+    h("button", { class: "menu-item menu-back", type: "button", onclick: (e) => { e.stopPropagation(); drawUserMenu(menu); } },
+      icon("back", 14), t("Language")),
+    h("div", { class: "menu-sep" }),
+    languageOptions());
+  menu.querySelector("[aria-checked=true]")?.focus();
+}
+
+// On the sign-in page: the current language, which opens the list of all of them
+function languagePicker() {
+  const list = h("div", { class: "menu lang-menu", role: "menu", hidden: true }, languageOptions());
+  const button = h("button", { class: "btn ghost sm", type: "button", "aria-haspopup": "menu", "aria-expanded": "false" },
+    icon("globe", 14), LANGUAGES[lang], icon("expand", 12));
+  const close = () => {
+    list.hidden = true;
+    button.setAttribute("aria-expanded", "false");
+    document.removeEventListener("click", close);
+  };
+  button.onclick = (e) => {
+    e.stopPropagation();
+    if (!list.hidden) { close(); return; }
+    list.hidden = false;
+    button.setAttribute("aria-expanded", "true");
+    document.addEventListener("click", close);
+    list.querySelector("[aria-checked=true]")?.focus();
+  };
+  menuKeys(list);
+  list.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") { close(); button.focus(); }
+  });
+  return h("div", { class: "lang-picker" }, button, list);
 }
 
 // Discord sends the browser back to the configured address of this web UI, and the sign-in only finishes in the browser
@@ -397,7 +466,6 @@ function renderAuth(notice) {
     field(t("Password"), password, mode === "login" ? null : t("At least 8 characters")),
     confirm ? field(t("Repeat password"), confirm) : null,
     error, submit);
-    const other = lang === "de" ? "en" : "de";
     clear(card).append(
       h("div", { class: "auth-brand" }, h("img", { class: "brand-mark large", src: "favicon.svg", alt: "" }), h("h1", {}, "Archipelago Manager")),
       mode === "setup" ? h("p", { class: "muted" }, t("Welcome! Create the administrator account to get started.")) : null,
@@ -408,8 +476,7 @@ function renderAuth(notice) {
           h("a", { href: "#", onclick: (e) => { e.preventDefault(); mode = mode === "login" ? "register" : "login"; draw(); } },
             mode === "login" ? t("Create one") : t("Sign in")))
         : null,
-      h("p", { class: "center small" }, h("a", { href: "#", lang: other, onclick: (e) => { e.preventDefault(); setLanguage(other); } },
-        icon("globe", 13), " ", LANGUAGES[other])));
+      languagePicker());
   };
   draw();
   clear(app).append(h("div", { class: "auth-wrap" }, card));

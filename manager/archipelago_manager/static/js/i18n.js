@@ -1,32 +1,34 @@
-// The web UI in English or German. English text is the key: t("Save") shows "Speichern" in German, and any text the
-// dictionary does not have yet stays English instead of breaking the page.
+// The web UI in English, German, French or Dutch. English text is the key: t("Save") shows "Speichern" in German, and
+// any text a dictionary does not have yet stays English instead of breaking the page.
 //
 // - t(text, { name }) fills in {name}; plural(n, one, other, vars) first picks the form for n (and fills in {n}).
-// - The server answers in English. tServer() turns its messages into the chosen language: exact texts from
-//   i18n/de.json's "server" part, and messages with changing parts ("Game {0} not found") by their pattern.
+// - The server answers in English. tServer() turns its messages into the chosen language: exact texts from the
+//   "server" part of i18n/<language>.json, and messages with changing parts ("Game {0} not found") by their pattern.
 
-export const LANGUAGES = { en: "English", de: "Deutsch" };
+// Each language by its own name
+export const LANGUAGES = { en: "English", de: "Deutsch", fr: "Français", nl: "Nederlands" };
+// Dates and numbers when the browser does not prefer a variant of the language (en-GB, fr-CA, nl-BE, ...)
+const LOCALES = { en: "en", de: "de-DE", fr: "fr-FR", nl: "nl-NL" };
 const STORAGE_KEY = "apm-language";
 
 function stored() {
   try { return localStorage.getItem(STORAGE_KEY); } catch { return null; }
 }
 
-export const lang = LANGUAGES[stored()] ? stored() : (navigator.language || "").toLowerCase().startsWith("de") ? "de" : "en";
-document.documentElement.lang = lang;
-
-// For dates and numbers: German formats in German; in English the browser's own English variant, else plain "en".
-// Some systems report tags Intl refuses ("en-US@posix"), which would break every date on the page.
-function englishVariant() {
-  const tag = navigator.language || "";
-  if (!tag.toLowerCase().startsWith("en")) return "en";
-  try {
-    return Intl.getCanonicalLocales(tag)[0];
-  } catch {
-    return "en";
-  }
+// The languages the browser asks for, best first. Some systems report tags Intl refuses ("en-US@posix"), which would
+// break every date on the page, so those are left out.
+function browserLocales() {
+  const tags = navigator.languages?.length ? navigator.languages : [navigator.language || ""];
+  return tags.flatMap((tag) => {
+    try { return Intl.getCanonicalLocales(tag); } catch { return []; }
+  });
 }
-export const locale = lang === "de" ? "de-DE" : englishVariant();
+
+export const lang = LANGUAGES[stored()] ? stored()
+  : browserLocales().map((tag) => tag.split("-")[0].toLowerCase()).find((code) => LANGUAGES[code]) || "en";
+document.documentElement.lang = lang;
+export const locale = browserLocales().find((tag) => tag.split("-")[0].toLowerCase() === lang) || LOCALES[lang];
+const pluralRules = new Intl.PluralRules(locale);
 
 let strings = {}, server = {};
 const patterns = [];
@@ -54,8 +56,9 @@ export function t(text, vars) {
   return fill(strings[text] ?? text, vars);
 }
 
+// The singular is for whatever the language counts as one: 1 in English, German and Dutch, 0 and 1 in French
 export function plural(n, one, other, vars) {
-  return t(n === 1 ? one : other, { n, ...vars });
+  return t(pluralRules.select(n) === "one" ? one : other, { n, ...vars });
 }
 
 export function tServer(message, depth = 0) {

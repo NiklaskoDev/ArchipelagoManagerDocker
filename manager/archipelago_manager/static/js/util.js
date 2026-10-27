@@ -108,6 +108,9 @@ const ICONS = {
   dice: '<rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.2" fill="currentColor"/><circle cx="15.5" cy="15.5" r="1.2" fill="currentColor"/><circle cx="12" cy="12" r="1.2" fill="currentColor"/>',
   link: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
   menu: '<line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/>',
+  chevron: '<polyline points="9 18 15 12 9 6"/>',
+  back: '<polyline points="15 18 9 12 15 6"/>',
+  expand: '<polyline points="6 9 12 15 18 9"/>',
 };
 
 export function icon(name, size = 16) {
@@ -165,8 +168,9 @@ export function fmtUntil(ts) {
   const s = ts - Date.now() / 1000;
   if (s <= 0) return t("passed");
   if (s < 3600) return t("in {n} min", { n: Math.max(1, Math.round(s / 60)) });
-  if (s < 86400) return t("in {n} h", { n: Math.round(s / 3600) });
-  const days = Math.floor(s / 86400), hours = Math.round((s % 86400) / 3600);
+  const total = Math.round(s / 3600);  // whole hours first, so that 2 d 23.6 h shows as 3 d, not as 2 d 24 h
+  if (total < 24) return t("in {n} h", { n: total });
+  const days = Math.floor(total / 24), hours = total % 24;
   return days < 3 && hours ? plural(days, "in 1 d {hours} h", "in {n} d {hours} h", { hours }) : plural(days, "in 1 d", "in {n} d");
 }
 

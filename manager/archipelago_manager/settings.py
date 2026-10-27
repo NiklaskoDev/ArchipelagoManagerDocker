@@ -61,7 +61,7 @@ DEFAULTS: dict[str, Any] = {
     "tls_cert": CONFIG.tls_cert,
     "tls_key": CONFIG.tls_key,
 }
-LANGUAGES = ("en", "de")
+LANGUAGES = ("en", "de", "fr", "nl")
 
 _BOOL_KEYS = {"discord_login", "discord_signup", "notify_mentions",
               "allow_registration", "users_can_start_rooms", "users_can_generate", "users_can_upload_apworlds",
