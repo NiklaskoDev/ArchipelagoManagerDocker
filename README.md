@@ -18,8 +18,9 @@ players log in to keep their YAML configs, see their games and download their pa
   into the library of the user who owns the slot.
 - **Stores configs per user.** Everyone has a private library of player YAMLs: upload one, or create it in a form with
   every option of the game (custom games included), like the player options page on archipelago.gg. The YAML can be
-  edited directly too, or started from the documented template. Players can share a config, and the others copy it
-  into their own library with their own player name.
+  edited directly too, or started from the documented template. *Check* asks Archipelago whether the generator would
+  take a config, and lists every problem it finds, before anyone generates. Players can share a config, and the others
+  copy it into their own library with their own player name.
 - **Generates games.** Pick configs, choose spoiler level, seed, race mode, plando and an optional `meta.yaml`, and
   generate with the real `Generate.py`. Options you use again (a race setup, an async one) are saved as templates. The result is imported as a game, with slots linked to the configs' owners, and
   can be hosted straight away. Jobs queue, show a live log and can be cancelled. *Generate again* repeats a game or a
@@ -54,6 +55,9 @@ players log in to keep their YAML configs, see their games and download their pa
   `!remaining`, …) on the game page, without Archipelago's own text client.
 - **Progress over time and an archive.** A chart shows how far each player got and when; games that are over move to
   an archive page, finished (with the playing time and who reached their goal when) or aborted.
+- **Small things that save time.** *Open in Archipelago* starts a player's client already connected to their slot;
+  hints are marked priority or avoid from the browser; planned starts and sign-up deadlines go into the calendar; a
+  game page in a background tab counts what is new in its title; lists can be searched; light or dark as you like.
 
 ## Quick start
 
@@ -144,18 +148,33 @@ and the game page marks the address *encrypted*. A client that cannot find out b
 
 1. **My configs** → upload your YAML, or *New config* and pick your game: its options open as a form (see
    [The options form](#the-options-form)). The editor checks the file when you save and tells you what is wrong. The
-   player name is the slot name in the game.
+   player name is the slot name in the game. The search above the list finds a config by its file, player name or game.
+   - *Check* next to a config asks Archipelago whether the generator would take it, without generating anything, and
+     lists what it finds in Archipelago's own words: option values it does not take (with what it does), item and
+     location names it does not know (with the name it guesses you meant), games that are not installed, and, as
+     warnings, option names it would silently ignore, such as a typo. Unlike a generation, it does not stop at the
+     first problem, and it tries every value and every game the file gives a weight to, not just one roll. In the
+     editor, *Check* takes the file as it is there, saved or not. What only shows when a seed is made, such as items
+     that cannot be placed with these options, is beyond it.
 2. When an admin generates a game with your config, or uploads a game with a slot of that name, it appears under
    **Games** with the server address, password, your slot name and your files. If the game allows it you can *claim*
-   a slot yourself ("This is mine").
+   a slot yourself ("This is mine"). The search above the list finds a game by its name, its worlds or your slot name.
 3. Download your patch file(s), patch your game, and connect with the Archipelago client of your game. If the game is
    *Asleep*, opening its page wakes it up: connect once it shows *Running*. When there was no port free for it while
    it slept, it may come back on a different port, so take the address from the page.
+   - *Open in Archipelago* next to your slot name does the connecting for you, if Archipelago is installed on your
+     computer: its Launcher opens the client of your game, with the address, your slot name and the password filled
+     in. Not every game's client takes such a link (`archipelago://`); for the others the Launcher opens the Text
+     Client, connected to your slot.
 4. While you play, **Your tracker** on the game page shows the items you received (and from whom), the locations you
    still have to check, and your hints: where your items are, and which items of other players are in your world. It
    is read from the server's save, so it can be up to a minute behind.
    - It also shows your hint points, what a hint costs, and how many hints they buy (or how many checks until the
      next one).
+   - **Mark your hints**, as in Archipelago's own client: next to each hint for one of your items, choose *Priority*
+     (you need it), *No priority*, or *Avoid* (you can do without it, a trap say). Whoever has the item in their world
+     sees it in their client and in their tracker, which lists the items the others need most first. It needs the
+     server running; the manager sends it in your name, like the text client below.
    - **Release my items** (`!release`: everything still in your world goes to its players) and **Collect my items**
      (`!collect`: everything of yours still in other worlds comes to you) appear when the game's rules let you use
      them, for example only after your goal. Otherwise the tracker says when they become available, or that they
@@ -177,6 +196,9 @@ and the game page marks the address *encrypted*. A client that cannot find out b
    server's log as it runs and kept with the game, so it is there for players who were not connected, with the time
    of each line. Filter it by chat, items, hints, or joins and goals, or show only what concerns your own slots. The
    server's own output, the console and remote administration (`!admin`) are not shown.
+   - While the game page is open in a background tab, its title counts what is new for you, such as
+     *(3) Friday Async*: what the others say in the chat, the items they send you, and hints for their items in your
+     world. Back on the tab, the count goes.
 7. **While you were away:** come back to a game page after more than ten minutes and a card at the top sums up what
    happened since your last visit: the items others sent you (and from whom), open hints between you and the others
    (your items in their worlds, their items waiting in yours), who got stuck, who reached their goal or released their
@@ -236,7 +258,8 @@ them anew.)
 YAML. It is checked against the round's rules right away (allowed games, unique player names, how many slots each
 player may enter). A file with several players, its documents separated by `---`, takes a slot for each of them, so it
 cannot bring more games into a round of one per player. Your entry is a copy: if you edit the config afterwards, the
-round page offers to use the new version. You can withdraw until the round closes.
+round page offers to use the new version. You can withdraw until the round closes. *Add to calendar* on a round with a
+deadline puts the deadline into your calendar, with a reminder a day before (an hour, if it is closer than that).
 
 #### The options form
 
@@ -375,7 +398,8 @@ they do is in the admins' log. A game generated by a sign-up round belongs to wh
 - **Planned start and races:** *Settings → Planned start* on the game page: a start time, how many minutes before it
   the server opens (10 by default, so everyone can connect and get ready), and whether a countdown runs.
   - Setting it posts a *Planned start* message on Discord, mentioning the players who asked to hear when their game goes
-    online. The game page and the game list show the start with a clock counting down.
+    online. The game page and the game list show the start with a clock counting down, and *Add to calendar* next to
+    it gives players a calendar file with a reminder when the server opens.
   - Until the server opens, players cannot start it themselves; admins can, and the planned opening then leaves it
     running.
   - At the opening time the server starts by itself and is announced like any start. With the countdown on, the
@@ -466,7 +490,10 @@ an administrator's change was made with.
 The web UI is available in English, German (Deutsch), French (Français) and Dutch (Nederlands). It follows the
 browser's preferred languages at first; switch it with the language button on the sign-in page or under *Language* in
 the user menu (the choice is remembered in that browser). Dates and numbers follow the language, in the browser's own
-variant of it where there is one (Swiss German, Canadian French, Belgian Dutch, …).
+variant of it where there is one (Swiss German, Canadian French, Belgian Dutch, …). Calendar files come in it too.
+
+It is dark, or light when the system asks for that. *Theme* in the user menu picks *Light* or *Dark* instead, for that
+browser (its other tabs follow at once); *As on this device* goes back to the system's choice.
 
 ### Custom games (APWorlds)
 

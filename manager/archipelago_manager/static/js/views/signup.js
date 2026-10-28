@@ -1,7 +1,7 @@
 import { h, clear, icon, toast, action, confirmDialog, openModal, fmtAgo, fmtDate, fmtUntil, toLocalInput, fromLocalInput } from "../util.js";
 import { api, get, post, patch, del, state } from "../api.js";
 import { banner, badge, chips, field, checkbox, select, missingGamesPanel, missingRomsPanel, promptMissingGames, presetBar, gameSettingsSection } from "../components.js";
-import { t, plural, tServer } from "../i18n.js";
+import { t, plural, tServer, lang } from "../i18n.js";
 
 const SPOILER_CHOICES = [[1, t("Basic spoiler log")], [0, t("No spoiler log")], [2, t("With playthrough")], [3, t("Playthrough and paths")]];
 const PLANDO = [["bosses", t("Bosses")], ["connections", t("Connections")], ["texts", t("Texts")], ["items", t("Items")]];
@@ -212,9 +212,10 @@ export async function openSignupForm({ signup = null, onSaved }) {
   syncMystery();
 }
 
-export default async function render({ root, params, cleanup, isCurrent }) {
+export default async function render({ root, params, cleanup, isCurrent, setTitle }) {
   const id = Number(params[0]);
   let signup = await get(`/api/signups/${id}`);
+  setTitle(signup.name);
   const manager = signup.can_manage;  // its organizer, or an administrator
   let configs = await get("/api/configs");
   const host = h("div");
@@ -227,6 +228,7 @@ export default async function render({ root, params, cleanup, isCurrent }) {
     if (!force && sig === signature) return;
     signup = fresh;
     signature = sig;
+    setTitle(signup.name);
     draw();
   }
   async function reloadConfigs() {
@@ -252,6 +254,10 @@ export default async function render({ root, params, cleanup, isCurrent }) {
   // ---------------------------------------------------------------------------------------------------------------------
   function header() {
     const actions = [];
+    if (signup.status === "open" && signup.deadline) {
+      actions.push(h("a", { class: "btn", href: `/api/signups/${id}/deadline.ics?lang=${lang}`,
+        title: t("A calendar file, with a reminder before the sign-ups close") }, icon("calendar", 14), t("Add to calendar")));
+    }
     if (manager) {
       actions.push(h("button", { class: "btn", type: "button", disabled: !["open", "closed"].includes(signup.status),
         onclick: action(() => openSignupForm({ signup, onSaved: apply })) }, icon("edit", 14), t("Edit")));

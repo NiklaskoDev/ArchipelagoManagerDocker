@@ -1368,7 +1368,39 @@
   "Not every player has reached their goal, so it is listed as aborted. The server keeps running until it is stopped; you can take the game back out later.": "Tous les joueurs n'ont pas atteint leur objectif, elle figure donc comme abandonnée. Le serveur continue de tourner jusqu'à ce qu'on l'arrête ; vous pourrez ressortir la partie plus tard.",
   "Move this game to the archive?": "Déplacer cette partie aux archives ?",
   "You have {games} unfinished games of your own, the most you can have at a time. Move one to the archive to generate another.": "Vous avez {games} parties à vous non terminées, le maximum à la fois. Déplacez-en une aux archives pour en générer une autre.",
-  "A game you generate can have up to {worlds} worlds. You can have {games} unfinished games of your own at a time, one of them running: {left} more for now.": "Une partie que vous générez peut avoir jusqu'à {worlds} mondes. Vous pouvez avoir {games} parties à vous non terminées à la fois, dont une en cours : encore {left} pour l'instant."
+  "A game you generate can have up to {worlds} worlds. You can have {games} unfinished games of your own at a time, one of them running: {left} more for now.": "Une partie que vous générez peut avoir jusqu'à {worlds} mondes. Vous pouvez avoir {games} parties à vous non terminées à la fois, dont une en cours : encore {left} pour l'instant.",
+  "Opens Archipelago's Launcher on this computer, connected to your slot": "Ouvre le Launcher d'Archipelago sur cet ordinateur, connecté à votre slot",
+  "Or press “{button}”: with Archipelago installed, its Launcher opens the client for your game already connected (the Text Client, if your game's client does not take links).": "Ou appuyez sur « {button} » : si Archipelago est installé, son Launcher ouvre le client de votre jeu, déjà connecté (le client texte, si celui de votre jeu ne prend pas de liens).",
+  "Open in Archipelago": "Ouvrir dans Archipelago",
+  "Mark the items you need most as priority, and those you can do without as avoid: whoever has them in their world sees it in their client.": "Marquez les objets dont vous avez le plus besoin en « Priorité », et ceux dont vous pouvez vous passer en « Éviter » : qui les a dans son monde le voit dans son client.",
+  "Marked {item} as {status}": "{item} marqué « {status} »",
+  "Status of the hint for {item}": "Statut de l'indice pour {item}",
+  "Tell the others how much you need this item": "Dites aux autres à quel point vous avez besoin de cet objet",
+  "A calendar file, with a reminder when the server opens": "Un fichier de calendrier, avec un rappel à l'ouverture du serveur",
+  "A calendar file, with a reminder before the sign-ups close": "Un fichier de calendrier, avec un rappel avant la fin des inscriptions",
+  "Add to calendar": "Ajouter au calendrier",
+  "Theme": "Thème",
+  "As on this device": "Comme sur cet appareil",
+  "Light": "Clair",
+  "Dark": "Sombre",
+  "Search by file, player name or game…": "Rechercher par fichier, nom de joueur ou jeu…",
+  "Search configs": "Rechercher dans les configs",
+  "Search the games": "Rechercher dans les parties",
+  "Archipelago is reading the file…": "Archipelago lit le fichier…",
+  "Archipelago read the file the way the generator does, with every value a weight can pick and every game the file can roll. Nothing was generated, though: whether the items can be placed with these options only shows when a game is generated.": "Archipelago a lu le fichier comme le fait le générateur, avec chaque valeur qu'un poids peut choisir et chaque jeu que le fichier peut tirer au sort. Rien n'a été généré pour autant : on ne voit si les objets peuvent être placés avec ces options qu'en générant une partie.",
+  "Archipelago takes this config.": "Archipelago accepte cette config.",
+  "Check {name}": "Vérifier {name}",
+  "Check": "Vérifier",
+  "Find out whether the generator takes the file as it is in the editor, saved or not": "Savoir si le générateur accepte le fichier tel qu'il est dans l'éditeur, enregistré ou non",
+  "Find out whether the generator takes this config, without generating": "Savoir si le générateur accepte cette config, sans générer",
+  "Fine": "Correct",
+  "Fix what is listed below, then check again.": "Corrigez ce qui est indiqué ci-dessous, puis vérifiez à nouveau.",
+  "Have a look at the warnings, though.": "Jetez tout de même un œil aux avertissements.",
+  "The generator would stop at this config.": "Le générateur s'arrêterait sur cette config.",
+  "{n} error": "{n} erreur",
+  "{n} errors": "{n} erreurs",
+  "{n} warning": "{n} avertissement",
+  "{n} warnings": "{n} avertissements"
  },
  "server": {
   " (line {0})": " (ligne {0})",
@@ -1748,7 +1780,17 @@
   "You already have {0} unfinished games of your own (counting those being generated). Move one to the archive before you generate another.": "Vous avez déjà {0} parties à vous non terminées (en comptant celles en cours de génération). Déplacez-en une aux archives avant d'en générer une autre.",
   "You can have one of your games running at a time, and {0} is running (or asleep until its players come back). Stop it first.": "Une seule de vos parties peut tourner à la fois, et {0} tourne (ou est en veille jusqu'au retour de ses joueurs). Arrêtez-la d'abord.",
   "There are {0} unfinished games of this player already. Move one of them to the archive first.": "Ce joueur a déjà {0} parties non terminées. Déplacez d'abord l'une d'elles aux archives.",
-  "Only whoever runs this game, or the player who generated it, can move it to the archive": "Seul celui qui gère cette partie, ou le joueur qui l'a générée, peut la déplacer aux archives"
+  "Only whoever runs this game, or the player who generated it, can move it to the archive": "Seul celui qui gère cette partie, ou le joueur qui l'a générée, peut la déplacer aux archives",
+  "A hint can be marked priority, no priority or avoid": "Un indice peut être marqué « Priorité », « Pas de priorité » ou « Éviter »",
+  "The server did not answer in time": "Le serveur n'a pas répondu à temps",
+  "The server did not change the hint": "Le serveur n'a pas modifié l'indice",
+  "The server has no such hint": "Le serveur ne connaît pas cet indice",
+  "The server refused to change the hint: {0}": "Le serveur a refusé de modifier l'indice : {0}",
+  "This game has no planned start": "Cette partie n'a pas de départ prévu",
+  "This item was found already": "Cet objet a déjà été trouvé",
+  "This round has no deadline": "Cette session n'a pas de date limite",
+  "Your last check is not done yet. Check again when it is.": "Votre dernière vérification n'est pas terminée. Vérifiez à nouveau quand elle le sera.",
+  "Two players in this file are named '{0}'. Player names must be unique.": "Deux joueurs de ce fichier s'appellent « {0} ». Les noms de joueur doivent être uniques."
  },
  "server_extra": [
   " (line {0})",
@@ -1821,6 +1863,7 @@
   "Enter the certificate with its full path in the container, e.g. /config/tls/fullchain.pem",
   "Enter the key with its full path in the container, e.g. /config/tls/privkey.pem",
   "Document #{0}: the player name has no visible characters, so nobody can read it",
-  "Document #{0}: the player name contains characters that change the direction of the text, so it shows differently from how it is spelled"
+  "Document #{0}: the player name contains characters that change the direction of the text, so it shows differently from how it is spelled",
+  "Two players in this file are named '{0}'. Player names must be unique."
  ]
 }

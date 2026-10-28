@@ -119,3 +119,48 @@ def test_a_file_without_the_game_section_is_stored_with_a_warning_but_cannot_be_
     assert any("ChecksFinder:" in w for w in detail["warnings"])
     job = admin.post("/api/jobs", json={"config_ids": [cfg["id"]], "host_after": False})
     assert job.status_code == 400 and "ChecksFinder:" in job.json()["detail"]
+
+
+def test_a_config_is_checked_the_way_the_generator_reads_it(make_user):
+    """Check (configcheck.py): what would stop the generator, and what it would ignore, without generating."""
+    _name, user = make_user()
+    check = lambda content: user.post("/api/configs/check", json={"content": content})  # noqa: E731
+
+    r = check(player_yaml("Fine"))
+    assert r.status_code == 200, r.text
+    assert r.json() == {"ok": True, "errors": [], "warnings": [], "missing_roms": [],
+                        "players": [{"name": "Fine", "games": ["ChecksFinder"], "errors": [], "warnings": []}]}
+
+    # an option name the generator does not know is ignored by it: a warning, as the generator logs it
+    result = check("name: Typo\ngame: ChecksFinder\nChecksFinder:\n  progresion_balancing: 30\n").json()
+    assert result["ok"] is True
+    assert any("progresion_balancing is not a valid option name" in w for w in result["players"][0]["warnings"])
+
+    # a value it does not take stops it, and so does an item name it does not know: both are listed, not only the first,
+    # and the names it would ignore as well
+    result = check("name: Wrong\ngame: ChecksFinder\nChecksFinder:\n  progression_balancing: 120\n"
+                   "  start_inventory:\n    Map Widht: 1\n  goall: 1\n").json()
+    assert result["ok"] is False
+    errors = result["players"][0]["errors"]
+    assert len(errors) == 2, errors
+    assert any("120 is higher than maximum 99" in e for e in errors)
+    assert any("'Map Widht'" in e and "Did you mean 'Map Width'" in e for e in errors)
+    assert any("goall is not a valid option name" in w for w in result["players"][0]["warnings"])
+
+    # every value a weight can pick is tried, not only the one a roll happens to pick, and every game
+    weights = ("name: Weighed\ngame:\n  ChecksFinder: 1\n  No Such Game: 1\n"
+               "ChecksFinder:\n  accessibility:\n    full: 1\n    sometimes: 1\n    minimal: 0\nNo Such Game: {}\n")
+    errors = check(weights).json()["players"][0]["errors"]
+    assert any('"sometimes"' in e and "accessibility" in e for e in errors), errors
+    assert any("No world found to handle game No Such Game" in e for e in errors), errors
+
+    # each player of a file on their own; names the generator refuses are found before Archipelago is asked
+    result = check(player_yaml("One") + "---\nname: Two\ngame: APQuest\nAPQuest:\n  progression_balancing: 200\n").json()
+    assert [(p["name"], bool(p["errors"])) for p in result["players"]] == [("One", False), ("Two", True)]
+    result = check(player_yaml("Same") + "---\n" + player_yaml("same")).json()
+    assert result["ok"] is False and result["players"] == []
+    assert result["errors"] == ["Two players in this file are named 'same'. Player names must be unique."]
+    result = check("name: Broken\ngame: ChecksFinder\n").json()  # no options section: the structure check says so
+    assert result["ok"] is False and "ChecksFinder:" in result["errors"][0]
+    result = check("name: [unclosed\n").json()
+    assert result["ok"] is False and result["errors"]

@@ -43,6 +43,16 @@ def test_a_round_from_sign_up_to_game(admin, make_user, discord):
     assert f"<t:{int(signup['deadline'])}:R>" in opened["description"]  # shown in every reader's own time zone
     assert {"name": "Games", "value": "APQuest, ChecksFinder", "inline": False} in opened["fields"]
 
+    # the deadline as a calendar file, in the language of the reader's web UI, with a reminder a day before
+    r = bo.get(f"/api/signups/{sid}/deadline.ics?lang=de")
+    assert r.status_code == 200 and r.headers["content-type"].startswith("text/calendar")
+    assert r.headers["content-disposition"] == 'inline; filename="Weekend-async.ics"'
+    deadline = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime(signup["deadline"]))
+    for line in (f"UID:signup-{sid}-deadline@manager.test", f"DTSTART:{deadline}", "SUMMARY:Anmeldung für Weekend async schließt",
+                 "DESCRIPTION:Bring your **best**", f"URL:http://manager.test:8080/#/signups/{sid}", "TRIGGER:-PT1440M"):
+        assert f"\r\n{line}\r\n" in r.text, (line, r.text)
+    assert "SUMMARY:Sign-ups for Weekend async close\r\n" in bo.get(f"/api/signups/{sid}/deadline.ics?lang=xx").text
+
     # everyone sees the round; players enter their own configs
     assert [s["id"] for s in bo.get("/api/signups").json() if s["id"] == sid] == [sid]
     assert enter(ann, sid, config(ann, "Annie")).status_code == 200
@@ -76,6 +86,7 @@ def test_the_rules_of_a_round(admin, make_user):
     _a, ann = make_user("ann")
     _b, bo = make_user("bo")
     sid = new_round(admin, allowed_games=["ChecksFinder"], slots_per_user=1)["id"]
+    assert ann.get(f"/api/signups/{sid}/deadline.ics").status_code == 404  # closed by hand: no date for a calendar
     first = config(ann, "Taken")
     assert enter(ann, sid, first).status_code == 200
     assert enter(ann, sid, first).status_code == 409  # the same config twice

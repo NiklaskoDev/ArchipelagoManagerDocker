@@ -73,6 +73,10 @@ class Session:
     hint_points: int | None = None
     hint_cost_percent: int = 0
     location_count: int = 0
+    # the answers to the manager's own requests (Get), by the number each was sent with
+    requests: int = 0
+    replies: dict[int, asyncio.Future] = field(default_factory=dict)
+    refused_update: str | None = None  # what the server said to the latest UpdateHint it refused
 
     @property
     def hint_cost(self) -> int:
@@ -226,14 +230,8 @@ class TextClients:
         """Says a command as the player, connecting first if needed. Returns the server's answer: the first message
         about this player of one of the `answers` types (or a CommandResult, which is how the server refuses), or None
         if none came in time."""
-        session = self.session(game_id, slot, user_id)
         deadline = time.monotonic() + COMMAND_TIMEOUT
-        while session.state == "connecting" and time.monotonic() < deadline:
-            await asyncio.sleep(0.2)
-        if session.state == "offline":
-            raise TextClientError("The game's server is not running", 409)
-        if session.state == "refused":
-            raise TextClientError(f"The server refused the connection: {session.error}", 409)
+        session = await self._ready(game_id, slot, user_id, deadline)
         before = session.seq
         await self.say(session, text)
         while time.monotonic() < deadline:
@@ -242,6 +240,47 @@ class TextClients:
                     return message
             await asyncio.sleep(0.2)
         return None
+
+    async def update_hint(self, game_id: int, slot: int, user_id: int, finder: int, location: int, status: int) -> int:
+        """Changes the status of a hint for one of the player's items (UpdateHint): priority, no priority or avoid.
+        Returns the status the server has for the hint afterwards. The server does not answer an UpdateHint that
+        worked, so a Get of the slot's hints goes with it: its answer comes once the server dealt with the change."""
+        deadline = time.monotonic() + COMMAND_TIMEOUT
+        session = await self._ready(game_id, slot, user_id, deadline)
+        session.requests += 1
+        tag = session.requests
+        session.replies[tag] = reply = asyncio.get_running_loop().create_future()
+        key = f"_read_hints_{session.team}_{session.slot}"
+        try:
+            await session.ws.send(json.dumps([
+                {"cmd": "UpdateHint", "player": finder, "location": location, "status": status},
+                {"cmd": "Get", "keys": [key], "manager_request": tag}]))  # the server sends extra fields back
+            packet, refused = await asyncio.wait_for(reply, max(1.0, deadline - time.monotonic()))
+        except WebSocketException:
+            raise TextClientError("Not connected to the game's server", 409) from None
+        except TimeoutError:
+            raise TextClientError("The server did not answer in time", 504) from None
+        finally:
+            session.replies.pop(tag, None)
+        if refused:
+            raise TextClientError(f"The server refused to change the hint: {refused}", 409)
+        for hint in (packet.get("keys") or {}).get(key) or []:
+            if isinstance(hint, dict) and _int(hint.get("finding_player")) == finder and _int(hint.get("location")) == location:
+                return _int(hint.get("status"))
+        raise TextClientError("The server has no such hint", 404)
+
+    async def _ready(self, game_id: int, slot: int, user_id: int, deadline: float) -> Session:
+        """The player's connection to the slot once it is connected, for a button that does something in their name."""
+        session = self.session(game_id, slot, user_id)
+        while session.state == "connecting" and time.monotonic() < deadline:
+            await asyncio.sleep(0.2)
+        if session.state == "offline":
+            raise TextClientError("The game's server is not running", 409)
+        if session.state == "refused":
+            raise TextClientError(f"The server refused the connection: {session.error}", 409)
+        if session.state != "connected" or session.ws is None:
+            raise TextClientError("Not connected to the game's server", 409)
+        return session
 
     async def close(self, key: tuple[int, int, int]) -> None:
         session = self.sessions.pop(key, None)
@@ -293,7 +332,10 @@ class TextClients:
             except Exception:  # noqa: BLE001 - a bug must not end the session for good
                 log.exception("Text client of game %s, slot %s failed", session.game_id, session.slot)
             finally:
-                session.ws = None
+                session.ws, session.refused_update = None, None
+                for reply in session.replies.values():  # their answers will not come any more
+                    if not reply.done():
+                        reply.set_exception(TextClientError("Not connected to the game's server", 409))
             if session.closed:
                 return
             if session.state == "connected":
@@ -372,6 +414,14 @@ class TextClients:
         elif cmd == "PrintJSON":
             session.add(render(session, packet.get("data") or []), str(packet.get("type") or ""),
                         concerns_me(session, packet))
+        elif cmd == "InvalidPacket" and packet.get("original_cmd") == "UpdateHint":
+            # comes before the answer to the Get sent with it (the server deals with a client's packets in order)
+            session.refused_update = str(packet.get("text") or "invalid")
+        elif cmd == "Retrieved":
+            reply = session.replies.get(_int(packet.get("manager_request")))
+            if reply is not None and not reply.done():
+                reply.set_result((packet, session.refused_update))
+            session.refused_update = None
 
     @staticmethod
     def _players(session: Session, players: Any) -> None:

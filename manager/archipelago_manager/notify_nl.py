@@ -101,6 +101,7 @@ MESSAGES = {
     "Nobody signed up.": "Niemand heeft zich ingeschreven.",
     "Generating the game now.": "Het spel wordt nu gegenereerd.",
     "An administrator will generate the game.": "Een beheerder genereert het spel.",
+    "Sign-ups for {name} close": "De aanmeldingen voor {name} sluiten",
     "Sign-ups for {name} close soon": "De aanmeldingen voor {name} sluiten binnenkort",
     "Sign-ups close {when} ({date}).": "De aanmeldingen sluiten {when} ({date}).",
     "{n} entry so far.": "Tot nu toe {n} inschrijving.",

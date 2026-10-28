@@ -3,23 +3,24 @@ import { api, state, refreshStatus, setUnauthorizedHandler, isAdmin, canGenerate
 import { banner, loading, field, checkbox } from "./components.js";
 import { t, plural, lang, locale, LANGUAGES, setLanguage } from "./i18n.js";
 
+// path, page, section of the nav, and the title of the browser tab (a page with a name of its own sets it: setTitle)
 const ROUTES = [
-  [/^\/?$/, () => import("./views/dashboard.js"), "home"],
-  [/^\/games$/, () => import("./views/games.js"), "games"],
-  [/^\/games\/(\d+)$/, () => import("./views/game.js"), "games"],
-  [/^\/archive$/, () => import("./views/archive.js"), "games"],
-  [/^\/configs$/, () => import("./views/configs.js"), "configs"],
-  [/^\/configs\/new$/, () => import("./views/config-edit.js"), "configs"],
-  [/^\/configs\/(\d+)$/, () => import("./views/config-edit.js"), "configs"],
-  [/^\/generate$/, () => import("./views/generate.js"), "generate"],
-  [/^\/jobs\/(\d+)$/, () => import("./views/job.js"), "generate"],
-  [/^\/signups$/, () => import("./views/signups.js"), "signups"],
-  [/^\/signups\/(\d+)$/, () => import("./views/signup.js"), "signups"],
-  [/^\/worlds$/, () => import("./views/worlds.js"), "worlds"],
-  [/^\/admin\/users$/, () => import("./views/admin-users.js"), "admin"],
-  [/^\/admin\/settings$/, () => import("./views/admin-settings.js"), "admin"],
-  [/^\/admin\/log$/, () => import("./views/admin-log.js"), "admin"],
-  [/^\/tokens$/, () => import("./views/tokens.js"), null],
+  [/^\/?$/, () => import("./views/dashboard.js"), "home", () => t("Dashboard")],
+  [/^\/games$/, () => import("./views/games.js"), "games", () => t("Games")],
+  [/^\/games\/(\d+)$/, () => import("./views/game.js"), "games", () => t("Games")],
+  [/^\/archive$/, () => import("./views/archive.js"), "games", () => t("Archive")],
+  [/^\/configs$/, () => import("./views/configs.js"), "configs", () => (isAdmin() ? t("Player configs") : t("My configs"))],
+  [/^\/configs\/new$/, () => import("./views/config-edit.js"), "configs", () => t("New config")],
+  [/^\/configs\/(\d+)$/, () => import("./views/config-edit.js"), "configs", () => t("My configs")],
+  [/^\/generate$/, () => import("./views/generate.js"), "generate", () => t("Generate")],
+  [/^\/jobs\/(\d+)$/, () => import("./views/job.js"), "generate", () => t("Generation")],
+  [/^\/signups$/, () => import("./views/signups.js"), "signups", () => t("Sign-ups")],
+  [/^\/signups\/(\d+)$/, () => import("./views/signup.js"), "signups", () => t("Sign-ups")],
+  [/^\/worlds$/, () => import("./views/worlds.js"), "worlds", () => t("Custom games")],
+  [/^\/admin\/users$/, () => import("./views/admin-users.js"), "admin", () => t("Users")],
+  [/^\/admin\/settings$/, () => import("./views/admin-settings.js"), "admin", () => t("Settings")],
+  [/^\/admin\/log$/, () => import("./views/admin-log.js"), "admin", () => t("Log")],
+  [/^\/tokens$/, () => import("./views/tokens.js"), null, () => t("API tokens")],
 ];
 
 const app = document.getElementById("app");
@@ -39,6 +40,18 @@ function runCleanups() {
   dirtyCheck = null;
 }
 
+// The browser tab's title: the page, and in front of it how many new messages a page counted while the tab was in the
+// background (the game page: what others said, sent or hinted to the player)
+let pageTitle = "", unread = 0;
+function drawTitle() {
+  document.title = `${unread ? `(${unread}) ` : ""}${pageTitle ? `${pageTitle} · ` : ""}Archipelago Manager`;
+}
+function setTitle(text, count = 0) {
+  pageTitle = text;
+  unread = count;
+  drawTitle();
+}
+
 async function route() {
   const hash = location.hash || "#/";
   if (dirtyCheck?.() && currentHash !== null && hash !== currentHash) {
@@ -49,10 +62,11 @@ async function route() {
   }
   currentHash = hash;
   const [path, queryString = ""] = hash.slice(1).split("?");
-  const match = ROUTES.map(([re, load, section]) => [re.exec(path), load, section]).find(([m]) => m);
+  const match = ROUTES.map(([re, load, section, title]) => [re.exec(path), load, section, title]).find(([m]) => m);
   runCleanups();
   const token = ++navToken;
   highlightNav(match ? match[2] : null);
+  setTitle(match ? match[3]() : t("Page not found"));
   if (!view) return;
   clear(view).append(loading());
   window.scrollTo(0, 0);
@@ -76,6 +90,8 @@ async function route() {
       cleanup: (fn) => cleanups.push(fn),
       setDirtyCheck: (fn) => { dirtyCheck = fn; },
       isCurrent: () => token === navToken,
+      setTitle: (text) => { if (token === navToken && text !== pageTitle) { pageTitle = text; drawTitle(); } },
+      setUnread: (count) => { if (token === navToken) { unread = count; drawTitle(); } },
     });
   } catch (err) {
     if (token !== navToken) return;
@@ -210,8 +226,45 @@ function drawUserMenu(menu) {
     h("button", { class: "menu-item", type: "button", role: "menuitem", "aria-haspopup": "menu",
       onclick: (e) => { e.stopPropagation(); drawLanguageMenu(menu); } },
       icon("globe", 14), t("Language"), h("span", { class: "menu-value" }, LANGUAGES[lang], icon("chevron", 12))),
+    h("button", { class: "menu-item", type: "button", role: "menuitem", "aria-haspopup": "menu",
+      onclick: (e) => { e.stopPropagation(); drawThemeMenu(menu); } },
+      icon("moon", 14), t("Theme"), h("span", { class: "menu-value" }, THEMES[theme()][1](), icon("chevron", 12))),
     h("div", { class: "menu-sep" }),
     item("logout", t("Sign out"), logout));
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// light or dark: as the system asks (style.css), or as chosen here and kept in this browser (read by theme.js)
+// ---------------------------------------------------------------------------------------------------------------------
+const THEME_KEY = "apm-theme";
+const THEMES = { system: ["monitor", () => t("As on this device")], light: ["sun", () => t("Light")], dark: ["moon", () => t("Dark")] };
+const theme = () => document.documentElement.dataset.theme || "system";
+
+function showTheme(choice) {
+  if (THEMES[choice] && choice !== "system") document.documentElement.dataset.theme = choice;
+  else delete document.documentElement.dataset.theme;
+}
+
+function setTheme(choice) {
+  showTheme(choice);
+  try {
+    if (choice === "system") localStorage.removeItem(THEME_KEY);
+    else localStorage.setItem(THEME_KEY, choice);
+  } catch { /* private mode: the choice lasts until reload only */ }
+}
+// the browser's other tabs of this server follow a choice made in one of them
+window.addEventListener("storage", (e) => { if (e.key === THEME_KEY || e.key === null) showTheme(e.newValue); });
+
+// The user menu's page of themes; a choice shows at once, and the menu stays open on it
+function drawThemeMenu(menu) {
+  clear(menu).append(
+    h("button", { class: "menu-item menu-back", type: "button", onclick: (e) => { e.stopPropagation(); drawUserMenu(menu); } },
+      icon("back", 14), t("Theme")),
+    h("div", { class: "menu-sep" }),
+    Object.entries(THEMES).map(([key, [iconName, label]]) => h("button", { class: "menu-item", type: "button", role: "menuitemradio",
+      "aria-checked": String(key === theme()), onclick: (e) => { e.stopPropagation(); setTheme(key); drawThemeMenu(menu); } },
+      icon(iconName, 14), h("span", { class: "grow" }, label()), key === theme() ? icon("check", 14) : null)));
+  menu.querySelector("[aria-checked=true]")?.focus();
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -444,6 +497,7 @@ function takeDiscordResult() {
 // ---------------------------------------------------------------------------------------------------------------------
 function renderAuth(notice) {
   view = null;
+  setTitle("");
   const status = state.status;
   let mode = status.needs_setup ? "setup" : "login";
   const card = h("div", { class: "auth-card card" });

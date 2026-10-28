@@ -1368,7 +1368,39 @@
   "Not every player has reached their goal, so it is listed as aborted. The server keeps running until it is stopped; you can take the game back out later.": "Niet elke speler heeft zijn doel bereikt, dus het staat als afgebroken. De server blijft draaien tot hij wordt gestopt; je kunt het spel later weer uit het archief halen.",
   "Move this game to the archive?": "Dit spel naar het archief verplaatsen?",
   "You have {games} unfinished games of your own, the most you can have at a time. Move one to the archive to generate another.": "Je hebt {games} eigen spellen die nog niet zijn afgelopen, het maximum tegelijk. Verplaats er een naar het archief om een ander te genereren.",
-  "A game you generate can have up to {worlds} worlds. You can have {games} unfinished games of your own at a time, one of them running: {left} more for now.": "Een spel dat je genereert, kan tot {worlds} werelden hebben. Je kunt {games} eigen spellen tegelijk hebben die nog niet zijn afgelopen, waarvan één draaiend: nu nog {left}."
+  "A game you generate can have up to {worlds} worlds. You can have {games} unfinished games of your own at a time, one of them running: {left} more for now.": "Een spel dat je genereert, kan tot {worlds} werelden hebben. Je kunt {games} eigen spellen tegelijk hebben die nog niet zijn afgelopen, waarvan één draaiend: nu nog {left}.",
+  "Opens Archipelago's Launcher on this computer, connected to your slot": "Opent de Archipelago-launcher op deze computer, verbonden met je slot",
+  "Or press “{button}”: with Archipelago installed, its Launcher opens the client for your game already connected (the Text Client, if your game's client does not take links).": "Of druk op \"{button}\": als Archipelago geïnstalleerd is, opent de launcher de client van je spel, al verbonden (de tekstclient, als de client van je spel geen links aanneemt).",
+  "Open in Archipelago": "Openen in Archipelago",
+  "Mark the items you need most as priority, and those you can do without as avoid: whoever has them in their world sees it in their client.": "Markeer de items die je het hardst nodig hebt als \"Prioriteit\", en de items die je kunt missen als \"Vermijden\": wie ze in zijn wereld heeft, ziet dat in zijn client.",
+  "Marked {item} as {status}": "{item} gemarkeerd als \"{status}\"",
+  "Status of the hint for {item}": "Status van de hint voor {item}",
+  "Tell the others how much you need this item": "Laat de anderen weten hoe hard je dit item nodig hebt",
+  "A calendar file, with a reminder when the server opens": "Een agendabestand, met een herinnering wanneer de server opengaat",
+  "A calendar file, with a reminder before the sign-ups close": "Een agendabestand, met een herinnering voordat de aanmeldingen sluiten",
+  "Add to calendar": "Aan agenda toevoegen",
+  "Theme": "Thema",
+  "As on this device": "Zoals op dit apparaat",
+  "Light": "Licht",
+  "Dark": "Donker",
+  "Search by file, player name or game…": "Zoeken op bestand, spelersnaam of spel…",
+  "Search configs": "Configs doorzoeken",
+  "Search the games": "De spellen doorzoeken",
+  "Archipelago is reading the file…": "Archipelago leest het bestand…",
+  "Archipelago read the file the way the generator does, with every value a weight can pick and every game the file can roll. Nothing was generated, though: whether the items can be placed with these options only shows when a game is generated.": "Archipelago heeft het bestand gelezen zoals de generator dat doet, met elke waarde die een gewicht kan kiezen en elk spel dat het bestand kan gooien. Er is wel niets gegenereerd: of de items met deze opties geplaatst kunnen worden, blijkt pas als er een spel gegenereerd wordt.",
+  "Archipelago takes this config.": "Archipelago accepteert deze config.",
+  "Check {name}": "{name} controleren",
+  "Check": "Controleren",
+  "Find out whether the generator takes the file as it is in the editor, saved or not": "Nagaan of de generator het bestand accepteert zoals het in de editor staat, opgeslagen of niet",
+  "Find out whether the generator takes this config, without generating": "Nagaan of de generator deze config accepteert, zonder te genereren",
+  "Fine": "In orde",
+  "Fix what is listed below, then check again.": "Los op wat hieronder staat en controleer daarna opnieuw.",
+  "Have a look at the warnings, though.": "Kijk wel even naar de waarschuwingen.",
+  "The generator would stop at this config.": "De generator zou op deze config vastlopen.",
+  "{n} error": "{n} fout",
+  "{n} errors": "{n} fouten",
+  "{n} warning": "{n} waarschuwing",
+  "{n} warnings": "{n} waarschuwingen"
  },
  "server": {
   " (line {0})": " (regel {0})",
@@ -1748,7 +1780,17 @@
   "You already have {0} unfinished games of your own (counting those being generated). Move one to the archive before you generate another.": "Je hebt al {0} eigen spellen die nog niet zijn afgelopen (die nu worden gegenereerd meegeteld). Verplaats er een naar het archief voordat je een ander genereert.",
   "You can have one of your games running at a time, and {0} is running (or asleep until its players come back). Stop it first.": "Je kunt één van je spellen tegelijk laten draaien, en {0} draait (of slaapt tot de spelers terugkomen). Stop het eerst.",
   "There are {0} unfinished games of this player already. Move one of them to the archive first.": "Deze speler heeft al {0} spellen die nog niet zijn afgelopen. Verplaats er eerst een naar het archief.",
-  "Only whoever runs this game, or the player who generated it, can move it to the archive": "Alleen wie dit spel beheert, of de speler die het heeft gegenereerd, kan het naar het archief verplaatsen"
+  "Only whoever runs this game, or the player who generated it, can move it to the archive": "Alleen wie dit spel beheert, of de speler die het heeft gegenereerd, kan het naar het archief verplaatsen",
+  "A hint can be marked priority, no priority or avoid": "Een hint kan als \"Prioriteit\", \"Geen prioriteit\" of \"Vermijden\" gemarkeerd worden",
+  "The server did not answer in time": "De server antwoordde niet op tijd",
+  "The server did not change the hint": "De server heeft de hint niet gewijzigd",
+  "The server has no such hint": "De server kent deze hint niet",
+  "The server refused to change the hint: {0}": "De server weigerde de hint te wijzigen: {0}",
+  "This game has no planned start": "Dit spel heeft geen geplande start",
+  "This item was found already": "Dit item is al gevonden",
+  "This round has no deadline": "Deze ronde heeft geen deadline",
+  "Your last check is not done yet. Check again when it is.": "Je laatste controle is nog niet klaar. Controleer opnieuw zodra die klaar is.",
+  "Two players in this file are named '{0}'. Player names must be unique.": "Twee spelers in dit bestand heten \"{0}\". Spelersnamen moeten uniek zijn."
  },
  "server_extra": [
   " (line {0})",
@@ -1821,6 +1863,7 @@
   "Enter the certificate with its full path in the container, e.g. /config/tls/fullchain.pem",
   "Enter the key with its full path in the container, e.g. /config/tls/privkey.pem",
   "Document #{0}: the player name has no visible characters, so nobody can read it",
-  "Document #{0}: the player name contains characters that change the direction of the text, so it shows differently from how it is spelled"
+  "Document #{0}: the player name contains characters that change the direction of the text, so it shows differently from how it is spelled",
+  "Two players in this file are named '{0}'. Player names must be unique."
  ]
 }

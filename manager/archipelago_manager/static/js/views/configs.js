@@ -1,7 +1,7 @@
 import { h, clear, icon, toast, action, confirmDialog, fmtAgo, fmtBytes, openModal } from "../util.js";
 import { api, get, post, put, del, isAdmin, state } from "../api.js";
 import { pageHeader, empty, chips, badge, missingGamesPanel, missingRomsPanel, promptMissingGames, checkbox, field,
-         defaultPlayerName } from "../components.js";
+         defaultPlayerName, configCheckDialog } from "../components.js";
 import { t, tServer, plural } from "../i18n.js";
 
 export default async function render({ root, query, isCurrent }) {
@@ -94,7 +94,17 @@ export default async function render({ root, query, isCurrent }) {
     name.focus();
   }
 
-  function draw(configs) {
+  // The search stays where it is while the table below it changes, so it keeps the focus
+  let configs = [];
+  const search = h("input", { class: "input", type: "search", placeholder: t("Search by file, player name or game…"),
+    "aria-label": t("Search configs") });
+  search.oninput = () => drawTable();
+  const tableHost = h("div");
+  const card = h("div", { class: "card flush", style: { marginTop: "14px" } },
+    h("div", { class: "row list-tools" }, h("div", { class: "grow list-search" }, search)), tableHost);
+
+  function draw(list) {
+    configs = list;
     clear(listHost);
     if (!configs.length) {
       listHost.append(dropArea(
@@ -105,10 +115,18 @@ export default async function render({ root, query, isCurrent }) {
           h("a", { class: "btn", href: "#/configs/new" }, icon("file", 14), t("Create a config")))));
       return;
     }
-    listHost.append(dropArea(null), h("div", { class: "card flush table-wrap", style: { marginTop: "14px" } }, h("table", { class: "table" },
+    listHost.append(dropArea(null), card);
+    drawTable();
+  }
+
+  function drawTable() {
+    const q = search.value.trim().toLowerCase();
+    const shown = configs.filter((c) => !q || [c.name, ...c.player_names, ...c.games, showAll ? c.owner : ""]
+      .some((text) => (text || "").toLowerCase().includes(q)));
+    clear(tableHost).append(shown.length ? h("div", { class: "table-wrap" }, h("table", { class: "table" },
       h("thead", {}, h("tr", {}, [showAll ? t("Owner") : null, t("File"), t("Player name"), t("Games"), t("Updated"), ""]
         .filter((text) => text !== null).map((text) => h("th", {}, text)))),
-      h("tbody", {}, configs.map((c) => h("tr", {},
+      h("tbody", {}, shown.map((c) => h("tr", {},
         showAll ? h("td", {}, c.owner) : null,
         h("td", {}, h("a", { href: `#/configs/${c.id}`, class: "slot-name" }, c.name),
           c.source_game_id ? [" ", h("a", { href: `#/games/${c.source_game_id}` }, badge(t("from a game"), "accent"))] : null,
@@ -118,6 +136,9 @@ export default async function render({ root, query, isCurrent }) {
         h("td", {}, chips(c.games, c.missing_games)),
         h("td", { class: "muted" }, fmtAgo(c.updated_at)),
         h("td", { class: "actions" }, h("div", { class: "row", style: { justifyContent: "flex-end" } },
+          h("button", { class: "btn sm", type: "button", title: t("Find out whether the generator takes this config, without generating"),
+            onclick: () => configCheckDialog({ name: c.name, load: async () => (await get(`/api/configs/${c.id}`)).content,
+              editHref: `#/configs/${c.id}` }) }, icon("check", 14), t("Check")),
           h("a", { class: "btn sm", href: `#/configs/${c.id}` }, icon("edit", 14), t("Edit")),
           c.user_id === state.user.id || c.shared ? h("button", { class: "btn sm ghost", type: "button", "aria-pressed": String(c.shared),
             title: c.shared ? t("Stop sharing this config") : t("Offer this config to the other players to copy"),
@@ -128,7 +149,8 @@ export default async function render({ root, query, isCurrent }) {
             await del(`/api/configs/${c.id}`);
             toast(t("Config deleted"), "success");
             await load();
-          }) }, icon("trash", 14))))))))));
+          }) }, icon("trash", 14)))))))))
+      : h("p", { class: "muted list-none" }, t("Nothing matches.")));
   }
 
   const fileInput = h("input", { type: "file", multiple: true, accept: ".yaml,.yml,text/yaml", hidden: true });

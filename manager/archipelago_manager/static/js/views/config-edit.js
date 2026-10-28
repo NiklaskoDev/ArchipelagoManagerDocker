@@ -1,6 +1,7 @@
 import { h, clear, icon, toast, action, confirmDialog, openModal, fmtAgo } from "../util.js";
 import { get, post, put, del, isAdmin } from "../api.js";
-import { pageHeader, chips, banner, field, loading, missingGamesPanel, missingRomsPanel, badge, defaultPlayerName } from "../components.js";
+import { pageHeader, chips, banner, field, loading, missingGamesPanel, missingRomsPanel, badge, defaultPlayerName,
+         configCheckDialog } from "../components.js";
 import { t, tServer } from "../i18n.js";
 import { loadSchema, optionsForm } from "../options-form.js";
 
@@ -13,7 +14,7 @@ function rememberTab(tab) {
   try { localStorage.setItem(TAB_KEY, tab); } catch { /* private mode */ }
 }
 
-export default async function render({ root, params, query, cleanup, setDirtyCheck, isCurrent }) {
+export default async function render({ root, params, query, cleanup, setDirtyCheck, isCurrent, setTitle }) {
   const id = params[0] ? Number(params[0]) : null;
   if (id === null && !query.get("game")) return renderPicker(root);
 
@@ -26,6 +27,7 @@ export default async function render({ root, params, query, cleanup, setDirtyChe
     config = await get(`/api/configs/${id}`);
     text = config.content;
     name = config.name;
+    setTitle(config.name);
   } else {
     const game = query.get("game");
     if (game === "__blank__") {
@@ -241,6 +243,12 @@ export default async function render({ root, params, query, cleanup, setDirtyChe
   root.append(
     h("div", { class: "muted small" }, h("a", { href: "#/configs" }, t("← All configs"))),
     pageHeader(id === null ? t("New config") : config.name, t("Set the options in the form or edit the YAML directly. Everything is checked when you save."),
+      h("button", { class: "btn", type: "button", title: t("Find out whether the generator takes the file as it is in the editor, saved or not"),
+        onclick: action(async () => {
+          if (mode === "form" && needsWrite()) editor.value = await writeForm();
+          const text = editor.value;
+          configCheckDialog({ name: nameInput.value || t("New config"), load: async () => text });
+        }) }, icon("check", 14), t("Check")),
       h("button", { class: "btn", type: "button", title: t("See what the weights, random ranges and triggers of this file come out as"),
         onclick: action(rollDialog) }, icon("dice", 14), t("Roll")),
       id !== null ? h("a", { class: "btn", href: `/api/configs/${id}/download` }, icon("download", 14), t("Download")) : null,

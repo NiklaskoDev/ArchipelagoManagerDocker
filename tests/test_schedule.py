@@ -25,6 +25,7 @@ def test_a_planned_start_opens_the_game_and_times_the_race(ap_server, admin, mak
     for body in ({"start_at": time.time() - 5}, {"start_at": time.time() + 400 * 86400}, {"start_open_minutes": 5000}):
         assert admin.patch(url, json=body).status_code == 400
     assert ann.patch(url, json={"start_at": time.time() + 3600}).status_code == 403
+    assert ann.get(f"{url}/start.ics").status_code == 404
 
     # planning it tells the players when the server opens and when the start is
     start = time.time() + 3600
@@ -33,6 +34,12 @@ def test_a_planned_start_opens_the_game_and_times_the_race(ap_server, admin, mak
     planned = ann.get(url).json()["start"]
     assert planned == {"at": start, "opens_at": start - 15 * 60, "open_minutes": 15, "countdown": True,
                        "stage": "planned"}
+    # a calendar file for the players, reminding them when the server opens
+    calendar = ann.get(f"{url}/start.ics?lang=fr")
+    assert calendar.status_code == 200 and calendar.headers["content-type"].startswith("text/calendar")
+    for line in (f"UID:game-{gid}-start@manager.test", f"DTSTART:{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime(start))}",
+                 f"SUMMARY:Départ prévu : {name}", "TRIGGER:-PT15M", f"URL:http://manager.test:8080/#/games/{gid}"):
+        assert f"\r\n{line}\r\n" in calendar.text, (line, calendar.text)
     announced = discord.wait_for(f"Planned start: {name}")
     fields = {f["name"]: f["value"] for f in announced["fields"]}
     assert fields["Start"].startswith(f"<t:{int(start)}:F>") and fields["Server opens"] == f"<t:{int(start) - 900}:t>"

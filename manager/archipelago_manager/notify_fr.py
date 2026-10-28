@@ -102,6 +102,7 @@ MESSAGES = {
     "Nobody signed up.": "Personne ne s'est inscrit.",
     "Generating the game now.": "Génération de la partie en cours.",
     "An administrator will generate the game.": "Un administrateur générera la partie.",
+    "Sign-ups for {name} close": "Les inscriptions à {name} ferment",
     "Sign-ups for {name} close soon": "Les inscriptions à {name} ferment bientôt",
     "Sign-ups close {when} ({date}).": "Les inscriptions ferment {when} ({date}).",
     "{n} entry so far.": "{n} inscription pour l'instant.",

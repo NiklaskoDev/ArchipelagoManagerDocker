@@ -359,7 +359,9 @@ def cmd_tracker(args) -> dict:
                       "location": names.lookup("location", h.finding_player, h.location),
                       "finder": names.player(h.finding_player), "in_my_world": h.finding_player == slot,
                       "entrance": str(h.entrance or ""), "found": bool(h.found), "flags": int(h.item_flags),
-                      "status": int(getattr(h, "status", 0))})
+                      "status": int(getattr(h, "status", 0)),
+                      # what the server knows the hint by, for its receiver to change its status (UpdateHint)
+                      "finder_slot": int(h.finding_player), "location_id": int(h.location)})
     hints.sort(key=lambda h: (h["found"], h["item"].lower()))
     status = save.get("client_game_state", {}).get((0, slot), 0)
     # This slot's items still waiting in some world, its own included: what !collect would bring
@@ -497,6 +499,93 @@ def cmd_roll(args) -> dict:
         raise ValueError("There is no player in this file")
     text = "---\n".join(yaml.safe_dump(d, sort_keys=False, allow_unicode=True, default_flow_style=False) for d in documents)
     return {"yaml": text, "rolled": rolled}
+
+
+def cmd_check(args) -> dict:
+    """Checks a player file the way the generator reads it, without generating: for every player, what would stop the
+    generator (errors) and what it would ignore or doubt (warnings, such as an option name it does not know), in
+    Archipelago's words. Unlike the generator, it does not stop at the first error, and it tries every game and every
+    option value the file gives a weight to, not only the ones a roll happens to pick."""
+    cmd_where(args)
+    import copy
+    import logging
+    import Generate
+    import worlds  # noqa: F401  (registers all worlds)
+    from BaseClasses import PlandoOptions
+    from worlds.AutoWorld import AutoWorldRegister
+    every_plando = PlandoOptions.from_option_string("bosses, items, texts, connections")
+
+    class Caught(logging.Handler):  # what Archipelago logs as a warning while it reads the file
+        def __init__(self):
+            super().__init__(logging.WARNING)
+            self.messages = []
+
+        def emit(self, record):
+            self.messages.append(record.getMessage())
+
+    def explain(e: BaseException) -> str:
+        """An error with what caused it: "Error generating option goal in X" says little on its own."""
+        parts = []
+        while e is not None and len(parts) < 3:
+            text = str(e.args[0] if isinstance(e, KeyError) and e.args else e)
+            if text and text not in parts:
+                parts.append(text)
+            e = e.__cause__ or e.__context__
+        return ": ".join(parts) or "unknown error"
+
+    def weighted(value) -> list:
+        """What a setting can come out as: the keys with a weight above 0, or the value itself."""
+        if isinstance(value, dict):
+            return [key for key, weight in value.items() if isinstance(weight, (int, float)) and weight > 0]
+        return [value]
+
+    def check_game(weights: dict, game, name: str) -> list:
+        trial = copy.deepcopy(weights)
+        if game is not None:
+            trial["game"] = game
+        errors, failed = [], set()
+        world = AutoWorldRegister.world_types.get(game)
+        section = trial.get(game)
+        if world is not None and isinstance(section, dict) and hasattr(Generate, "handle_option"):
+            # each option on its own, and each value with a weight, where the generator stops at the first error
+            player = argparse.Namespace(game=game, name=name)
+            for key, option in world.options_dataclass.type_hints.items():
+                given = section.get(key)
+                values = weighted(given) if isinstance(given, dict) and option.supports_weighting else [given]
+                for value in values:
+                    try:
+                        Generate.handle_option(player, {**section, key: value} if key in section else section, key,
+                                               option, every_plando)
+                    except Exception as e:  # noqa: BLE001
+                        errors.append(explain(e))
+                        failed.add(key)
+            for key in failed:  # left out, so that the generator's own reading goes on to the rest of the file
+                del section[key]
+        try:  # the generator's own reading: triggers, requirements, and the names it would ignore (logged)
+            Generate.roll_settings(trial, every_plando)
+        except Exception as e:  # noqa: BLE001 - what the generator would stop at
+            errors.append(explain(e))
+        return errors
+
+    players = []
+    for index, weights in enumerate(Generate.read_weights_yamls(args.path), 1):
+        if weights is None:
+            continue
+        name = weights.get("name") if isinstance(weights.get("name"), str) else f"Player {index}"
+        games = [g for g in weighted(weights.get("game")) if isinstance(g, str)]
+        errors = []
+        caught = Caught()
+        logging.getLogger().addHandler(caught)
+        try:
+            for game in games or [None]:
+                errors += check_game(weights, game, name)
+        finally:
+            logging.getLogger().removeHandler(caught)
+        players.append({"name": name, "games": games, "errors": list(dict.fromkeys(errors)),
+                        "warnings": list(dict.fromkeys(caught.messages))})
+    if not players:
+        raise ValueError("There is no player in this file")
+    return {"players": players}
 
 
 # --------------------------------------------------------------------------------------------------------------------
@@ -735,6 +824,7 @@ COMMANDS = {
     "tracker": cmd_tracker,
     "build-save": cmd_build_save,
     "roll": cmd_roll,
+    "check": cmd_check,
     "templates": cmd_templates,
 }
 
@@ -761,6 +851,8 @@ def main() -> None:
     p.add_argument("state", help="JSON file: how the game stands (see cmd_build_save)")
     p.add_argument("out", help="where the save is written")
     p = sub.add_parser("roll")
+    p.add_argument("path", help="a player file, perhaps with weights")
+    p = sub.add_parser("check")
     p.add_argument("path", help="a player file, perhaps with weights")
     p = sub.add_parser("templates")
     p.add_argument("out")

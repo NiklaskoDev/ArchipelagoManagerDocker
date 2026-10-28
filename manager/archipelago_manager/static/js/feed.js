@@ -24,10 +24,13 @@ function clock(ts) {
     : d.toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 }
 
-export function activitySection({ gameId, mySlots, cleanup, isCurrent, source = `/api/games/${gameId}/activity`, spectator = false }) {
+// While the tab is in the background, onUnread(n) hears how many entries came in since that are news for the viewer
+// (for the tab's title), and onUnread(0) once the tab is back in view.
+export function activitySection({ gameId, mySlots, cleanup, isCurrent, source = `/api/games/${gameId}/activity`, spectator = false,
+  onUnread = null }) {
   const mine = new Set(mySlots);
   const filters = spectator ? FILTERS.filter(([key]) => key !== "chat") : FILTERS;
-  let entries = [], last = 0, filter = "all", timer = null, loaded = false;
+  let entries = [], last = 0, filter = "all", timer = null, loaded = false, unread = 0;
   const list = h("div", { class: "console feed", role: "log", "aria-live": "polite", tabindex: 0 });
   const tabs = h("div", { class: "tabs", role: "tablist", style: { marginBottom: 0 } });
   const onlyMine = mine.size ? checkbox(t("Only about me"), false) : null;
@@ -37,6 +40,10 @@ export function activitySection({ gameId, mySlots, cleanup, isCurrent, source = 
   const item = (name) => h("span", { class: "tc-item" }, name);
   const place = (name) => h("span", { class: "tc-location" }, name);
   const concerns = (e) => [e.player, e.finder, e.receiver].some((name) => mine.has(name));
+  // news: what the others say, the items they send the viewer, and hints for items of theirs in the viewer's world
+  const news = (e) => (e.kind === "chat" && !mine.has(e.player))
+    || (e.kind === "item" && mine.has(e.receiver) && !mine.has(e.finder))
+    || (e.kind === "hint" && mine.has(e.finder) && !mine.has(e.receiver));
   const user = (name) => h("strong", {}, name);
 
   function line(e) {
@@ -102,12 +109,21 @@ export function activitySection({ gameId, mySlots, cleanup, isCurrent, source = 
         last = fresh.last;
         draw(first);
       }
+      const count = !first && document.hidden && onUnread ? fresh.entries.filter(news).length : 0;
+      if (count) onUnread((unread += count));
     } catch { /* the next look tries again */ }
   }
   draw();
   load();
-  timer = setInterval(() => { if (!document.hidden) load(); }, 5000);
+  // in the background only to count the news, and less often
+  let ticks = 0;
+  timer = setInterval(() => { if (!document.hidden || (onUnread && ++ticks % 4 === 0)) load(); }, 5000);
   cleanup(() => clearInterval(timer));
+  if (onUnread) {
+    const seen = () => { if (!document.hidden && unread) onUnread((unread = 0)); };
+    document.addEventListener("visibilitychange", seen);
+    cleanup(() => document.removeEventListener("visibilitychange", seen));
+  }
 
   return h("div", { class: "section" }, h("div", { class: "card stack" },
     h("div", { class: "card-head" }, h("h2", {}, t("Activity")), onlyMine),
