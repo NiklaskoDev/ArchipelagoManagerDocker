@@ -16,7 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
-from .. import __version__, audit, db, discord_auth, limits, notify, settings as app_settings
+from .. import __version__, audit, db, discord_auth, invites, limits, notify, settings as app_settings
 from ..config import CONFIG
 from ..security import (ROLES, SESSION_COOKIE, LoginThrottle, admin_user, check_password_policy, check_username,
                         client_address, create_session, current_user, destroy_session, destroy_user_sessions,
@@ -46,13 +46,13 @@ def has_users() -> bool:
     return db.query_one("SELECT 1 FROM users LIMIT 1") is not None
 
 
-def create_user(username: str, password: str, role: str) -> int:
+def create_user(username: str, password: str, role: str, invite_id: int | None = None) -> int:
     username = check_username(username)
     check_password_policy(password)
     if db.query_one("SELECT 1 FROM users WHERE username = ?", (username,)):
         raise HTTPException(409, "That username is already taken")
-    return db.execute("INSERT INTO users(username, password_hash, role, created_at) VALUES (?,?,?,?)",
-                      (username, hash_password(password), role, time.time()))
+    return db.execute("INSERT INTO users(username, password_hash, role, created_at, invite_id) VALUES (?,?,?,?,?)",
+                      (username, hash_password(password), role, time.time(), invite_id))
 
 
 def bootstrap_admin() -> None:
@@ -223,6 +223,7 @@ def change_password(body: PasswordChange, request: Request, user: sqlite3.Row = 
         raise HTTPException(403, "Current password is wrong")
     check_password_policy(body.new_password)
     db.execute("UPDATE users SET password_hash = ? WHERE id = ?", (hash_password(body.new_password), user["id"]))
+    invites.drop_resets(user["id"])
     destroy_user_sessions(user["id"], except_token=request.cookies.get(SESSION_COOKIE))
     return {"ok": True, "tokens_revoked": revoke_user_tokens(user["id"]) if body.revoke_tokens else 0}
 
@@ -289,7 +290,10 @@ async def discord_callback(request: Request, state: str = "", code: str = "", er
             return _back_to_app("#/?discord=linked")
         user = discord_auth.user_for(identity["id"])
         fragment = discord_auth.safe_next(pending.next)
-        if user is None:
+        if user is None and pending.mode == "invite":
+            user_id = _join_with_discord(pending.invite_id, identity)
+            fragment = "#/?discord=welcome"
+        elif user is None:
             if not app_settings.get_setting("discord_signup"):
                 raise discord_auth.DiscordError("not_linked")
             user_id = discord_auth.sign_up(identity)
@@ -317,6 +321,21 @@ def discord_unlink(user: sqlite3.Row = Depends(current_user)) -> dict:
     return user_json(db.query_one("SELECT * FROM users WHERE id = ?", (user["id"],)))
 
 
+def _join_with_discord(invite_id: int | None, identity: dict) -> int:
+    """A new account for a Discord account, with the role of the invite the flow started with. (A Discord account that
+    already has one signs in with it in discord_callback, and the invite keeps its use.)"""
+    invite = invites.take_use(invite_id) if invite_id else None
+    if invite is None:
+        raise discord_auth.DiscordError("invite")
+    try:
+        user_id = discord_auth.sign_up(identity, role=invite["role"], invite_id=invite["id"])
+    except BaseException:
+        invites.give_back(invite["id"])
+        raise
+    _joined(user_id, invite)
+    return user_id
+
+
 class Pings(BaseModel):
     pings: list[str] = Field(max_length=len(notify.PING_KINDS))
 
@@ -331,6 +350,119 @@ def discord_pings(body: Pings, user: sqlite3.Row = Depends(current_user)) -> dic
     pings = [kind for kind in notify.PING_KINDS if kind in body.pings]
     db.execute("UPDATE users SET discord_pings = ? WHERE id = ?", (db.jdumps(pings), user["id"]))
     return user_json(db.query_one("SELECT * FROM users WHERE id = ?", (user["id"],)))
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+# invite and reset links (invites.py). Their token comes in the body of a request, never in an address, which would end
+# up in logs; a wrong one counts as a failed login of the address, so nobody can try many.
+# ----------------------------------------------------------------------------------------------------------------------
+class LinkToken(BaseModel):
+    token: str = Field(min_length=1, max_length=128)
+
+
+def _link_guard(request: Request) -> str:
+    ip_key = f"ip|{client_address(request)}"
+    if ip_throttle.blocked(ip_key):
+        raise HTTPException(429, "Too many attempts. Try again later.")
+    return ip_key
+
+
+def _usable_invite(request: Request, token: str) -> sqlite3.Row:
+    ip_key = _link_guard(request)
+    invite = invites.find(token)
+    if invite is None:
+        ip_throttle.fail(ip_key)
+        raise HTTPException(410, "This invite link cannot be used any more: it expired, was used up or was revoked. "
+                                 "Ask whoever sent it for a new one.")
+    return invite
+
+
+def _joined(user_id: int, invite: sqlite3.Row) -> None:
+    """The admins' log: who joined with which invite (nobody was signed in to make the request)."""
+    row = db.query_one("SELECT * FROM users WHERE id = ?", (user_id,))
+    audit.record(row, "user.join", ("user", user_id, row["username"]),
+                 {"role": invite["role"], **({"invite": invite["note"]} if invite["note"] else {})})
+
+
+@router.post("/auth/invite")
+def invite_info(body: LinkToken, request: Request) -> dict:
+    """What an invite link gives, for the page it opens."""
+    invite = _usable_invite(request, body.token)
+    return {"role": invite["role"], "note": invite["note"], "invited_by": invite["creator"],
+            "expires_at": invite["expires_at"], "discord": app_settings.discord_login_ready(app_settings.get_settings())}
+
+
+class InviteJoin(LinkToken):
+    username: str = Field(max_length=64)
+    password: str = Field(max_length=256)
+
+
+@router.post("/auth/invite/join")
+def invite_join(body: InviteJoin, request: Request, response: Response) -> dict:
+    """An account made with an invite link, also while registration is closed. Signs it in."""
+    invite = _usable_invite(request, body.token)
+    if invites.take_use(invite["id"]) is None:  # the last use went a moment ago
+        raise HTTPException(410, "This invite link cannot be used any more: it expired, was used up or was revoked. "
+                                 "Ask whoever sent it for a new one.")
+    try:
+        user_id = create_user(body.username, body.password, invite["role"], invite_id=invite["id"])
+    except BaseException:  # a name that is taken, a password too short: the use is not spent
+        invites.give_back(invite["id"])
+        raise
+    _joined(user_id, invite)
+    return _login_response(request, response, user_id)
+
+
+@router.post("/auth/invite/discord")
+def invite_discord(body: LinkToken, request: Request, response: Response) -> dict:
+    """Starts making an account with an invite link through Discord. The browser then goes to the returned address;
+    the invite's use is taken when Discord sends it back (discord_callback)."""
+    invite = _usable_invite(request, body.token)
+    key = client_address(request)
+    if _discord_starts.blocked(key):
+        raise HTTPException(429, "Too many attempts. Try again later.")
+    _discord_starts.fail(key)
+    try:
+        url, browser = discord_auth.begin("invite", invite_id=invite["id"])
+    except discord_auth.DiscordError:
+        raise HTTPException(409, "Signing in with Discord is not set up on this server") from None
+    _state_cookie(request, response, browser)
+    return {"url": url}
+
+
+@router.post("/auth/reset")
+def reset_info(body: LinkToken, request: Request) -> dict:
+    """Whose password a reset link sets, for the page it opens."""
+    ip_key = _link_guard(request)
+    user = invites.find_reset(body.token)
+    if user is None:
+        ip_throttle.fail(ip_key)
+        raise HTTPException(410, "This link to set a new password cannot be used any more: it expired or was used. "
+                                 "Ask an administrator for a new one.")
+    return {"username": user["username"]}
+
+
+class ResetUse(LinkToken):
+    password: str = Field(max_length=256)
+
+
+@router.post("/auth/reset/use")
+def reset_use(body: ResetUse, request: Request, response: Response) -> dict:
+    """Sets the new password, once. Signs the user out everywhere else and revokes their API tokens, as whoever knew
+    the old password may have made some; then signs them in."""
+    ip_key = _link_guard(request)
+    check_password_policy(body.password)
+    user_id = invites.use_reset(body.token, hash_password(body.password))
+    if user_id is None:
+        ip_throttle.fail(ip_key)
+        raise HTTPException(410, "This link to set a new password cannot be used any more: it expired or was used. "
+                                 "Ask an administrator for a new one.")
+    destroy_user_sessions(user_id)
+    revoked = revoke_user_tokens(user_id)
+    row = db.query_one("SELECT * FROM users WHERE id = ?", (user_id,))
+    audit.record(row, "user.password_reset", ("user", user_id, row["username"]),
+                 {"tokens_revoked": revoked} if revoked else None)
+    return {**_login_response(request, response, user_id), "tokens_revoked": revoked}
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -399,11 +531,13 @@ def patch_user(user_id: int, body: UserPatch, request: Request, admin: sqlite3.R
         db.execute("UPDATE users SET disabled = ? WHERE id = ?", (int(body.disabled), user_id))
         if body.disabled:
             destroy_user_sessions(user_id)
+            invites.drop_resets(user_id)
     if body.password:  # for someone who lost theirs, or whose account someone else used: they start afresh
         check_password_policy(body.password)
         db.execute("UPDATE users SET password_hash = ? WHERE id = ?", (hash_password(body.password), user_id))
         destroy_user_sessions(user_id)
         revoke_user_tokens(user_id)
+        invites.drop_resets(user_id)
     if body.unlink_discord:
         db.execute("UPDATE users SET discord_id = NULL, discord_name = NULL, discord_avatar = NULL WHERE id = ?",
                    (user_id,))
@@ -430,3 +564,51 @@ def delete_user(user_id: int, admin: sqlite3.Row = Depends(admin_user)) -> dict:
                "WHERE handover_to = ? OR user_id IS NULL", (user_id,))
     shutil.rmtree(CONFIG.configs_dir / str(user_id), ignore_errors=True)
     return {"ok": True}
+
+
+class NewInvite(BaseModel):
+    role: str = "user"
+    max_uses: int = 1
+    days: int = 7
+    note: str = Field(default="", max_length=200)
+
+
+@router.get("/users/invites")
+def list_invites(_admin: sqlite3.Row = Depends(admin_user)) -> list[dict]:
+    return invites.listing()
+
+
+@router.post("/users/invites")
+def add_invite(body: NewInvite, request: Request, admin: sqlite3.Row = Depends(admin_user)) -> dict:
+    """A new invite link. Its token is shown this once: only a hash of it is kept."""
+    try:
+        token, invite_id = invites.create(admin, body.role, body.max_uses, body.days, body.note)
+    except invites.InviteError as e:
+        raise HTTPException(e.status, e.message) from None
+    invite = next(i for i in invites.listing() if i["id"] == invite_id)
+    audit.note(request, target=("invite", invite_id, invite["note"]), role=body.role, uses=body.max_uses, days=body.days)
+    return {"token": token, "invite": invite}
+
+
+@router.delete("/users/invites/{invite_id}")
+def delete_invite(invite_id: int, request: Request, _admin: sqlite3.Row = Depends(admin_user)) -> dict:
+    """Revokes an invite link. The accounts made with it stay."""
+    row = invites.delete(invite_id)
+    if row is None:
+        raise HTTPException(404, "No such invite")
+    audit.note(request, target=("invite", invite_id, row["note"]))
+    return {"ok": True}
+
+
+@router.post("/users/{user_id}/reset-link")
+def reset_link(user_id: int, request: Request, admin: sqlite3.Row = Depends(admin_user)) -> dict:
+    """A link with which a user sets a new password, once, within a day; it replaces one they had. Its token is shown
+    this once."""
+    target = db.query_one("SELECT * FROM users WHERE id = ?", (user_id,))
+    if not target:
+        raise HTTPException(404, "No such user")
+    if target["disabled"]:
+        raise HTTPException(409, "Enable the account first: a disabled account cannot set a password")
+    token, expires_at = invites.create_reset(user_id, admin)
+    audit.note(request, target=("user", user_id, target["username"]))
+    return {"token": token, "expires_at": expires_at}

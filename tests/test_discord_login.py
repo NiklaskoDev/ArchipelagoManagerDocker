@@ -318,3 +318,39 @@ def test_discord_sign_in_is_off_unless_set_up(plain_server):
     assert client.get("/api/auth/status").json()["discord_login"] is False
     r = client.get("/api/auth/discord/callback", params={"state": "x", "code": "y"}, follow_redirects=False)
     assert r.headers["location"] == "/#/?discord_error=expired"
+
+
+def test_an_invite_link_works_with_discord(site, discord):
+    """Discord sign-up is off, and an invite opens it for its role. The invite's id goes along, never its token."""
+    server, admin = site
+    invite = admin.post("/api/users/invites", json={"role": "organizer", "max_uses": 1, "note": "crew"}).json()
+    browser = server.client()
+    assert browser.post("/api/auth/invite", json={"token": invite["token"]}).json()["discord"] is True
+    r = browser.post("/api/auth/invite/discord", json={"token": invite["token"]})
+    assert r.status_code == 200 and invite["token"] not in r.json()["url"]
+    state = parse_qs(urlsplit(r.json()["url"]).query)["state"][0]
+    assert finish(browser, state, discord.code_for("33333", "carla")) == "/#/?discord=welcome"
+    user = me(browser)
+    assert (user["username"], user["role"], user["discord_name"], user["has_password"]) == ("carla", "organizer", "Carla", False)
+    used = admin.get("/api/users/invites").json()[0]
+    assert (used["uses"], used["joined"]) == (1, ["carla"])
+
+    # used up: no more accounts, through Discord either
+    assert browser.post("/api/auth/invite/discord", json={"token": invite["token"]}).status_code == 410
+    # a flow started while it had a use left finds it gone when Discord sends the browser back
+    second = admin.post("/api/users/invites", json={}).json()
+    late = server.client()
+    r = late.post("/api/auth/invite/discord", json={"token": second["token"]})
+    state = parse_qs(urlsplit(r.json()["url"]).query)["state"][0]
+    admin.delete(f"/api/users/invites/{second['invite']['id']}")
+    assert "discord_error=invite" in finish(late, state, discord.code_for("44444", "dora"))
+    assert me(late) is None
+
+    # someone who already has an account signs in with it, and the invite keeps its use
+    third = admin.post("/api/users/invites", json={}).json()
+    again = server.client()
+    r = again.post("/api/auth/invite/discord", json={"token": third["token"]})
+    state = parse_qs(urlsplit(r.json()["url"]).query)["state"][0]
+    assert finish(again, state, discord.code_for("33333", "carla")) == "/#/"
+    assert me(again)["username"] == "carla"
+    assert admin.get("/api/users/invites").json()[0]["uses"] == 0

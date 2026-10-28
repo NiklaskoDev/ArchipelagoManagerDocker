@@ -262,6 +262,9 @@ def test_a_database_from_the_first_version_is_upgraded(tmp_path):
         conn.execute(f"ALTER TABLE games DROP COLUMN {column}")
     for column in ("player_since", "reminded_at", "reminders"):
         conn.execute(f"ALTER TABLE game_slots DROP COLUMN {column}")
+    conn.execute("DROP TABLE invites")
+    conn.execute("DROP TABLE password_resets")
+    conn.execute("ALTER TABLE users DROP COLUMN invite_id")
     conn.execute("PRAGMA user_version = 1")
     conn.commit()
     conn.close()
@@ -272,7 +275,7 @@ def test_a_database_from_the_first_version_is_upgraded(tmp_path):
         games = admin.get("/api/games").json()
         assert [(g["name"], g["single_claim"], g["finished_at"]) for g in games] == [("Old game", False, None)]
         conn = sqlite3.connect(db_path)
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 21
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 22
         conn.close()
         # tables added since then exist and work
         r = admin.post("/api/signups", json={"name": "After the upgrade"})
@@ -289,6 +292,7 @@ def test_a_database_from_the_first_version_is_upgraded(tmp_path):
         assert admin.get("/api/users").json()[0]["discord_pings"] == []
         assert admin.get("/api/configs/shared").json() == []
         assert admin.get("/api/presets").json()["presets"] == []
+        assert admin.get("/api/users/invites").json() == []
         # the users table was built anew for the organizer role, with everything that refers to it
         boss = admin.get("/api/auth/status").json()["user"]
         assert boss["username"] == "boss" and boss["role"] == "admin"
@@ -317,6 +321,9 @@ def test_entries_from_before_slots_were_counted_are_counted(tmp_path):
     conn.execute("ALTER TABLE signup_entries DROP COLUMN slots")  # what a v19 database looks like
     conn.execute("ALTER TABLE signups RENAME COLUMN slots_per_user TO configs_per_user")
     conn.execute("ALTER TABLE users DROP COLUMN discord_avatar")  # added after v19, in v21
+    conn.execute("DROP TABLE invites")  # and these in v22
+    conn.execute("DROP TABLE password_resets")
+    conn.execute("ALTER TABLE users DROP COLUMN invite_id")
     conn.execute("PRAGMA user_version = 19")
     conn.commit()
     conn.close()

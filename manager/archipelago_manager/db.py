@@ -13,7 +13,7 @@ from .config import CONFIG
 
 log = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 21
+SCHEMA_VERSION = 22
 
 # Added in schema version 3
 _SIGNUPS = """
@@ -212,6 +212,32 @@ _SLOTS = ("ALTER TABLE signups RENAME COLUMN configs_per_user TO slots_per_user;
 # Discord's default picture). NULL until the account next signs in with Discord, for accounts linked before.
 _DISCORD_AVATAR = "ALTER TABLE users ADD COLUMN discord_avatar TEXT;"
 
+# Added in schema version 22
+_INVITES = """
+-- Invite links (invites.py): whoever has one makes an account with its role, while it has uses left and has not
+-- expired. Reset links: one user sets a new password, once. Only hashes of the links' tokens are kept.
+CREATE TABLE invites (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    token_hash TEXT NOT NULL UNIQUE,
+    role       TEXT NOT NULL CHECK (role IN ('organizer', 'user')),
+    note       TEXT,
+    max_uses   INTEGER NOT NULL,
+    uses       INTEGER NOT NULL DEFAULT 0,
+    created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    created_at REAL NOT NULL,
+    expires_at REAL NOT NULL
+);
+CREATE TABLE password_resets (
+    token_hash TEXT PRIMARY KEY,
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    created_at REAL NOT NULL,
+    expires_at REAL NOT NULL
+);
+-- the invite an account was made with (ids are not given out again, so one of a revoked invite points nowhere)
+ALTER TABLE users ADD COLUMN invite_id INTEGER;
+"""
+
 SCHEMA = _USERS + _USERS_INDEX + """
 CREATE TABLE sessions (
     token_hash TEXT PRIMARY KEY,
@@ -351,7 +377,7 @@ CREATE TABLE job_players (
 );
 CREATE INDEX job_players_job ON job_players(job_id);
 """ + _SIGNUPS + _SOURCES + "ALTER TABLE apworld_sources ADD COLUMN latest_asset TEXT; " + \
-    "ALTER TABLE signups ADD COLUMN test_job_id INTEGER;" + _PROGRESS + _AUDIT + _VISITS + _AP_VERSIONS + _API_TOKENS + _SPECTATE_REMINDERS + _MYSTERY + _PRESETS + _SLOTS + _DISCORD_AVATAR
+    "ALTER TABLE signups ADD COLUMN test_job_id INTEGER;" + _PROGRESS + _AUDIT + _VISITS + _AP_VERSIONS + _API_TOKENS + _SPECTATE_REMINDERS + _MYSTERY + _PRESETS + _SLOTS + _DISCORD_AVATAR + _INVITES
 
 
 # Upgrades for databases created by older versions: MIGRATIONS[n] turns schema n - 1 into schema n. New databases get
@@ -409,6 +435,7 @@ MIGRATIONS: dict[int, str] = {
     19: _PRESETS,
     20: _SLOTS,
     21: _DISCORD_AVATAR,
+    22: _INVITES,
 }
 
 

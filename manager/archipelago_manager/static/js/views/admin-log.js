@@ -19,6 +19,9 @@ const ACTIONS = {
   "system.version_remove": () => t("Removed an Archipelago version"),
   "token.add": () => t("Created an API token"), "token.delete": () => t("Revoked an API token"),
   "user.add": () => t("Added a user"), "user.change": () => t("Changed a user"), "user.delete": () => t("Deleted a user"),
+  "user.invite": () => t("Made an invite link"), "user.invite_delete": () => t("Revoked an invite link"),
+  "user.join": () => t("Joined with an invite link"), "user.reset_link": () => t("Made a link to set a new password"),
+  "user.password_reset": () => t("Set a new password with a link"),
   "apworld.add": () => t("Added a custom game"), "apworld.approve": () => t("Approved a custom game"), "apworld.delete": () => t("Removed a custom game"),
   "source.add": () => t("Added a GitHub repository"), "source.approve": () => t("Approved a GitHub repository"),
   "source.update": () => t("Installed a new release"), "source.check": () => t("Checked for a new release"), "source.delete": () => t("Removed a GitHub repository"),
@@ -38,9 +41,10 @@ const DETAIL_KEYS = { changed: () => t("changed"), command: () => t("command"), 
   disabled: () => t("disabled"), password: () => t("password"), discord: () => t("Discord"), game: () => t("game"),
   configs: () => t("configs"), action: () => t("action"), done: () => t("done"), name: () => t("name"), status: () => t("status"),
   to: () => t("to"), previous: () => t("from"), version: () => t("version"),
-  token: () => t("API token"), access: () => t("access"), owner: () => t("owner") };
+  token: () => t("API token"), access: () => t("access"), owner: () => t("owner"), uses: () => t("uses"), days: () => t("days"),
+  invite: () => t("invite"), tokens_revoked: () => t("API tokens revoked") };
 
-const LINKS = { game: (id) => `#/games/${id}`, user: () => "#/admin/users", signup: (id) => `#/signups/${id}`, job: (id) => `#/jobs/${id}`,
+const LINKS = { game: (id) => `#/games/${id}`, user: () => "#/admin/users", invite: () => "#/admin/users", signup: (id) => `#/signups/${id}`, job: (id) => `#/jobs/${id}`,
   apworld: () => "#/worlds", source: () => "#/worlds", config: (id) => `#/configs/${id}` };
 
 function details(d) {

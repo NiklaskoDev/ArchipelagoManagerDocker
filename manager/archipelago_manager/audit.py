@@ -65,6 +65,9 @@ ACTIONS: dict[tuple[str, str], str] = {
     ("POST", "/api/users"): "user.add",
     ("PATCH", "/api/users/{user_id}"): "user.change",
     ("DELETE", "/api/users/{user_id}"): "user.delete",
+    ("POST", "/api/users/invites"): "user.invite",
+    ("DELETE", "/api/users/invites/{invite_id}"): "user.invite_delete",
+    ("POST", "/api/users/{user_id}/reset-link"): "user.reset_link",
     ("POST", "/api/apworlds"): "apworld.add",
     ("POST", "/api/apworlds/{apworld_id}/approve"): "apworld.approve",
     ("DELETE", "/api/apworlds/{apworld_id}"): "apworld.delete",
@@ -115,7 +118,8 @@ _TARGETS = [
     (re.compile(r"^/api/apworld-sources/(\d+)(?:/|$)"), "source", "SELECT repo FROM apworld_sources WHERE id = ?"),
     (re.compile(r"^/api/configs/(\d+)(?:/|$)"), "config", "SELECT name FROM configs WHERE id = ?"),
 ]
-_ID_PARAMS = {"game_id", "user_id", "signup_id", "job_id", "apworld_id", "source_id", "config_id", "token_id", "preset_id"}
+_ID_PARAMS = {"game_id", "user_id", "signup_id", "job_id", "apworld_id", "source_id", "config_id", "token_id", "preset_id",
+              "invite_id"}
 
 
 def watched(request: Request) -> bool:
