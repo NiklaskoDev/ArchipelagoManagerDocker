@@ -137,3 +137,48 @@ def test_hint_points_and_release_and_collect(admin, make_user):
     assert r.status_code == 200 and r.json()["done"] is False and "disabled" in r.json()["message"]
     admin.post(f"/api/games/{gid}/stop")
     admin.delete(f"/api/games/{gid}")
+
+
+def test_a_player_marks_the_hints_for_their_items(admin, make_user):
+    """Priority, no priority or avoid: the receiver of a hint marks it on the tracker, and the player in whose world the
+    item is sees it as well."""
+    _ann_name, ann = make_user("ann")
+    _bob_name, bob = make_user("bob")
+    gid, _job = make_game(admin, names=("Mark", "Seek"), owners={"Mark": ann, "Seek": bob})
+    slots = {s["name"]: s["slot"] for s in admin.get(f"/api/games/{gid}").json()["slots"]}
+    url = f"/api/games/{gid}/slots/{slots['Mark']}"
+
+    admin.post(f"/api/games/{gid}/start")
+    wait_state(admin, gid, "running")
+    log = lambda: [line["text"] for line in admin.get(f"/api/games/{gid}/log").json()["lines"]]  # noqa: E731
+    assert admin.post(f"/api/games/{gid}/command", json={"command": "/hint Mark Map Width"}).status_code == 200
+    wait_for(lambda: any("Map Width is at" in line for line in log()), timeout=15, message="the hint")
+    save_now(admin, gid)
+    hint = next(h for h in ann.get(f"{url}/tracker").json()["hints"] if h["for_me"] and not h["found"])
+    assert hint["finder_slot"] in slots.values() and hint["location_id"] > 0
+    hint_url = f"{url}/hints/{hint['finder_slot']}/{hint['location_id']}"
+
+    # the manager connects as the player, if no text client is open, and the save has it right away
+    for status in (20, 30):
+        r = ann.put(hint_url, json={"status": status})
+        assert r.status_code == 200 and r.json() == {"status": status}, r.text
+        mine = wait_for(lambda s=status: next((h for h in ann.get(f"{url}/tracker").json()["hints"]
+                                               if h["location_id"] == hint["location_id"] and h["status"] == s), None),
+                        timeout=15, message="the status in the save")
+        assert mine["for_me"]
+    if hint["finder_slot"] == slots["Seek"]:
+        theirs = bob.get(f"/api/games/{gid}/slots/{slots['Seek']}/tracker").json()["hints"]
+        assert next(h for h in theirs if h["location_id"] == hint["location_id"])["status"] == 30
+
+    # only the receiver marks a hint: the server refuses anyone else, and the manager talks only for a slot's own player
+    r = bob.put(f"/api/games/{gid}/slots/{slots['Seek']}/hints/{hint['finder_slot']}/{hint['location_id']}", json={"status": 20})
+    assert r.status_code == 409 and "No Permission" in r.json()["detail"], r.text
+    assert admin.put(hint_url, json={"status": 20}).status_code == 404
+    assert ann.put(hint_url, json={"status": 40}).status_code == 400  # found is up to the server
+    assert ann.put(f"{url}/hints/{hint['finder_slot']}/1", json={"status": 30}).status_code == 404
+
+    admin.post(f"/api/games/{gid}/stop")
+    wait_state(admin, gid, "stopped")
+    r = ann.put(hint_url, json={"status": 10})
+    assert r.status_code == 409 and "not running" in r.json()["detail"]
+    admin.delete(f"/api/games/{gid}")

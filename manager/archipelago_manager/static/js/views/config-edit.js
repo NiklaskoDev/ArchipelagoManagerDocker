@@ -13,7 +13,7 @@ function rememberTab(tab) {
   try { localStorage.setItem(TAB_KEY, tab); } catch { /* private mode */ }
 }
 
-export default async function render({ root, params, query, cleanup, setDirtyCheck, isCurrent }) {
+export default async function render({ root, params, query, cleanup, setDirtyCheck, isCurrent, setTitle }) {
   const id = params[0] ? Number(params[0]) : null;
   if (id === null && !query.get("game")) return renderPicker(root);
 
@@ -26,6 +26,7 @@ export default async function render({ root, params, query, cleanup, setDirtyChe
     config = await get(`/api/configs/${id}`);
     text = config.content;
     name = config.name;
+    setTitle(config.name);
   } else {
     const game = query.get("game");
     if (game === "__blank__") {

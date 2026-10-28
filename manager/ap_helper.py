@@ -359,7 +359,9 @@ def cmd_tracker(args) -> dict:
                       "location": names.lookup("location", h.finding_player, h.location),
                       "finder": names.player(h.finding_player), "in_my_world": h.finding_player == slot,
                       "entrance": str(h.entrance or ""), "found": bool(h.found), "flags": int(h.item_flags),
-                      "status": int(getattr(h, "status", 0))})
+                      "status": int(getattr(h, "status", 0)),
+                      # what the server knows the hint by, for its receiver to change its status (UpdateHint)
+                      "finder_slot": int(h.finding_player), "location_id": int(h.location)})
     hints.sort(key=lambda h: (h["found"], h["item"].lower()))
     status = save.get("client_game_state", {}).get((0, slot), 0)
     # This slot's items still waiting in some world, its own included: what !collect would bring

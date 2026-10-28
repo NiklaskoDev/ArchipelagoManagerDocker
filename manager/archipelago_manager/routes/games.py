@@ -13,8 +13,8 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPExcepti
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from .. import (activity, apbridge, audit, backups, db, gamepaths, gamestore, ggimport, history, limits, notify, reminders,
-               schedule, spectate, tls, versions, visits, settings as app_settings, textclient)
+from .. import (activity, apbridge, audit, backups, db, gamepaths, gamestore, ggimport, history, ics, limits, notify,
+               reminders, schedule, spectate, tls, versions, visits, settings as app_settings, textclient)
 from ..config import CONFIG
 from ..rooms import ROOMS, STATUS_GOAL, RoomError, mask_secrets, sleep_minutes, slot_rules, valid_password
 from ..security import current_user, is_admin, manages, normal_username, organizer_user
@@ -778,6 +778,22 @@ async def _announce_stuck(game: sqlite3.Row, slot: sqlite3.Row, note: str) -> No
                 ping="player_stuck", ping_users=owners, game_id=game["id"])
 
 
+@router.get("/games/{game_id}/start.ics")
+def start_calendar(game_id: int, request: Request, lang: str = "en", user: sqlite3.Row = Depends(current_user)):
+    """The planned start as a calendar file, reminding when the server opens (or ten minutes before the start)."""
+    game = get_game(game_id, user)
+    if not game["start_at"]:
+        raise HTTPException(404, "This game has no planned start")
+    language = lang if lang in ics.LANGUAGES else "en"
+    base, host = ics.site(request)
+    opens = game["start_open_minutes"]
+    return ics.response(ics.event(
+        uid=f"game-{game_id}-start@{host}", at=game["start_at"],
+        summary=notify.tr("Planned start: {game}", language=language, game=game["name"]),
+        description=notify.tr("The server opens before the start, so everyone can connect and get ready.", language=language)
+        if opens else "", url=f"{base}/#/games/{game_id}", remind_minutes=opens or 10), game["name"])
+
+
 @router.get("/games/{game_id}/slots/{slot}/tracker")
 async def slot_tracker(game_id: int, slot: int, user: sqlite3.Row = Depends(current_user)) -> dict:
     """What a slot has received, which of its locations are checked, and its hints. For its owner and admins."""
@@ -861,6 +877,35 @@ async def slot_action(game_id: int, slot: int, body: SlotAction, request: Reques
     if done:
         await ROOMS.save_soon(game_id)
     return {"done": done, "message": "".join(part["text"] for part in answer["parts"])}
+
+
+# what the receiver of a hint can mark it as (NetUtils.HintStatus), as Archipelago's own client offers it
+HINT_STATUSES = (10, 20, 30)  # no priority, avoid, priority
+HINT_FOUND = 40
+
+
+class HintStatusChange(BaseModel):
+    status: int
+
+
+@router.put("/games/{game_id}/slots/{slot}/hints/{finder}/{location}")
+async def hint_status(game_id: int, slot: int, finder: int, location: int, body: HintStatusChange,
+                      user: sqlite3.Row = Depends(current_user)) -> dict:
+    """The player marks a hint for one of their items: priority (they need it), no priority, or avoid. The hint is
+    the one at `location` in the world of slot `finder` (the tracker's finder_slot and location_id)."""
+    _own_slot(game_id, slot, user)
+    if body.status not in HINT_STATUSES:
+        raise HTTPException(400, "A hint can be marked priority, no priority or avoid")
+    try:
+        status = await TEXT_CLIENTS.update_hint(game_id, slot, user["id"], finder, location, body.status)
+    except textclient.TextClientError as e:
+        raise HTTPException(e.status, e.message) from None
+    if status == HINT_FOUND:
+        raise HTTPException(409, "This item was found already")
+    if status != body.status:
+        raise HTTPException(409, "The server did not change the hint")
+    await ROOMS.save_soon(game_id)  # the tracker reads the save
+    return {"status": status}
 
 
 @router.get("/games/{game_id}/slots/{slot}/client/names")

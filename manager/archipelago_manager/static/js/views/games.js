@@ -7,8 +7,17 @@ import { t, tServer } from "../i18n.js";
 export default async function render({ root, cleanup, isCurrent }) {
   const admin = isAdmin();
   const organizer = isOrganizer();  // adds games
-  const host = h("div");
-  let signature = "";
+  let running = [], signature = "";
+  // The parts of the page are shown and hidden rather than made anew, so the search keeps the focus while the list
+  // changes underneath it.
+  const emptyHost = h("div");
+  const tabsHost = h("div");
+  const none = h("p", { class: "muted", hidden: true }, t("No game is being played right now."));
+  const listHost = h("div");
+  const search = h("input", { class: "input", type: "search", placeholder: t("Search by game, world or player…"), "aria-label": t("Search the games") });
+  search.oninput = drawList;
+  const card = h("div", { class: "card flush", hidden: true },
+    h("div", { class: "row list-tools" }, h("div", { class: "grow list-search" }, search)), listHost);
 
   async function load(force = false) {
     const games = await get("/api/games");
@@ -20,24 +29,27 @@ export default async function render({ root, cleanup, isCurrent }) {
   }
 
   function draw(games) {
-    clear(host);
-    if (!games.length) {
-      host.append(empty(t("No games here yet"),
-        organizer ? t("Upload the zip of a pregenerated multiworld, or generate one from player configs.")
-              : t("You will see a game here once an administrator adds you to one."),
-        organizer ? h("button", { class: "btn primary", type: "button", onclick: action(uploadDialog) }, icon("upload", 14), t("Add a game")) : null,
-        organizer ? h("a", { class: "btn", href: "#/generate" }, icon("zap", 14), t("Generate")) : null));
-      return;
-    }
+    clear(emptyHost).append(games.length ? null : empty(t("No games here yet"),
+      organizer ? t("Upload the zip of a pregenerated multiworld, or generate one from player configs.")
+        : t("You will see a game here once an administrator adds you to one."),
+      organizer ? h("button", { class: "btn primary", type: "button", onclick: action(uploadDialog) }, icon("upload", 14), t("Add a game")) : null,
+      organizer ? h("a", { class: "btn", href: "#/generate" }, icon("zap", 14), t("Generate")) : null));
     // games that are over are in the archive (views/archive.js)
-    const running = games.filter((g) => !g.finished_at);
-    host.append(gamesTabs("games", games.length - running.length));
-    if (running.length) host.append(activeTable(running));
-    else host.append(h("p", { class: "muted" }, t("No game is being played right now.")));
+    running = games.filter((g) => !g.finished_at);
+    clear(tabsHost).append(games.length ? gamesTabs("games", games.length - running.length) : null);
+    none.hidden = !games.length || running.length > 0;
+    card.hidden = !running.length;
+    drawList();
+  }
+
+  function drawList() {
+    const q = search.value.trim().toLowerCase();
+    const list = running.filter((g) => !q || [g.name, ...g.games, ...g.my_slots.map((s) => s.name)].some((text) => text.toLowerCase().includes(q)));
+    clear(listHost).append(list.length ? activeTable(list) : h("p", { class: "muted list-none" }, t("Nothing matches.")));
   }
 
   function activeTable(games) {
-    return h("div", { class: "card flush table-wrap" }, h("table", { class: "table" },
+    return h("div", { class: "table-wrap" }, h("table", { class: "table" },
       h("thead", {}, h("tr", {}, [t("Game"), t("Status"), t("Server"), t("Players"), t("Worlds"), ""].map((text) => h("th", {}, text)))),
       h("tbody", {}, games.map((g) => h("tr", {},
         h("td", {}, h("a", { href: `#/games/${g.id}`, class: "slot-name" }, g.name),
@@ -107,7 +119,7 @@ export default async function render({ root, cleanup, isCurrent }) {
       : organizer ? t("Multiworlds you run or are part of.") : t("Multiworlds you are part of."),
       organizer ? h("button", { class: "btn primary", type: "button", onclick: action(uploadDialog) }, icon("upload", 14), t("Add a game")) : null,
       organizer ? h("a", { class: "btn", href: "#/generate" }, icon("zap", 14), t("Generate")) : null),
-    host);
+    emptyHost, tabsHost, none, card);
   await load(true);
   const timer = setInterval(() => { if (!document.hidden) load().catch(() => {}); }, 5000);
   cleanup(() => clearInterval(timer));

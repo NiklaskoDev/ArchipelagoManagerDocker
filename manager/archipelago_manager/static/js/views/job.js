@@ -3,7 +3,7 @@ import { get, post, del, canGenerate } from "../api.js";
 import { pageHeader, jobBadge, chips, banner, badge } from "../components.js";
 import { t, tServer } from "../i18n.js";
 
-export default async function render({ root, params, cleanup, isCurrent }) {
+export default async function render({ root, params, cleanup, isCurrent, setTitle }) {
   const id = Number(params[0]);
   let job = await get(`/api/jobs/${id}`);
   const out = h("div", { class: "console job-log", tabIndex: 0, "aria-label": t("Generator output") });
@@ -15,6 +15,7 @@ export default async function render({ root, params, cleanup, isCurrent }) {
   const generates = canGenerate();
 
   function drawHead() {
+    setTitle(job.name || t("Job #{id}", { id: job.id }));
     const elapsed = job.started_at ? (job.finished_at || Date.now() / 1000) - job.started_at : 0;
     clear(head).append(
       h("div", { class: "muted small" }, job.signup ? h("a", { href: `#/signups/${job.signup.id}` }, `← ${job.signup.name}`)

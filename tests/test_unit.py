@@ -1,9 +1,11 @@
 """Pure unit tests: no server, no Archipelago."""
 import json
+import re
+from pathlib import Path
 
 import pytest
 
-from archipelago_manager import apbridge, configstore, settings, yamlform, yamlinfo
+from archipelago_manager import apbridge, configstore, ics, settings, yamlform, yamlinfo
 from archipelago_manager.config import CONFIG
 from archipelago_manager.generation import _player_file_errors, _summarize_failure
 from archipelago_manager.rooms import slot_rules
@@ -456,3 +458,26 @@ def test_custom_worlds_go_into_the_versions_they_work_with():
     assert not apbridge.works_with({"maximum_ap_version": "0.5.1"}, (0, 6, 2))
     assert apbridge.works_with({"minimum_ap_version": "0.5.0", "maximum_ap_version": "0.6.9"}, (0, 6, 2))
     assert apbridge.works_with({"minimum_ap_version": "nonsense"}, (0, 6, 2))
+
+
+def test_calendar_files_keep_to_the_standard():
+    summary = "Race; with, commas \\ and\na line break\x07" + "é" * 60
+    text = ics.event(uid="game-1-start@example.com", at=1_800_000_000, summary=summary, description="",
+                     url="https://example.com/#/games/1", remind_minutes=15)
+    assert text.startswith("BEGIN:VCALENDAR\r\n") and text.endswith("END:VCALENDAR\r\n")
+    assert "\n" not in text.replace("\r\n", "")  # every line ends in CRLF, and line breaks in values are escaped
+    # long lines go on in the next one, never longer than 75 bytes and never in the middle of a character
+    assert all(len(line.encode()) <= 75 for line in text.split("\r\n"))
+    unfolded = text.replace("\r\n ", "")
+    assert "\r\nSUMMARY:Race\\; with\\, commas \\\\ and\\na line break" + "é" * 60 + "\r\n" in unfolded
+    assert "\r\nDTSTART:20270115T080000Z\r\n" in unfolded and "\r\nTRIGGER:-PT15M\r\n" in unfolded
+    assert "DESCRIPTION:" not in unfolded.split("BEGIN:VALARM")[0]  # none given
+
+
+def test_the_chosen_light_theme_has_the_light_colors_of_the_system():
+    # style.css has them twice: for a system that asks for light, and for whoever chose light in the user menu
+    css = (Path(ics.__file__).parent / "static" / "style.css").read_text(encoding="utf-8")
+    system = re.search(r'@media \(prefers-color-scheme: light\) \{\s*:root:not\(\[data-theme="dark"\]\) \{(.*?)\}', css, re.S)
+    chosen = re.search(r':root\[data-theme="light"\] \{(.*?)\}', css, re.S)
+    colors = lambda block: re.findall(r"(--[\w-]+):\s*([^;]+);", block.group(1))  # noqa: E731
+    assert colors(system) and colors(chosen) == colors(system)

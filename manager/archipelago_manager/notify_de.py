@@ -101,6 +101,7 @@ MESSAGES = {
     "Nobody signed up.": "Niemand hat sich angemeldet.",
     "Generating the game now.": "Das Spiel wird jetzt generiert.",
     "An administrator will generate the game.": "Ein Admin generiert das Spiel.",
+    "Sign-ups for {name} close": "Anmeldung für {name} schließt",
     "Sign-ups for {name} close soon": "Anmeldung für {name} schließt bald",
     "Sign-ups close {when} ({date}).": "Die Anmeldung schließt {when} ({date}).",
     "{n} entry so far.": "Bisher {n} Anmeldung.",

@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import AliasChoices, BaseModel, Field
 
-from .. import apbridge, audit, db, mystery, signups, yamlinfo
+from .. import apbridge, audit, db, ics, mystery, notify, signups, yamlinfo
 from ..security import current_user, is_admin, manages, organizer_user
 
 router = APIRouter(prefix="/api")
@@ -176,6 +176,21 @@ def signup_detail(signup_id: int, user: sqlite3.Row = Depends(current_user)) -> 
     manager = manages(row, user)
     return {**signup_json(row, user, rows), "test": signups.test_result(row, rows) if manager else None,
             "entries": [entry_json(r, user, issues[r["id"]], errors.get(r["id"]), manager=manager) for r in rows]}
+
+
+@router.get("/signups/{signup_id}/deadline.ics")
+def deadline_calendar(signup_id: int, request: Request, lang: str = "en", user: sqlite3.Row = Depends(current_user)):
+    """The deadline as a calendar file, reminding a day before (an hour, if it is closer than a day and a half)."""
+    row = _get(signup_id)
+    if not row["deadline"]:
+        raise HTTPException(404, "This round has no deadline")
+    base, host = ics.site(request)
+    soon = row["deadline"] - time.time() < signups.REMIND_BEFORE * 1.5
+    return ics.response(ics.event(
+        uid=f"signup-{signup_id}-deadline@{host}", at=row["deadline"],
+        summary=notify.tr("Sign-ups for {name} close", language=lang if lang in ics.LANGUAGES else "en", name=row["name"]),
+        description=row["description"] or "", url=f"{base}/#/signups/{signup_id}",
+        remind_minutes=60 if soon else signups.REMIND_BEFORE // 60), row["name"])
 
 
 @router.patch("/signups/{signup_id}")

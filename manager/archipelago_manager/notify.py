@@ -77,13 +77,14 @@ def md(text: Any) -> str:
 _MESSAGES = {"de": notify_de.MESSAGES, "fr": notify_fr.MESSAGES, "nl": notify_nl.MESSAGES}
 
 
-def tr(text: str, **values: Any) -> str:
-    """A message text in the language the admin chose for notifications, with the values filled in.
+def tr(text: str, *, language: str | None = None, **values: Any) -> str:
+    """A message text in the language the admin chose for notifications, with the values filled in. With `language`
+    (en, de, fr or nl) in that one instead: for a file a player downloads, in the language of their web UI.
 
     The English text is the key (notify_de.py has the German ones, and so on). Values go in as they are: escape names
     with md().
     """
-    text = _MESSAGES.get(app_settings.get_setting("notify_language"), {}).get(text, text)
+    text = _MESSAGES.get(language or app_settings.get_setting("notify_language"), {}).get(text, text)
     return text.format(**values)
 
 

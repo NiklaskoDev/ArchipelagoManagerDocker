@@ -3,7 +3,7 @@ import { h, clear, icon, toast, action, confirmDialog, openModal, fmtBytes, fmtA
 import { api, get, post, patch, del, isAdmin, canGenerate, state } from "../api.js";
 import { stateBadge, badge, chips, progressBar, copyField, copyButton, controlButtons, banner, field, checkbox, select,
          missingGamesPanel, isActive, serverOptionsForm, deliveryStatus } from "../components.js";
-import { t, tServer, plural } from "../i18n.js";
+import { t, tServer, plural, lang } from "../i18n.js";
 import { textClientSection } from "../textclient.js";
 import { activitySection } from "../feed.js";
 import { awaySummary } from "../away.js";
@@ -17,7 +17,7 @@ const FILE_KINDS = { patch: t("patch"), spoiler: t("spoiler"), yaml: t("yaml"), 
 const SLOT_STATUSES = { playing: ["ok", () => t("Playing")], stuck: ["warn", () => t("Stuck")], away: ["muted", () => t("On a break")] };
 const STATUS_NOTE_LENGTH = 140;
 
-export default async function render({ root, params, cleanup, isCurrent, query }) {
+export default async function render({ root, params, cleanup, isCurrent, query, setTitle, setUnread }) {
   const id = Number(params[0]);
   const admin = isAdmin();
   let game = await get(`/api/games/${id}`);
@@ -42,6 +42,7 @@ export default async function render({ root, params, cleanup, isCurrent, query }
   // header
   // -------------------------------------------------------------------------------------------------------------------
   function drawHeader() {
+    setTitle(game.name);
     clear(headerHost).append(
       h("div", { class: "muted small" }, h("a", { href: "#/games" }, t("← All games"))),
       h("div", { class: "page-head", style: { marginTop: "8px" } },
@@ -92,7 +93,9 @@ export default async function render({ root, params, cleanup, isCurrent, query }
       start.countdown ? t("A countdown in every client ends at the start.") : null,
     ].filter(Boolean).join(" ");
     return banner(opened ? "ok" : "info", icon("calendar", 18), h("div", { class: "grow" },
-      h("div", {}, t("Starts {date}", { date: fmtDate(start.at) }), " · ", left), h("div", { class: "muted small" }, how)));
+      h("div", {}, t("Starts {date}", { date: fmtDate(start.at) }), " · ", left), h("div", { class: "muted small" }, how)),
+      h("a", { class: "btn sm", href: `/api/games/${id}/start.ics?lang=${lang}`, title: t("A calendar file, with a reminder when the server opens") },
+        icon("calendar", 14), t("Add to calendar")));
   }
 
   // The player was reminded that the others play on without them (reminders.py)
@@ -219,7 +222,9 @@ export default async function render({ root, params, cleanup, isCurrent, query }
         game.password ? [h("dt", {}, t("Password")), h("dd", {}, copyField(game.password))] : null,
         game.my_slots.length ? [h("dt", {}, plural(game.my_slots.length, "Your slot", "Your slots")),
           h("dd", { class: "stack tight" }, game.my_slots.map((s) => h("div", { class: "row" },
-            copyField(s.name), h("span", { class: "muted" }, s.game))))] : null,
+            copyField(s.name), h("span", { class: "muted" }, s.game),
+            game.address ? h("a", { class: "btn sm", href: launchLink(s), title: t("Opens Archipelago's Launcher on this computer, connected to your slot") },
+              icon("external", 14), t("Open in Archipelago")) : null)))] : null,
         h("dt", {}, "Archipelago"), h("dd", {}, game.ap_version || "—",
           game.ap_version_own ? h("span", { class: "muted small" }, " ", t("(use a client of this version)")) : null),
         h("dt", {}, t("Progress")), h("dd", {}, progressBar(game.progress.checked, game.progress.total))),
@@ -227,7 +232,16 @@ export default async function render({ root, params, cleanup, isCurrent, query }
         ? t("In your Archipelago client, enter the server address, your slot name and the password.")
         : t("In your Archipelago client, enter the server address and your slot name."),
         game.tls && game.address ? [" ", withNodes(t("The connection is encrypted; a client that does not find that out by itself takes {address}."),
-          { address: h("span", { class: "mono" }, `wss://${game.address}`) })] : null)));
+          { address: h("span", { class: "mono" }, `wss://${game.address}`) })] : null,
+        game.my_slots.length && game.address ? [" ", t("Or press “{button}”: with Archipelago installed, its Launcher opens the client for your game already connected (the Text Client, if your game's client does not take links).",
+          { button: t("Open in Archipelago") })] : null)));
+  }
+
+  // Archipelago's Launcher opens archipelago://slot:password@host:port links (Launcher.handle_uri): it offers the clients
+  // of the game that take such a link, else the Text Client, and they connect to the slot.
+  function launchLink(slot) {
+    const password = game.password ? `:${encodeURIComponent(game.password)}` : "";
+    return `archipelago://${encodeURIComponent(slot.name)}${password}@${game.address}?game=${encodeURIComponent(slot.game)}`;
   }
 
   // -------------------------------------------------------------------------------------------------------------------
@@ -408,7 +422,9 @@ export default async function render({ root, params, cleanup, isCurrent, query }
     if (key === activityKey) return;
     activityKey = key;
     activityStops.splice(0).forEach((fn) => fn());
-    clear(activityHost).append(activitySection({ gameId: id, mySlots: names, cleanup: (fn) => activityStops.push(fn), isCurrent }));
+    setUnread(0);
+    clear(activityHost).append(activitySection({ gameId: id, mySlots: names, cleanup: (fn) => activityStops.push(fn), isCurrent,
+      onUnread: setUnread }));
   }
 
   function syncTextClient() {
@@ -488,20 +504,54 @@ export default async function render({ root, params, cleanup, isCurrent, query }
         done.length ? h("details", {}, h("summary", { class: "muted" }, t("Checked ({n})", { n: done.length })), h("div", { style: { marginTop: "8px" } }, list(done))) : null);
     }
 
+    const HINT_LABELS = { 0: t("Not found yet"), 10: t("No priority"), 20: t("Avoid"), 30: t("Priority") };
+    const HINT_CHOICES = [10, 30, 20];  // what the receiver can mark a hint as, in the order Archipelago's client has
+    const HINT_RANK = { 30: 0, 0: 1, 10: 1, 20: 2 };  // the items others need most come first
+
+    // The player marks a hint for one of their items: the player in whose world it is sees that in their client
+    function hintPicker(x) {
+      const running = game.state === "running";
+      const picker = select([...(HINT_CHOICES.includes(x.status) ? [] : [[x.status, HINT_LABELS[x.status] || HINT_LABELS[0]]]),
+        ...HINT_CHOICES.map((status) => [status, HINT_LABELS[status]])], x.status);
+      Object.assign(picker, { disabled: !running, title: running ? t("Tell the others how much you need this item") : t("Start the server first") });
+      picker.style.maxWidth = "180px";
+      picker.setAttribute("aria-label", t("Status of the hint for {item}", { item: x.item }));
+      picker.onchange = async () => {
+        picker.disabled = true;
+        try {
+          const result = await api("PUT", `/api/games/${id}/slots/${current}/hints/${x.finder_slot}/${x.location_id}`, { status: Number(picker.value) });
+          x.status = result.status;
+          toast(t("Marked {item} as {status}", { item: x.item, status: HINT_LABELS[x.status] }), "success");
+        } catch (err) {
+          toast(err.message, "error");
+        }
+        draw();
+      };
+      return picker;
+    }
+
     function hintsTab() {
-      const label = { 0: t("Not found yet"), 10: t("No priority"), 20: t("Avoid"), 30: t("Priority") };
+      const canMark = slots.find((s) => s.slot === current)?.mine;
+      const status = (x, mine) => {
+        if (x.found) return badge(t("Found"), "ok");
+        if (mine && canMark && x.location_id != null) return hintPicker(x);
+        return x.status === 30 ? badge(HINT_LABELS[30], "warn") : h("span", { class: "muted" }, HINT_LABELS[x.status] || HINT_LABELS[0]);
+      };
       const table = (hints, mine) => h("div", { class: "table-wrap" }, h("table", { class: "table" },
         h("thead", {}, h("tr", {}, [t("Item"), mine ? t("Is at") : t("For"), t("Status")].map((text) => h("th", {}, text)))),
         h("tbody", {}, hints.map((x) => h("tr", { style: x.found ? { opacity: 0.6 } : undefined },
           h("td", {}, itemLabel(x.item, x.flags)),
           h("td", {}, mine ? [x.location, h("div", { class: "muted small" }, x.finder === data.name ? t("in your own world") : t("in {player}'s world", { player: x.finder }),
             x.entrance ? ` · ${x.entrance}` : "")] : [x.receiver, h("div", { class: "muted small" }, t("at {location}", { location: x.location }), x.entrance ? ` · ${x.entrance}` : "")]),
-          h("td", {}, x.found ? badge(t("Found"), "ok") : x.status === 30 ? badge(label[30], "warn") : h("span", { class: "muted" }, label[x.status] || label[0])))))));
+          h("td", {}, status(x, mine)))))));
       const forMe = data.hints.filter((x) => x.for_me && matches(x.item, x.location, x.finder, x.entrance));
-      const inMine = data.hints.filter((x) => !x.for_me && x.in_my_world && matches(x.item, x.location, x.receiver, x.entrance));
+      const inMine = data.hints.filter((x) => !x.for_me && x.in_my_world && matches(x.item, x.location, x.receiver, x.entrance))
+        .sort((a, b) => a.found - b.found || (HINT_RANK[a.status] ?? 1) - (HINT_RANK[b.status] ?? 1));
       if (!data.hints.length) return h("p", { class: "muted" }, t("No hints yet. Ask for one in your client with !hint followed by an item name."));
       return h("div", { class: "stack" },
-        h("div", { class: "stack tight" }, h("strong", {}, t("Where your items are")), forMe.length ? table(forMe, true) : h("span", { class: "muted" }, t("None."))),
+        h("div", { class: "stack tight" }, h("strong", {}, t("Where your items are")),
+          canMark && forMe.some((x) => !x.found) ? h("span", { class: "muted small" }, t("Mark the items you need most as priority, and those you can do without as avoid: whoever has them in their world sees it in their client.")) : null,
+          forMe.length ? table(forMe, true) : h("span", { class: "muted" }, t("None."))),
         h("div", { class: "stack tight" }, h("strong", {}, t("Other players' items in your world")), inMine.length ? table(inMine, false) : h("span", { class: "muted" }, t("None."))));
     }
 
