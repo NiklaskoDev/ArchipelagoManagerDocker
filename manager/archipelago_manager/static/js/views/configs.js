@@ -1,7 +1,7 @@
 import { h, clear, icon, toast, action, confirmDialog, fmtAgo, fmtBytes, openModal } from "../util.js";
 import { api, get, post, put, del, isAdmin, state } from "../api.js";
 import { pageHeader, empty, chips, badge, missingGamesPanel, missingRomsPanel, promptMissingGames, checkbox, field,
-         defaultPlayerName } from "../components.js";
+         defaultPlayerName, configCheckDialog } from "../components.js";
 import { t, tServer, plural } from "../i18n.js";
 
 export default async function render({ root, query, isCurrent }) {
@@ -136,6 +136,9 @@ export default async function render({ root, query, isCurrent }) {
         h("td", {}, chips(c.games, c.missing_games)),
         h("td", { class: "muted" }, fmtAgo(c.updated_at)),
         h("td", { class: "actions" }, h("div", { class: "row", style: { justifyContent: "flex-end" } },
+          h("button", { class: "btn sm", type: "button", title: t("Find out whether the generator takes this config, without generating"),
+            onclick: () => configCheckDialog({ name: c.name, load: async () => (await get(`/api/configs/${c.id}`)).content,
+              editHref: `#/configs/${c.id}` }) }, icon("check", 14), t("Check")),
           h("a", { class: "btn sm", href: `#/configs/${c.id}` }, icon("edit", 14), t("Edit")),
           c.user_id === state.user.id || c.shared ? h("button", { class: "btn sm ghost", type: "button", "aria-pressed": String(c.shared),
             title: c.shared ? t("Stop sharing this config") : t("Offer this config to the other players to copy"),

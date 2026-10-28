@@ -1385,7 +1385,22 @@
   "Dark": "Sombre",
   "Search by file, player name or game…": "Rechercher par fichier, nom de joueur ou jeu…",
   "Search configs": "Rechercher dans les configs",
-  "Search the games": "Rechercher dans les parties"
+  "Search the games": "Rechercher dans les parties",
+  "Archipelago is reading the file…": "Archipelago lit le fichier…",
+  "Archipelago read the file the way the generator does, with every value a weight can pick and every game the file can roll. Nothing was generated, though: whether the items can be placed with these options only shows when a game is generated.": "Archipelago a lu le fichier comme le fait le générateur, avec chaque valeur qu'un poids peut choisir et chaque jeu que le fichier peut tirer au sort. Rien n'a été généré pour autant : on ne voit si les objets peuvent être placés avec ces options qu'en générant une partie.",
+  "Archipelago takes this config.": "Archipelago accepte cette config.",
+  "Check {name}": "Vérifier {name}",
+  "Check": "Vérifier",
+  "Find out whether the generator takes the file as it is in the editor, saved or not": "Savoir si le générateur accepte le fichier tel qu'il est dans l'éditeur, enregistré ou non",
+  "Find out whether the generator takes this config, without generating": "Savoir si le générateur accepte cette config, sans générer",
+  "Fine": "Correct",
+  "Fix what is listed below, then check again.": "Corrigez ce qui est indiqué ci-dessous, puis vérifiez à nouveau.",
+  "Have a look at the warnings, though.": "Jetez tout de même un œil aux avertissements.",
+  "The generator would stop at this config.": "Le générateur s'arrêterait sur cette config.",
+  "{n} error": "{n} erreur",
+  "{n} errors": "{n} erreurs",
+  "{n} warning": "{n} avertissement",
+  "{n} warnings": "{n} avertissements"
  },
  "server": {
   " (line {0})": " (ligne {0})",
@@ -1773,7 +1788,9 @@
   "The server refused to change the hint: {0}": "Le serveur a refusé de modifier l'indice : {0}",
   "This game has no planned start": "Cette partie n'a pas de départ prévu",
   "This item was found already": "Cet objet a déjà été trouvé",
-  "This round has no deadline": "Cette session n'a pas de date limite"
+  "This round has no deadline": "Cette session n'a pas de date limite",
+  "Your last check is not done yet. Check again when it is.": "Votre dernière vérification n'est pas terminée. Vérifiez à nouveau quand elle le sera.",
+  "Two players in this file are named '{0}'. Player names must be unique.": "Deux joueurs de ce fichier s'appellent « {0} ». Les noms de joueur doivent être uniques."
  },
  "server_extra": [
   " (line {0})",
@@ -1846,6 +1863,7 @@
   "Enter the certificate with its full path in the container, e.g. /config/tls/fullchain.pem",
   "Enter the key with its full path in the container, e.g. /config/tls/privkey.pem",
   "Document #{0}: the player name has no visible characters, so nobody can read it",
-  "Document #{0}: the player name contains characters that change the direction of the text, so it shows differently from how it is spelled"
+  "Document #{0}: the player name contains characters that change the direction of the text, so it shows differently from how it is spelled",
+  "Two players in this file are named '{0}'. Player names must be unique."
  ]
 }

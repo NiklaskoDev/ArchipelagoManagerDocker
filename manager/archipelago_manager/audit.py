@@ -99,6 +99,7 @@ SKIP = {("POST", "/api/configs"), ("POST", "/api/configs/text"), ("POST", "/api/
         ("POST", "/api/games/{game_id}/wake"), ("POST", "/api/games/{game_id}/visit"),
         ("PUT", "/api/games/{game_id}/slots/{slot}/status"), ("PUT", "/api/games/{game_id}/slots/{slot}/hints/{finder}/{location}"),
         ("POST", "/api/configs/form/read"), ("POST", "/api/configs/form/write"), ("POST", "/api/configs/roll"),
+        ("POST", "/api/configs/check"),
         ("POST", "/api/signups/{signup_id}/entries"), ("POST", "/api/signups/{signup_id}/entries/{entry_id}/refresh"),
         ("POST", "/api/signups/{signup_id}/mystery-entries"), ("POST", "/api/mystery-weights")}
 # Recorded for everyone, not only administrators

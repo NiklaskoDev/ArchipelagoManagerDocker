@@ -367,6 +367,45 @@ export function promptMissingGames(items, onChange) {
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
+// checking a config (POST /api/configs/check, configcheck.py)
+// ---------------------------------------------------------------------------------------------------------------------
+// Whether the generator takes a config, as Archipelago reads it. Opens at once and fills in when Archipelago answers,
+// which takes a few seconds. `load` gives the file's text; `editHref` adds a way to the editor.
+export function configCheckDialog({ name, load, editHref = null }) {
+  const body = h("div", { class: "stack" }, loading(t("Archipelago is reading the file…")));
+  const modal = openModal({ title: t("Check {name}", { name }), wide: true, body,
+    actions: [editHref ? h("a", { class: "btn", href: editHref, onclick: () => modal.close() }, icon("edit", 14), t("Edit")) : null,
+      h("button", { class: "btn", type: "button", onclick: () => modal.close() }, t("Close"))].filter(Boolean) });
+  (async () => {
+    try {
+      drawConfigCheck(body, await post("/api/configs/check", { content: await load() }));
+    } catch (err) {
+      clear(body).append(banner("error", icon("alert", 16), h("div", { class: "grow" }, err.message)));
+    }
+  })();
+}
+
+function drawConfigCheck(body, r) {
+  // the manager's own messages are translated; Archipelago's stay in its words
+  const list = (items, kind) => (items.length
+    ? h("ul", { class: `check-list ${kind}` }, items.map((text) => h("li", {}, tServer(text)))) : null);
+  const fileWarnings = [...r.warnings, ...r.missing_roms.map((game) => t("{game} needs its base ROM on the server before it can be generated.", { game }))];
+  const warned = fileWarnings.length || r.players.some((p) => p.warnings.length);
+  clear(body).append(
+    r.ok ? banner("ok", icon("check", 18), h("div", { class: "grow" }, h("strong", {}, t("Archipelago takes this config.")),
+      warned ? ` ${t("Have a look at the warnings, though.")}` : null))
+      : banner("error", icon("alert", 18), h("div", { class: "grow" }, h("strong", {}, t("The generator would stop at this config.")),
+        " ", t("Fix what is listed below, then check again."))),
+    list(r.errors, "bad"), list(fileWarnings, "warn"),
+    r.players.map((p) => h("div", { class: "stack tight" },
+      h("div", { class: "row" }, h("strong", { class: "slot-name" }, p.name), h("span", { class: "muted" }, p.games.join(", ")),
+        p.errors.length ? badge(plural(p.errors.length, "{n} error", "{n} errors"), "bad")
+          : p.warnings.length ? badge(plural(p.warnings.length, "{n} warning", "{n} warnings"), "warn") : badge(t("Fine"), "ok")),
+      list(p.errors, "bad"), list(p.warnings, "warn"))),
+    h("p", { class: "muted small" }, t("Archipelago read the file the way the generator does, with every value a weight can pick and every game the file can roll. Nothing was generated, though: whether the items can be placed with these options only shows when a game is generated.")));
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
 // games
 // ---------------------------------------------------------------------------------------------------------------------
 export function isActive(game) {

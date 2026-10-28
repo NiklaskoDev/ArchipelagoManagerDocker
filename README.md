@@ -18,8 +18,9 @@ players log in to keep their YAML configs, see their games and download their pa
   into the library of the user who owns the slot.
 - **Stores configs per user.** Everyone has a private library of player YAMLs: upload one, or create it in a form with
   every option of the game (custom games included), like the player options page on archipelago.gg. The YAML can be
-  edited directly too, or started from the documented template. Players can share a config, and the others copy it
-  into their own library with their own player name.
+  edited directly too, or started from the documented template. *Check* asks Archipelago whether the generator would
+  take a config, and lists every problem it finds, before anyone generates. Players can share a config, and the others
+  copy it into their own library with their own player name.
 - **Generates games.** Pick configs, choose spoiler level, seed, race mode, plando and an optional `meta.yaml`, and
   generate with the real `Generate.py`. Options you use again (a race setup, an async one) are saved as templates. The result is imported as a game, with slots linked to the configs' owners, and
   can be hosted straight away. Jobs queue, show a live log and can be cancelled. *Generate again* repeats a game or a
@@ -148,6 +149,13 @@ and the game page marks the address *encrypted*. A client that cannot find out b
 1. **My configs** → upload your YAML, or *New config* and pick your game: its options open as a form (see
    [The options form](#the-options-form)). The editor checks the file when you save and tells you what is wrong. The
    player name is the slot name in the game. The search above the list finds a config by its file, player name or game.
+   - *Check* next to a config asks Archipelago whether the generator would take it, without generating anything, and
+     lists what it finds in Archipelago's own words: option values it does not take (with what it does), item and
+     location names it does not know (with the name it guesses you meant), games that are not installed, and, as
+     warnings, option names it would silently ignore, such as a typo. Unlike a generation, it does not stop at the
+     first problem, and it tries every value and every game the file gives a weight to, not just one roll. In the
+     editor, *Check* takes the file as it is there, saved or not. What only shows when a seed is made, such as items
+     that cannot be placed with these options, is beyond it.
 2. When an admin generates a game with your config, or uploads a game with a slot of that name, it appears under
    **Games** with the server address, password, your slot name and your files. If the game allows it you can *claim*
    a slot yourself ("This is mine"). The search above the list finds a game by its name, its worlds or your slot name.

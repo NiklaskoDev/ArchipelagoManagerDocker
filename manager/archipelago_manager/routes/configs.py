@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Res
 from fastapi.responses import FileResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 
-from .. import apbridge, configstore, db, mystery, yamlform, yamlinfo
+from .. import apbridge, configcheck, configstore, db, mystery, yamlform, yamlinfo
 from ..configstore import config_path
 from ..security import current_user, is_admin
 
@@ -305,6 +305,26 @@ async def roll_config(body: RollRequest, user: sqlite3.Row = Depends(current_use
         raise HTTPException(400, f"This file cannot be rolled: {e}") from None
     finally:
         _rolling.discard(user["id"])
+
+
+_checking: set[int] = set()  # one check at a time each, as with rolls
+
+
+@router.post("/configs/check")
+async def check_config(body: RollRequest, user: sqlite3.Row = Depends(current_user)) -> dict:
+    """Whether the generator takes a config, and what Archipelago says about it, without generating (configcheck.py).
+    The editor sends the text it holds, saved or not."""
+    if user["id"] in _checking:
+        raise HTTPException(429, "Your last check is not done yet. Check again when it is.")
+    if apbridge.STATE.info is None:
+        raise HTTPException(503, f"Archipelago is unavailable: {apbridge.STATE.error or 'not loaded yet'}")
+    _checking.add(user["id"])
+    try:
+        return await configcheck.check(body.content)
+    except apbridge.APBridgeError as e:
+        raise HTTPException(502, f"Archipelago could not check the file: {e}") from None
+    finally:
+        _checking.discard(user["id"])
 
 
 @router.post("/configs/form/read")

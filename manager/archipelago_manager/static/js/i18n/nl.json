@@ -1385,7 +1385,22 @@
   "Dark": "Donker",
   "Search by file, player name or game…": "Zoeken op bestand, spelersnaam of spel…",
   "Search configs": "Configs doorzoeken",
-  "Search the games": "De spellen doorzoeken"
+  "Search the games": "De spellen doorzoeken",
+  "Archipelago is reading the file…": "Archipelago leest het bestand…",
+  "Archipelago read the file the way the generator does, with every value a weight can pick and every game the file can roll. Nothing was generated, though: whether the items can be placed with these options only shows when a game is generated.": "Archipelago heeft het bestand gelezen zoals de generator dat doet, met elke waarde die een gewicht kan kiezen en elk spel dat het bestand kan gooien. Er is wel niets gegenereerd: of de items met deze opties geplaatst kunnen worden, blijkt pas als er een spel gegenereerd wordt.",
+  "Archipelago takes this config.": "Archipelago accepteert deze config.",
+  "Check {name}": "{name} controleren",
+  "Check": "Controleren",
+  "Find out whether the generator takes the file as it is in the editor, saved or not": "Nagaan of de generator het bestand accepteert zoals het in de editor staat, opgeslagen of niet",
+  "Find out whether the generator takes this config, without generating": "Nagaan of de generator deze config accepteert, zonder te genereren",
+  "Fine": "In orde",
+  "Fix what is listed below, then check again.": "Los op wat hieronder staat en controleer daarna opnieuw.",
+  "Have a look at the warnings, though.": "Kijk wel even naar de waarschuwingen.",
+  "The generator would stop at this config.": "De generator zou op deze config vastlopen.",
+  "{n} error": "{n} fout",
+  "{n} errors": "{n} fouten",
+  "{n} warning": "{n} waarschuwing",
+  "{n} warnings": "{n} waarschuwingen"
  },
  "server": {
   " (line {0})": " (regel {0})",
@@ -1773,7 +1788,9 @@
   "The server refused to change the hint: {0}": "De server weigerde de hint te wijzigen: {0}",
   "This game has no planned start": "Dit spel heeft geen geplande start",
   "This item was found already": "Dit item is al gevonden",
-  "This round has no deadline": "Deze ronde heeft geen deadline"
+  "This round has no deadline": "Deze ronde heeft geen deadline",
+  "Your last check is not done yet. Check again when it is.": "Je laatste controle is nog niet klaar. Controleer opnieuw zodra die klaar is.",
+  "Two players in this file are named '{0}'. Player names must be unique.": "Twee spelers in dit bestand heten \"{0}\". Spelersnamen moeten uniek zijn."
  },
  "server_extra": [
   " (line {0})",
@@ -1846,6 +1863,7 @@
   "Enter the certificate with its full path in the container, e.g. /config/tls/fullchain.pem",
   "Enter the key with its full path in the container, e.g. /config/tls/privkey.pem",
   "Document #{0}: the player name has no visible characters, so nobody can read it",
-  "Document #{0}: the player name contains characters that change the direction of the text, so it shows differently from how it is spelled"
+  "Document #{0}: the player name contains characters that change the direction of the text, so it shows differently from how it is spelled",
+  "Two players in this file are named '{0}'. Player names must be unique."
  ]
 }
