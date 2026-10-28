@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from helpers import APClient, make_game, wait_for, wait_state
+from helpers import APClient, make_game, save_now, wait_for, wait_state
 
 pytestmark = pytest.mark.ap
 
@@ -43,12 +43,17 @@ def test_a_spectator_link_shows_the_game_and_nothing_to_play_it_with(ap_server, 
             assert client.connected
             client.ws.send(json.dumps([{"cmd": "Say", "text": "my secret plan"}]))
             client.check(2)
+            # who is online comes from the server's save, which it writes once a minute, or at once when asked
+            save_now(admin, gid)
+            assert anyone.get(f"/api/watch/{link['token']}").json()["players"][0]["status"] == "online"
+        # once the feed has the player leaving, the server knows, and its next save says so
         feed = wait_for(lambda: (f := anyone.get(f"/api/watch/{link['token']}/activity").json())["entries"]
-                        and any(e["kind"] == "item" for e in f["entries"]) and f, timeout=30)
+                        and {"item", "part"} <= {e["kind"] for e in f["entries"]} and f, timeout=30)
         kinds = {e["kind"] for e in feed["entries"]}
         assert "item" in kinds and "join" in kinds and "chat" not in kinds
         assert "my secret plan" not in json.dumps(feed)
         assert "my secret plan" in json.dumps(admin.get(f"/api/games/{gid}/activity").json())  # the players see it
+        save_now(admin, gid)
         assert anyone.get(f"/api/watch/{link['token']}").json()["players"][0]["status"] == "offline"
 
         # a new link ends the old one, and the link can be taken away
