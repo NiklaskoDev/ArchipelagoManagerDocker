@@ -104,6 +104,18 @@ async function route() {
     clear(view).append(banner("error", icon("alert", 18), h("div", {}, h("strong", {}, t("Something went wrong.")), " ", err.message || String(err)),
       h("button", { class: "btn sm", type: "button", onclick: route }, t("Retry"))));
   }
+  if (token === navToken) repaintView();
+}
+
+// Safari on iPhones can leave a piece of the page before on screen once the new one is drawn: a tile of the page that
+// it does not paint anew (seen going from the dashboard to Sign-ups through the menu). Giving the view a layer of its
+// own for a moment makes Safari paint all of it, and the page behind it once the layer goes. Other browsers merely
+// paint it once more. Toasts, dialogs and the menus are not inside the view, so the transform moves nothing.
+function repaintView() {
+  const shown = view;
+  if (!shown) return;
+  shown.style.transform = "translateZ(0)";
+  requestAnimationFrame(() => requestAnimationFrame(() => { shown.style.transform = ""; }));
 }
 
 function highlightNav(section) {
