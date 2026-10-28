@@ -11,7 +11,8 @@ The rules that keep it safe:
 - Discord accounts are matched by their numeric id only. A Discord account is never attached to an existing account
   because a name matches; linking happens only for the person signed in, in a flow they started.
 - Disabled users cannot sign in this way either. Accounts created through Discord are regular users, and only when an
-  admin allows it; an admin can also require membership in one Discord server.
+  admin allows it, or with the role of an invite link an admin made (invites.py); an admin can also require membership
+  in one Discord server.
 """
 from __future__ import annotations
 
@@ -58,10 +59,11 @@ class DiscordError(Exception):
 @dataclass
 class _Pending:
     browser_hash: str
-    mode: str  # "login" or "link"
+    mode: str  # "login", "link" or "invite"
     user_id: int | None
     next: str
     created: float
+    invite_id: int | None = None  # the invite a new account is made with (never its token)
 
 
 _pending: dict[str, _Pending] = {}
@@ -76,7 +78,7 @@ def _hash(value: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()
 
 
-def begin(mode: str, *, user_id: int | None = None, next_page: str = "") -> tuple[str, str]:
+def begin(mode: str, *, user_id: int | None = None, next_page: str = "", invite_id: int | None = None) -> tuple[str, str]:
     """Starts a flow. Returns the Discord address to send the browser to and the value for the state cookie."""
     cfg = app_settings.get_settings()
     if not app_settings.discord_login_ready(cfg):
@@ -88,7 +90,7 @@ def begin(mode: str, *, user_id: int | None = None, next_page: str = "") -> tupl
             del _pending[key]
         while len(_pending) >= MAX_PENDING:  # a flood of starts only pushes out the oldest unfinished ones
             del _pending[next(iter(_pending))]
-        _pending[state] = _Pending(_hash(browser), mode, user_id, safe_next(next_page), now)
+        _pending[state] = _Pending(_hash(browser), mode, user_id, safe_next(next_page), now, invite_id)
     scopes = "identify guilds" if cfg["discord_guild_id"] else "identify"
     query = urllib.parse.urlencode({"response_type": "code", "client_id": cfg["discord_client_id"], "scope": scopes,
                                     "state": state, "redirect_uri": redirect_uri(), "prompt": "none"})
@@ -200,15 +202,17 @@ def _free_username(wanted: str) -> str:
     return name
 
 
-def sign_up(identity: dict) -> int:
-    """A new regular user for a Discord account nobody linked yet. Never takes over an existing name."""
+def sign_up(identity: dict, role: str = "user", invite_id: int | None = None) -> int:
+    """A new user for a Discord account nobody linked yet: a regular one, or with the role of the invite it was made
+    with. Never takes over an existing name."""
     for _attempt in range(5):
         username = _free_username(identity["username"] or identity["name"])
         try:
             # An empty password hash matches no password: the account signs in with Discord until a password is set.
             return db.execute("INSERT INTO users(username, password_hash, role, created_at, discord_id, discord_name, "
-                              "discord_avatar) VALUES (?, '', 'user', ?, ?, ?, ?)",
-                              (username, time.time(), identity["id"], identity["name"], identity["avatar"]))
+                              "discord_avatar, invite_id) VALUES (?, '', ?, ?, ?, ?, ?, ?)",
+                              (username, role, time.time(), identity["id"], identity["name"], identity["avatar"],
+                               invite_id))
         except sqlite3.IntegrityError:  # the same name or Discord account was taken a moment ago
             existing = user_for(identity["id"])
             if existing is not None:

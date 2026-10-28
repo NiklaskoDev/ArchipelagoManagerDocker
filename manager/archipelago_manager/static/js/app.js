@@ -1,4 +1,4 @@
-import { h, clear, icon, toast, openModal, action, confirmDialog } from "./util.js";
+import { h, clear, icon, toast, openModal, action, confirmDialog, fmtDate } from "./util.js";
 import { api, state, refreshStatus, setUnauthorizedHandler, isAdmin, canGenerate, post, put, ApiError } from "./api.js";
 import { banner, loading, field, checkbox } from "./components.js";
 import { t, plural, lang, locale, LANGUAGES, setLanguage } from "./i18n.js";
@@ -59,6 +59,11 @@ async function route() {
       history.replaceState(null, "", currentHash);
       return;
     }
+  }
+  if (linkInAddress()) {  // an invite or reset link pasted while the app is open
+    runCleanups();
+    renderLinkPage(linkInAddress());
+    return;
   }
   currentHash = hash;
   const [path, queryString = ""] = hash.slice(1).split("?");
@@ -470,6 +475,7 @@ const DISCORD_ERRORS = {
   not_member: () => t("Only members of this server's Discord community can sign in with Discord."),
   taken: () => t("This Discord account is already linked to another user."),
   disabled: () => t("Signing in with Discord is not set up on this server."),
+  invite: () => t("This invite link cannot be used any more: it expired, was used up or was revoked. Ask whoever sent it for a new one."),
   discord: () => t("Discord did not accept the sign-in. Try again; if it keeps happening, an administrator should check the client ID and secret."),
   unreachable: () => t("Discord could not be reached. Try again in a moment."),
   busy: () => t("Too many sign-in attempts. Try again in a few minutes."),
@@ -533,7 +539,7 @@ function renderAuth(notice) {
     confirm ? field(t("Repeat password"), confirm) : null,
     error, submit);
     clear(card).append(
-      h("div", { class: "auth-brand" }, h("img", { class: "brand-mark large", src: "favicon.svg", alt: "" }), h("h1", {}, "Archipelago Manager")),
+      authBrand(),
       mode === "setup" ? h("p", { class: "muted" }, t("Welcome! Create the administrator account to get started.")) : null,
       form,
       mode !== "setup" && status.discord_login ? [h("div", { class: "auth-or" }, t("or")), discordButton(status)] : null,
@@ -557,12 +563,118 @@ function discordButton(status) {
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
+// invite and reset links (#/invite/<token>, #/reset/<token>): an administrator hands them out (views/admin-users.js).
+// The token stays in the fragment, which the browser never sends to the server; the page posts it.
+// ---------------------------------------------------------------------------------------------------------------------
+function linkInAddress() {
+  const match = /^#\/(invite|reset)\/([A-Za-z0-9_-]{20,128})$/.exec(location.hash);
+  return match ? { kind: match[1], token: match[2] } : null;
+}
+
+// Done with the link: out of the address and the history, on to the app
+async function leaveLink(notice) {
+  history.replaceState(null, "", "#/");
+  await boot();
+  if (notice) toast(notice, "success", 9000);
+}
+
+function authBrand() {
+  return h("div", { class: "auth-brand" }, h("img", { class: "brand-mark large", src: "favicon.svg", alt: "" }), h("h1", {}, "Archipelago Manager"));
+}
+
+async function renderLinkPage({ kind, token }) {
+  view = null;
+  setTitle(kind === "invite" ? t("Invitation") : t("New password"));
+  const card = h("div", { class: "auth-card card" }, loading());
+  clear(app).append(h("div", { class: "auth-wrap" }, card));
+  let info;
+  try {
+    info = await post(`/api/auth/${kind}`, { token });
+  } catch (err) {
+    clear(card).append(authBrand(), banner("error", icon("alert", 16), h("div", { class: "grow" }, err.message)),
+      h("p", { class: "center small" }, h("a", { href: "#/", onclick: (e) => { e.preventDefault(); leaveLink(); } },
+        state.user ? t("Go to the dashboard") : t("Go to the sign-in page"))),
+      languagePicker());
+    return;
+  }
+  // someone signed in who opens the link ends up signed in as its account
+  const signedIn = state.user && !(kind === "reset" && state.user.username === info.username)
+    ? banner("info", icon("user", 16), h("div", { class: "grow small" }, t("You are signed in as {name}. Going on signs you in as the account this link is for instead.", { name: state.user.username }))) : null;
+  const password = h("input", { class: "input", type: "password", autocomplete: "new-password", required: true, minLength: 8 });
+  const again = h("input", { class: "input", type: "password", autocomplete: "new-password", required: true });
+  const error = h("div", { class: "form-error", role: "alert" });
+  const checked = () => {
+    if (password.value !== again.value) throw new Error(t("The passwords do not match"));
+  };
+  if (kind === "reset") {
+    const submit = h("button", { class: "btn primary block", type: "submit" }, t("Set password"));
+    const form = h("form", { class: "stack", onsubmit: async (e) => {
+      e.preventDefault();
+      error.textContent = "";
+      submit.disabled = true;
+      try {
+        checked();
+        const result = await post("/api/auth/reset/use", { token, password: password.value });
+        const revoked = result.tokens_revoked ? ` ${plural(result.tokens_revoked, "{n} API token was revoked.", "{n} API tokens were revoked.")}` : "";
+        await leaveLink(t("Your new password is set. You were signed out everywhere else.") + revoked);
+      } catch (err) {
+        error.textContent = err.message;
+        submit.disabled = false;
+      }
+    } },
+    // the name for the browser's password manager, which saves the new password with it
+    h("input", { type: "text", autocomplete: "username", value: info.username, hidden: true, readOnly: true }),
+    field(t("New password"), password, t("At least 8 characters")), field(t("Repeat new password"), again), error, submit);
+    clear(card).append(authBrand(), h("p", {}, t("Set a new password for {name}.", { name: info.username })), signedIn, form, languagePicker());
+    password.focus();
+    return;
+  }
+
+  const username = h("input", { class: "input", autocomplete: "username", required: true });
+  const submit = h("button", { class: "btn primary block", type: "submit" }, t("Create account"));
+  const form = h("form", { class: "stack", onsubmit: async (e) => {
+    e.preventDefault();
+    error.textContent = "";
+    submit.disabled = true;
+    try {
+      checked();
+      await post("/api/auth/invite/join", { token, username: username.value, password: password.value });
+      await leaveLink(t("Welcome! Your account is ready."));
+    } catch (err) {
+      error.textContent = err.message;
+      submit.disabled = false;
+    }
+  } },
+  field(t("Username"), username), field(t("Password"), password, t("At least 8 characters")), field(t("Repeat password"), again), error, submit);
+  // with Discord: the invite goes along through Discord's sign-in, which comes back on the server's own address
+  const discord = info.discord ? h("button", { class: "btn discord block", type: "button", onclick: action(async () => {
+    if (!onSiteAddress()) {
+      openOnSiteAddress(t("Discord sends you back to the address this server is set up with, so open the invite there:"));
+      return;
+    }
+    location.href = (await post("/api/auth/invite/discord", { token })).url;
+  }) }, icon("login", 16), t("Sign up with Discord")) : null;
+  clear(card).append(authBrand(),
+    h("p", {}, info.invited_by ? t("{name} invites you to this Archipelago server.", { name: info.invited_by }) : t("You are invited to this Archipelago server."),
+      info.role === "organizer" ? ` ${t("Your account will be an organizer's: you add games, generate them and run sign-up rounds.")}` : ""),
+    info.note ? h("p", { class: "muted small" }, `“${info.note}”`) : null,
+    signedIn, form, discord ? [h("div", { class: "auth-or" }, t("or")), discord] : null,
+    h("p", { class: "muted center small" }, t("The invitation is valid until {date}.", { date: fmtDate(info.expires_at) })),
+    languagePicker());
+  username.focus();
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
 export async function boot() {
   const discordResult = takeDiscordResult();
   try {
     await refreshStatus();
   } catch (err) {
     clear(app).append(h("div", { class: "auth-wrap" }, banner("error", t("Cannot reach the server: {error}", { error: err.message }))));
+    return;
+  }
+  if (linkInAddress()) {
+    await renderLinkPage(linkInAddress());
     return;
   }
   if (!state.user) {
