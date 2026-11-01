@@ -1,7 +1,7 @@
 import { h, clear, fmtDate, fmtSpan } from "../util.js";
-import { get } from "../api.js";
-import { pageHeader, empty, chips, badge, gamesTabs } from "../components.js";
-import { t } from "../i18n.js";
+import { get, del } from "../api.js";
+import { pageHeader, empty, chips, badge, gamesTabs, gameSelection } from "../components.js";
+import { t, plural } from "../i18n.js";
 import { every } from "../live.js";
 
 // Games that are over: every player reached their goal ("finished"), or they were moved here before that ("aborted")
@@ -17,8 +17,16 @@ export default async function render({ root, cleanup, isCurrent }) {
   search.oninput = draw;
   // made once, so the search keeps the focus while the list below it is drawn anew
   const listHost = h("div");
+  // old games away, several at once, for whoever runs them
+  const selection = gameSelection({
+    onDone: () => load(true),
+    actions: [{ label: t("Delete"), icon: "trash", danger: true, run: (g) => del(`/api/games/${g.id}`),
+      confirm: (n) => ({ title: plural(n, "Delete {n} game?", "Delete {n} games?"), confirmText: t("Delete"),
+        text: t("Each game's multiworld, save and the files of every player are deleted. This cannot be undone.") }),
+      done: (n) => plural(n, "{n} game deleted", "{n} games deleted") }],
+  });
   const card = h("div", { class: "card flush" },
-    h("div", { class: "row spread list-tools" }, filters, h("div", { class: "grow list-search" }, search)), listHost);
+    h("div", { class: "row spread list-tools" }, filters, h("div", { class: "grow list-search" }, search)), selection.bar, listHost);
 
   async function load(force = false) {
     const all = await get("/api/games");
@@ -46,10 +54,12 @@ export default async function render({ root, cleanup, isCurrent }) {
     const q = search.value.trim().toLowerCase();
     const list = games.filter((g) => (shown === "all" || g.outcome === shown)
       && (!q || `${g.name} ${g.games.join(" ")} ${g.my_slots.map((s) => s.name).join(" ")}`.toLowerCase().includes(q)));
+    selection.list(list);
     clear(listHost).append(
       list.length ? h("div", { class: "table-wrap" }, h("table", { class: "table" },
-        h("thead", {}, h("tr", {}, [t("Game"), t("Outcome"), t("Ended"), t("Time played"), t("Goals reached"), t("Worlds"), ""].map((text) => h("th", {}, text)))),
+        h("thead", {}, h("tr", {}, selection.head(), [t("Game"), t("Outcome"), t("Ended"), t("Time played"), t("Goals reached"), t("Worlds"), ""].map((text) => h("th", {}, text)))),
         h("tbody", {}, list.map((g) => h("tr", {},
+          selection.cell(g),
           h("td", {}, h("a", { href: `#/games/${g.id}`, class: "slot-name" }, g.name),
             g.my_slots.length ? h("div", { class: "muted small" }, t("You: {names}", { names: g.my_slots.map((s) => s.name).join(", ") })) : null),
           h("td", {}, g.outcome === "finished" ? badge(t("Finished"), "ok") : badge(t("Aborted"), "muted")),

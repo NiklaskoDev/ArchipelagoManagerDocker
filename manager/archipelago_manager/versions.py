@@ -18,7 +18,9 @@ import logging
 import os
 import re
 import shutil
+import signal
 import tarfile
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -46,9 +48,11 @@ class VersionError(Exception):
 
 class _State:
     task: asyncio.Task | None = None
+    version: str | None = None  # the one being installed
 
 
 STATE = _State()
+_CANCEL = threading.Event()  # tells the download, which runs in a thread of its own, to stop
 
 
 def root() -> Path:
@@ -143,7 +147,19 @@ def start_install(version: str) -> None:
     db.execute("INSERT INTO ap_versions(version, status, created_at) VALUES (?, 'installing', ?) "
                "ON CONFLICT(version) DO UPDATE SET status = 'installing', error = NULL, created_at = excluded.created_at",
                (version, time.time()))
+    _CANCEL.clear()
+    STATE.version = version
     STATE.task = asyncio.create_task(_install(version))
+
+
+async def cancel(version: str) -> None:
+    """Stops an installation that is under way: its processes end, and what it had made is removed."""
+    task = STATE.task
+    if not task or task.done() or STATE.version != version:
+        raise VersionError(f"Archipelago {version} is not being installed", 409)
+    _CANCEL.set()
+    task.cancel()
+    await asyncio.wait({task}, timeout=60)  # the clean-up, before the listing that answers says how it ended
 
 
 async def _install(version: str) -> None:
@@ -190,6 +206,13 @@ async def _install(version: str) -> None:
                        "WHERE version = ?", (time.time(), size, version))
             note(f"done: {len(info['games'])} games")
             log.info("Installed Archipelago %s", version)
+        except asyncio.CancelledError:  # cancel() or the manager shutting down: nothing half-made stays
+            note("stopped")
+            log.info("Installing Archipelago %s was stopped", version)
+            apbridge.EXTRA.pop(version, None)
+            await asyncio.to_thread(shutil.rmtree, folder, True)
+            db.execute("UPDATE ap_versions SET status = 'failed', error = 'The installation was stopped' WHERE version = ?",
+                       (version,))
         except Exception as e:  # noqa: BLE001 - whatever went wrong, the version is marked failed and says why
             message = e.message if isinstance(e, VersionError) else (str(e) or type(e).__name__)
             if isinstance(e, apbridge.APBridgeError):
@@ -235,15 +258,14 @@ async def _run(out: BinaryIO, cmd: list[str], *, cwd: Path | None = None) -> Non
                                                 env=env, start_new_session=True)
     try:
         code = await asyncio.wait_for(proc.wait(), STEP_TIMEOUT)
-    except TimeoutError:
-        with contextlib.suppress(ProcessLookupError):
-            proc.kill()
+    except (TimeoutError, asyncio.CancelledError) as e:
+        # the whole process group (its own session): pip's compilers and build steps too, not only pip
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            os.killpg(proc.pid, signal.SIGKILL)
         await proc.wait()
+        if isinstance(e, asyncio.CancelledError):
+            raise
         raise VersionError(f"{Path(cmd[0]).name} took longer than {STEP_TIMEOUT // 60} minutes") from None
-    except asyncio.CancelledError:
-        with contextlib.suppress(ProcessLookupError):
-            proc.kill()
-        raise
     if code != 0:
         raise VersionError(f"{' '.join(Path(part).name for part in cmd[:4])} failed (exit code {code}); see the log")
 
@@ -257,6 +279,8 @@ def _download(url: str, target: Path) -> None:
         with urllib.request.urlopen(request, timeout=60) as response, open(archive, "wb") as f:
             size = 0
             while chunk := response.read(1 << 20):
+                if _CANCEL.is_set():
+                    raise VersionError("The installation was stopped")
                 size += len(chunk)
                 if size > MAX_DOWNLOAD_BYTES:
                     raise VersionError("The download is unreasonably large")

@@ -1,8 +1,8 @@
 import { h, clear, icon, openModal, toast, action, setText } from "../util.js";
-import { api, get, isAdmin, isOrganizer } from "../api.js";
+import { api, get, post, del, isAdmin, isOrganizer } from "../api.js";
 import { pageHeader, empty, stateBadge, chips, badge, controlButtons, copyField, checkbox, field, promptMissingGames, apVersionField,
-  gamesTabs, canLaunch, launchButton } from "../components.js";
-import { t, tServer } from "../i18n.js";
+  gamesTabs, canLaunch, launchButton, gameSelection } from "../components.js";
+import { t, tServer, plural } from "../i18n.js";
 import { every } from "../live.js";
 
 export default async function render({ root, cleanup, isCurrent }) {
@@ -17,8 +17,26 @@ export default async function render({ root, cleanup, isCurrent }) {
   const listHost = h("div");
   const search = h("input", { class: "input", type: "search", placeholder: t("Search by game, world or player…"), "aria-label": t("Search the games") });
   search.oninput = drawList;
+  // several games at once, for whoever runs them
+  const selection = gameSelection({
+    onDone: () => load(true),
+    actions: [
+      { label: t("Stop"), icon: "stop", run: (g) => post(`/api/games/${g.id}/stop`),
+        confirm: (n) => ({ title: plural(n, "Stop {n} game?", "Stop {n} games?"), confirmText: t("Stop"),
+          text: t("Their servers stop. Players can no longer connect until a game is started again.") }),
+        done: (n) => plural(n, "{n} game stopped", "{n} games stopped") },
+      { label: t("Move to the archive"), icon: "package", run: (g) => post(`/api/games/${g.id}/archive`, { archived: true }),
+        confirm: (n) => ({ title: plural(n, "Move {n} game to the archive?", "Move {n} games to the archive?"), confirmText: t("Move to the archive"),
+          text: t("Their servers are stopped. A game where not every player reached their goal is listed as aborted, and can be taken back out later.") }),
+        done: (n) => plural(n, "{n} game moved to the archive", "{n} games moved to the archive") },
+      { label: t("Delete"), icon: "trash", danger: true, run: (g) => del(`/api/games/${g.id}`),
+        confirm: (n) => ({ title: plural(n, "Delete {n} game?", "Delete {n} games?"), confirmText: t("Delete"),
+          text: t("Each game's multiworld, save and the files of every player are deleted. This cannot be undone.") }),
+        done: (n) => plural(n, "{n} game deleted", "{n} games deleted") },
+    ],
+  });
   const card = h("div", { class: "card flush", hidden: true },
-    h("div", { class: "row list-tools" }, h("div", { class: "grow list-search" }, search)), listHost);
+    h("div", { class: "row list-tools" }, h("div", { class: "grow list-search" }, search)), selection.bar, listHost);
 
   async function load(force = false) {
     const games = await get("/api/games");
@@ -46,13 +64,15 @@ export default async function render({ root, cleanup, isCurrent }) {
   function drawList() {
     const q = search.value.trim().toLowerCase();
     const list = running.filter((g) => !q || [g.name, ...g.games, ...g.my_slots.map((s) => s.name)].some((text) => text.toLowerCase().includes(q)));
+    selection.list(list);
     clear(listHost).append(list.length ? activeTable(list) : h("p", { class: "muted list-none" }, t("Nothing matches.")));
   }
 
   function activeTable(games) {
     return h("div", { class: "table-wrap" }, h("table", { class: "table" },
-      h("thead", {}, h("tr", {}, [t("Game"), t("Status"), t("Server"), t("Players"), t("Worlds"), ""].map((text) => h("th", {}, text)))),
+      h("thead", {}, h("tr", {}, selection.head(), [t("Game"), t("Status"), t("Server"), t("Players"), t("Worlds"), ""].map((text) => h("th", {}, text)))),
       h("tbody", {}, games.map((g) => h("tr", {},
+        selection.cell(g),
         h("td", {}, h("a", { href: `#/games/${g.id}`, class: "slot-name" }, g.name),
           g.race_mode ? [" ", badge(t("Race"), "warn")] : null,
           g.offered_slots.length ? [" ", badge(t("Slot offered"), "accent")] : null,

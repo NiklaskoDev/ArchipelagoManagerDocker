@@ -517,3 +517,14 @@ def test_the_web_ui_is_sent_compressed_to_browsers_that_take_it(tmp_path):
     for header, takes in (("gzip, deflate, br", True), ("", False), ("br", False), ("*", True), ("gzip;q=0", False),
                           ("*, gzip;q=0", False), ("gzip; q=0.5", True), ("GZIP", True), ("*;q=0", False)):
         assert accepts_gzip(header) is takes, header
+
+
+def test_worlds_that_did_not_load_whichever_way_archipelago_lists_them():
+    # Archipelago 0.6.8 keeps a reason for each; earlier versions, which can be installed besides it, only the names
+    from types import SimpleNamespace
+    import ap_helper
+    assert ap_helper.failed_worlds(SimpleNamespace(failed_world_loads={"zillion": "No module named 'zilliandomizer'"})) \
+        == {"zillion": "No module named 'zilliandomizer'"}
+    assert ap_helper.failed_worlds(SimpleNamespace(failed_world_loads=["zillion"])) == {"zillion": ""}
+    assert ap_helper.failed_worlds(SimpleNamespace(failed_world_loads=[])) == {}
+    assert ap_helper.failed_worlds(SimpleNamespace()) == {}

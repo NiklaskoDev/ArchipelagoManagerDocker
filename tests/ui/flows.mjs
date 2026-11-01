@@ -203,9 +203,16 @@ admin.once("dialog", (d) => d.accept());  // leaving the unsaved new config
 
 // generate ------------------------------------------------------------------------------------------------------------
 await nav(admin, "#/generate");
+// the configs come by game, each a group that opens
+const groups = await admin.locator(".config-group > summary").allInnerTexts();
+if (!groups.some((g) => g.includes("ChecksFinder")) || !groups.some((g) => g.includes("Custom Checks"))) problems.push(`config groups: ${groups}`);
+if (await admin.locator(".config-group[open]").count()) problems.push("a config group is open before anything is chosen");
+await admin.locator(".config-group > summary", { hasText: "ChecksFinder" }).click();
 await admin.locator("tbody tr", { hasText: "gwen.yaml" }).click();
+await admin.locator(".config-group > summary", { hasText: "Custom Checks" }).click();
 await admin.locator("tbody tr", { hasText: "custom.yaml" }).click();
 await expectText(admin, "2 selected");
+log("the configs to generate from are grouped by game");
 await admin.fill("input[placeholder^='Optional']", "UI run");
 await shot(admin, "generate");
 await admin.getByRole("button", { name: "Generate" }).click();
@@ -241,6 +248,7 @@ await admin.getByRole("button", { name: "Move to the archive" }).click();
 // nobody reached their goal, so it is asked first: the game goes to the archive as aborted
 await admin.locator(".modal").getByRole("button", { name: "Move to the archive" }).click();
 await admin.locator(".page-head .badge", { hasText: "Finished" }).waitFor();
+await admin.locator(".page-head .badge", { hasText: "Stopped" }).waitFor();  // a game in the archive is not played on
 await admin.locator("h2", { hasText: "Results" }).waitFor({ timeout: 15000 });
 await nav(admin, "#/games");
 await expectText(admin, "No game is being played right now");
@@ -250,7 +258,9 @@ await shot(admin, "archive");
 await nav(admin, gameUrl.slice(BASE.length + 1));
 await admin.getByRole("button", { name: "Back to the running games" }).click();
 await admin.locator("h2", { hasText: "Progress over time" }).waitFor({ timeout: 15000 });
-log("an admin moves the game to the archive and back");
+await admin.locator(".page-actions").getByRole("button", { name: "Start" }).click();
+await admin.locator(".page-head .badge", { hasText: "Running" }).waitFor({ timeout: 60000 });
+log("an admin moves the game to the archive, which stops it, and back");
 // the slots table (the standings above it have no selects, Files below has)
 const ownerSelects = admin.locator(".section", { has: admin.locator("h2", { hasText: "Slots" }) }).locator("table select");
 if (await ownerSelects.count() !== 2) problems.push(`expected 2 owner selects, got ${await ownerSelects.count()}`);
@@ -610,6 +620,14 @@ const [backupFile] = await Promise.all([admin.waitForEvent("download", { timeout
   admin.getByRole("button", { name: "Download a backup" }).click()]);
 if (!backupFile.suggestedFilename().endsWith(".zip")) problems.push(`backup download is ${backupFile.suggestedFilename()}`);
 log("a backup of everything downloads as a zip");
+// several games at once: choose them all, stop them
+await nav(admin, "#/games");
+await admin.locator("thead .select-col input").check();
+await admin.locator(".bulk-bar").getByRole("button", { name: "Stop" }).click();
+await admin.locator(".modal").getByRole("button", { name: "Stop" }).click();
+await admin.locator(".toast", { hasText: /games? stopped/ }).waitFor({ timeout: 60000 });
+if (await admin.locator("tbody .badge", { hasText: "Running" }).count()) problems.push("a game still runs after stopping all of them");
+log("an admin stops all games at once");
 // signing out ends what the page was asking the server, on the sign-in page too
 await nav(admin, "#/games");
 await admin.locator(".user-btn").click();

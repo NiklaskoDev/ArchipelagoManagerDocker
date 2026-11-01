@@ -183,8 +183,15 @@ def cmd_games(args) -> dict:
     return {
         **where,
         "games": games,
-        "failed": dict(getattr(worlds, "failed_world_loads", {})),
+        "failed": failed_worlds(worlds),
     }
+
+
+def failed_worlds(worlds) -> dict:
+    """The worlds that did not load, and why. Archipelago 0.6.8 keeps the reasons; before, it kept only the names (a
+    list), which further versions installed here still do: one world without its requirements is no reason to fail."""
+    failed = getattr(worlds, "failed_world_loads", None) or {}
+    return dict(failed) if isinstance(failed, dict) else {str(name): "" for name in failed}
 
 
 # --------------------------------------------------------------------------------------------------------------------

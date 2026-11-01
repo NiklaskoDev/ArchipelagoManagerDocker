@@ -120,7 +120,19 @@ def test_a_game_runs_on_a_version_of_its_own(versioned):
     assert r.json()["ap_version_own"] == OTHER
     assert admin.post("/api/games", files={"file": ("x.archipelago", multidata)},
                       data={"ap_version": "0.1.0"}).status_code == 409
-    admin.delete(f"/api/games/{r.json()['id']}")
+
+    # in the archive, it comes back only while its version is there (its files are gone after restoring a backup)
+    on_other = r.json()["id"]
+    assert admin.post(f"/api/games/{on_other}/archive", json={"archived": True}).status_code == 200
+    folder.rename(folder.with_name("away"))
+    try:
+        assert admin.get(f"/api/games/{on_other}").json()["return_blocked"] == "version"
+        r = admin.post(f"/api/games/{on_other}/archive", json={"archived": False})
+        assert r.status_code == 409 and r.json()["detail"] == f"Archipelago {OTHER} is not installed on this server"
+    finally:
+        folder.with_name("away").rename(folder)
+    assert admin.post(f"/api/games/{on_other}/archive", json={"archived": False}).status_code == 200
+    admin.delete(f"/api/games/{on_other}")
 
     # it is not in the backup of everything
     r = admin.post("/api/system/backup")
@@ -146,3 +158,32 @@ def test_a_release_that_cannot_be_downloaded_fails(versioned):
     assert player.get("/api/ap-versions").json()["versions"] == []
     assert player.post("/api/ap-versions", json={"version": "0.6.0"}).status_code == 403
     assert admin.delete("/api/ap-versions/0.6.0").status_code == 200
+
+
+def test_an_installation_can_be_stopped(versioned):
+    server, admin = versioned
+    releases = Path(server.extra_env["AP_SOURCE_URL"].removeprefix("file://")).parent
+    source_archive(releases, "0.6.1")
+    assert admin.post("/api/ap-versions/0.6.1/cancel").status_code == 409  # nothing to stop yet
+    assert admin.post("/api/ap-versions", json={"version": "0.6.1"}).status_code == 200
+    wait_for(lambda: "making its Python environment" in admin.get("/api/ap-versions/0.6.1/log").text, timeout=60,
+             message="the installation to get going")
+    r = admin.post("/api/ap-versions/0.6.1/cancel")
+    assert r.status_code == 200, r.text
+    stopped = next(v for v in r.json()["versions"] if v["version"] == "0.6.1")
+    assert (stopped["status"], stopped["error"]) == ("failed", "The installation was stopped")
+    assert "--- stopped" in admin.get("/api/ap-versions/0.6.1/log").text
+    # nothing of it is left: no files, and no pip or Python still at work on it
+    assert not (server.data_dir / "ap-versions" / "0.6.1").exists()
+    still = []
+    for proc in Path("/proc").iterdir():
+        if proc.name.isdigit():
+            try:
+                if b"ap-versions/0.6.1" in (proc / "cmdline").read_bytes():
+                    still.append(proc.name)
+            except OSError:
+                pass
+    assert not still
+    assert admin.post("/api/ap-versions/0.6.1/cancel").status_code == 409
+    assert admin.get("/api/audit", params={"action": "system.version_cancel"}).json()["entries"]
+    assert admin.delete("/api/ap-versions/0.6.1").status_code == 200

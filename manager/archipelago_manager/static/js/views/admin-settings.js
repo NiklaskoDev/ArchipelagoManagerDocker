@@ -157,6 +157,13 @@ function versionsCard(cleanup) {
             ["failed", "missing"].includes(v.status) ? h("button", { class: "btn sm", type: "button", onclick: action(async () => {
               draw(await post("/api/ap-versions", { version: v.version }));
             }) }, icon("restart", 14), t("Install again")) : null,
+            // an installation that hangs or is not wanted after all: its processes end and its files go
+            v.status === "installing" ? h("button", { class: "btn sm", type: "button", onclick: action(async () => {
+              if (!(await confirmDialog(t("The download and the installation stop, and what was installed so far is removed."),
+                { title: t("Stop installing Archipelago {version}?", { version: v.version }), confirmText: t("Stop") }))) return;
+              draw(await post(`/api/ap-versions/${v.version}/cancel`));
+              toast(t("Installing Archipelago {version} was stopped", { version: v.version }), "success");
+            }) }, icon("stop", 14), t("Stop")) : null,
             v.status !== "installing" ? h("button", { class: "btn sm ghost icon-only", type: "button", title: t("Remove"), "aria-label": t("Remove"),
               onclick: action(async () => {
                 if (!(await confirmDialog(t("Its files are deleted. Games cannot run on it any more until it is installed again."),

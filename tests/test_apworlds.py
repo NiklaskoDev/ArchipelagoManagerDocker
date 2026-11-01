@@ -85,6 +85,11 @@ def test_user_submission_waits_for_approval(admin, make_user, tmp_path, clean_cu
 
     assert admin.post(f"/api/apworlds/{pending['id']}/approve").status_code == 200
     assert CUSTOM in game_names(user)
+    # players list only what they submitted; the overview of every game links the installed file for everyone
+    assert [i["id"] for i in user.get("/api/apworlds").json()["items"]] == [pending["id"]]
+    assert other.get("/api/apworlds").json()["items"] == []
+    listed = next(g for g in other.get("/api/worlds").json()["games"] if g["name"] == CUSTOM)
+    assert listed["apworld_id"] == pending["id"] and other.get(f"/api/apworlds/{pending['id']}/download").status_code == 200
     assert admin.post(f"/api/apworlds/{pending['id']}/approve").status_code == 409
     assert user.delete(f"/api/apworlds/{pending['id']}").status_code == 403  # installed: admin only
 

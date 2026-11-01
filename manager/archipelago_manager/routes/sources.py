@@ -48,7 +48,7 @@ def _http(e: sources.SourceError) -> HTTPException:
 def list_sources(user: sqlite3.Row = Depends(current_user)) -> list[dict]:
     rows = db.query("SELECT s.*, u.username AS adder FROM apworld_sources s LEFT JOIN users u ON u.id = s.added_by "
                     "ORDER BY s.status DESC, s.repo COLLATE NOCASE")  # 'pending' sorts before 'approved' this way
-    return [source_json(r) for r in rows if r["status"] == "approved" or is_admin(user) or r["added_by"] == user["id"]]
+    return [source_json(r) for r in rows if is_admin(user) or r["added_by"] == user["id"]]  # players: what they added
 
 
 @router.get("/apworld-sources/lookup")

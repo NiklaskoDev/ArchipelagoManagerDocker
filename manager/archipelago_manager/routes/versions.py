@@ -38,6 +38,16 @@ async def install_version(body: VersionInstall, request: Request, _admin: sqlite
     return versions.listing()
 
 
+@router.post("/ap-versions/{version}/cancel")
+async def cancel_install(version: str, _admin: sqlite3.Row = Depends(admin_user)) -> dict:
+    """Stops installing a version: its downloads and pip end, and what was made of it is removed."""
+    try:
+        await versions.cancel(version)
+    except versions.VersionError as e:
+        raise HTTPException(e.status, e.message) from None
+    return versions.listing()
+
+
 @router.get("/ap-versions/{version}/log", response_class=PlainTextResponse)
 def version_log(version: str, _admin: sqlite3.Row = Depends(admin_user)) -> str:
     if not versions.VERSION.match(version) or not db.query_one("SELECT 1 FROM ap_versions WHERE version = ?",

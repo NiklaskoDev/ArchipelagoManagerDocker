@@ -71,6 +71,24 @@
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }
 body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 var(--font); }
+/* The page: deep water lit by a few islands, with their contour lines as on a sea chart. The lines are a layer behind
+   everything, so they only show between the cards, never under text; their colour follows the theme's accent. */
+body {
+  min-height: 100vh;
+  background:
+    radial-gradient(1100px 620px at 6% -10%, color-mix(in srgb, var(--accent) 15%, transparent), transparent 62%),
+    radial-gradient(900px 560px at 104% 4%, color-mix(in srgb, var(--info) 11%, transparent), transparent 58%),
+    radial-gradient(1000px 700px at 62% 115%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 60%),
+    var(--bg);
+  background-attachment: fixed;
+}
+body::before {
+  --contours: url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22760%22 height=%22640%22 viewBox=%220 0 760 640%22%3E%3Cpath d=%22M227 180C227 189 216 199 208 208C201 217 192 232 181 234C170 235 157 223 145 217C133 211 114 208 109 199C104 190 111 173 117 163C123 154 135 150 146 144C156 138 170 125 181 127C192 128 202 143 210 151C217 160 227 171 227 180ZM246 180C247 192 233 205 223 218C212 231 200 256 186 257C172 259 154 236 138 227C122 219 96 217 89 205C83 194 91 170 99 158C107 146 124 140 138 133C152 125 170 111 184 113C197 115 209 134 219 145C229 156 245 168 246 180ZM267 180C267 195 247 211 234 226C221 241 207 270 189 273C171 275 147 253 128 242C109 232 82 225 74 210C66 195 70 166 80 152C89 137 113 131 131 122C149 113 170 95 187 97C203 100 217 123 230 137C244 150 266 165 267 180ZM284 180C285 198 264 218 248 236C233 254 213 285 192 288C171 291 143 266 120 254C97 242 64 234 55 216C45 198 54 166 65 147C76 129 98 117 120 105C141 93 171 71 192 75C212 79 227 110 242 128C258 145 283 162 284 180ZM600 130C599 138 596 146 591 152C586 159 577 166 568 168C559 169 545 168 538 163C530 159 529 149 525 141C521 133 511 122 514 116C517 110 534 107 543 104C551 101 558 98 567 98C575 98 589 100 595 105C600 110 601 122 600 130ZM615 130C614 140 609 151 601 160C594 168 583 179 571 182C559 184 540 181 530 175C520 169 518 155 513 145C508 134 496 119 500 111C504 103 526 100 538 97C549 93 557 89 568 89C580 89 598 90 606 97C614 104 616 120 615 130ZM629 130C629 143 622 157 613 168C604 180 588 194 574 197C559 199 536 191 525 183C513 174 512 160 505 147C498 135 479 116 484 106C489 97 520 96 534 91C548 86 558 77 571 77C584 77 604 82 614 91C624 100 629 117 629 130ZM643 470C642 481 638 489 631 500C624 510 614 531 603 533C591 534 573 519 562 511C551 504 543 496 538 486C533 477 531 464 533 452C536 440 542 420 553 415C564 411 585 421 599 424C614 427 633 426 640 434C647 441 645 459 643 470ZM658 470C656 484 649 493 640 506C632 519 620 545 606 548C592 550 570 531 556 521C541 512 527 505 520 492C513 480 510 462 514 446C517 431 527 404 542 399C557 393 583 410 601 415C620 419 643 415 653 425C662 434 660 456 658 470ZM676 470C673 488 666 500 655 517C644 534 630 571 611 574C593 577 563 549 545 537C527 524 511 514 502 497C494 481 491 460 495 440C499 420 510 384 528 377C546 371 580 395 604 401C628 406 660 399 672 411C684 423 679 452 676 470ZM697 470C696 490 684 508 670 528C657 548 637 589 615 592C593 596 560 562 538 547C517 532 496 521 486 502C477 484 477 460 482 436C487 412 495 368 516 360C537 352 580 380 607 387C634 395 665 391 680 405C695 419 699 450 697 470ZM250 500C250 507 245 515 239 521C234 527 225 533 217 533C209 534 199 530 193 526C186 522 181 516 178 510C175 504 173 495 175 489C178 483 186 478 193 474C200 470 210 463 217 464C225 465 233 474 238 480C243 486 250 493 250 500ZM260 500C261 509 255 520 248 527C241 535 229 543 219 544C209 545 196 538 188 533C179 528 172 521 168 513C164 505 162 494 165 486C168 478 176 468 185 463C194 458 209 453 219 455C229 457 237 468 244 476C250 483 260 491 260 500ZM276 500C276 511 266 525 257 534C248 543 234 553 221 555C209 556 191 550 181 543C171 537 164 526 160 516C155 506 149 492 152 482C156 472 167 460 179 454C190 447 210 438 222 440C235 443 246 458 255 468C264 478 275 489 276 500ZM411 330C410 334 409 339 406 342C404 345 398 345 393 346C389 348 381 351 377 349C373 347 370 341 369 337C367 332 366 327 367 323C369 319 375 316 380 315C384 313 389 314 393 314C398 314 405 314 408 317C411 320 411 326 411 330ZM415 330C414 336 414 341 410 345C407 348 400 349 394 350C388 352 379 357 373 355C368 353 363 345 361 339C359 333 357 325 360 320C362 315 370 311 376 309C382 307 388 307 395 307C401 308 413 307 416 311C420 315 416 324 415 330ZM422 330C421 337 420 344 415 348C411 352 403 354 395 355C388 357 377 362 370 359C364 357 360 347 357 340C353 334 349 324 351 318C354 312 365 307 373 304C380 302 388 302 396 302C404 303 417 303 421 307C426 312 423 323 422 330Z%22 fill=%22none%22 stroke=%22%23000%22 stroke-width=%221.3%22/%3E%3C/svg%3E");
+  content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  background: color-mix(in srgb, var(--accent) var(--contour-strength, 11%), transparent);
+  -webkit-mask: var(--contours) 0 0 / 760px 640px repeat;
+  mask: var(--contours) 0 0 / 760px 640px repeat;
+}
 h1, h2, h3 { line-height: 1.25; margin: 0; }
 h1 { font-size: 1.6rem; }
 h2 { font-size: 1.15rem; }
@@ -347,6 +365,21 @@ button.tab:hover { color: var(--text); }
 button.tab { display: inline-flex; align-items: center; gap: 6px; }
 hr { border: 0; border-top: 1px solid var(--border); margin: 6px 0; width: 100%; }
 
+/* what can be done to the games chosen in a list (components.js gameSelection) */
+.bulk-bar { padding: 10px 16px; background: color-mix(in srgb, var(--accent) 10%, var(--surface)); border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border); }
+/* a custom game in the list of all games links its .apworld (views/worlds.js) */
+a.chip-link { color: inherit; text-decoration: none; gap: 6px; }
+a.chip-link:hover { border-color: var(--accent); color: var(--accent-strong); }
+/* the generate page's configs, a group for each game that opens (views/generate.js) */
+.config-group { border-top: 1px solid var(--border); }
+.config-group > summary { display: flex; align-items: center; gap: 12px; padding: 11px 16px; cursor: pointer; list-style: none; }
+.config-group > summary::-webkit-details-marker { display: none; }
+.config-group > summary::after { content: "▸"; color: var(--muted); transition: transform .15s; }
+.config-group[open] > summary::after { transform: rotate(90deg); }
+.config-group > summary:hover { background: var(--surface-2); }
+.config-group > summary input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); }
+.config-group > .table-wrap { border-top: 1px solid var(--border); }
 /* the config editor: the file on the left, its details beside it; one column on narrow screens */
 .editor-layout { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr) minmax(260px, 340px); align-items: start; }
 @media (max-width: 900px) { .editor-layout { grid-template-columns: minmax(0, 1fr); } }
@@ -479,6 +512,7 @@ input.switch:disabled { opacity: .5; cursor: not-allowed; }
 @media (max-width: 720px) { .watch-clock { align-items: flex-start; } }
 .race-clock { font-family: var(--mono); font-size: 2rem; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
 body.overlay { background: transparent; }
+body.overlay::before { display: none; }  /* over a stream: nothing but the panel */
 body.overlay #watch { padding: 8px; }
 .ov { --text: #f3f7fb; --muted: #b6c4d4; color: var(--text); background: rgba(9, 15, 24, .78); border-radius: 12px; padding: 12px 14px;
   display: flex; flex-direction: column; gap: 8px; max-width: 520px; text-shadow: 0 1px 2px rgba(0, 0, 0, .6); }

@@ -16,7 +16,7 @@ const ACTIONS = {
   "settings.change": () => t("Changed the settings"), "settings.test_notification": () => t("Sent a Discord test message"),
   "settings.host_yaml": () => t("Edited host.yaml"), "system.check_updates": () => t("Checked for updates"),
   "system.reload_worlds": () => t("Reloaded the worlds"), "system.backup": () => t("Made a backup of everything"), "system.version_install": () => t("Installed an Archipelago version"),
-  "system.version_remove": () => t("Removed an Archipelago version"),
+  "system.version_remove": () => t("Removed an Archipelago version"), "system.version_cancel": () => t("Stopped installing an Archipelago version"),
   "token.add": () => t("Created an API token"), "token.delete": () => t("Revoked an API token"),
   "user.add": () => t("Added a user"), "user.change": () => t("Changed a user"), "user.delete": () => t("Deleted a user"),
   "user.invite": () => t("Made an invite link"), "user.invite_delete": () => t("Revoked an invite link"),

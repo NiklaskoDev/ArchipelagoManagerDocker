@@ -69,6 +69,18 @@ def can_archive(game: sqlite3.Row, user: sqlite3.Row) -> bool:
     return manages(game, user) or game["created_by"] == user["id"]
 
 
+def return_blocked(game: sqlite3.Row, players: list[sqlite3.Row]) -> str | None:
+    """Why a game in the archive cannot come back out of it, if it cannot: "finished" (every player reached their goal,
+    so there is nothing left to play) or "version" (the Archipelago version it runs on is not installed)."""
+    if game["finished_at"] is None:
+        return None
+    if outcome(game, players) == "finished":
+        return "finished"
+    if game["ap_version"] and not versions.available(game["ap_version"]):
+        return "version"
+    return None
+
+
 def outcome(game: sqlite3.Row, players: list[sqlite3.Row]) -> str | None:
     """How a game in the archive ended: "finished" when every player reached their goal, else "aborted"."""
     if game["finished_at"] is None:
@@ -162,6 +174,7 @@ def game_summary(row: sqlite3.Row, slots: list[sqlite3.Row], user: sqlite3.Row, 
         "can_control": bool(can_control(row, user)),
         "can_manage": manages(row, user),
         "can_archive": can_archive(row, user),
+        "return_blocked": return_blocked(row, players),
     }
 
 
@@ -426,6 +439,8 @@ async def patch_game(game_id: int, body: GamePatch, request: Request, user: sqli
         db.execute(f"UPDATE games SET {assignments} WHERE id = ?", [*changes.values(), game_id])
         await ROOMS.apply_options(game_id)
     if "finished" in given and body.finished is not None:  # after the spoiler setting, which finishing applies
+        if body.finished and row["finished_at"] is None:
+            await ROOMS.stop(game_id)  # as when it is moved to the archive (archive_game)
         history.finish(game_id, body.finished)
     if announce_start:
         schedule.announce(game_id)
@@ -444,15 +459,24 @@ class Archive(BaseModel):
 
 @router.post("/games/{game_id}/archive")
 async def archive_game(game_id: int, body: Archive, request: Request, user: sqlite3.Row = Depends(current_user)) -> dict:
-    """Moves a game to the archive (finished, or aborted before everyone reached their goal), or back out of it."""
+    """Moves a game to the archive (finished, or aborted before everyone reached their goal), stopping its server, or an
+    aborted one back out of it."""
     row = get_game(game_id, user)
     if not can_archive(row, user):
         raise HTTPException(403, "Only whoever runs this game, or the player who generated it, can move it to the archive")
     if not body.archived and row["finished_at"] is not None:
+        players = [s for s in _slots_for([game_id]).get(game_id, []) if s["type"] == 1]
+        blocked = return_blocked(row, players)
+        if blocked == "finished":
+            raise HTTPException(409, "Every player reached their goal in this game, so it stays in the archive")
+        if blocked == "version":
+            raise HTTPException(409, f"Archipelago {row['ap_version']} is not installed on this server")
         try:
             limits.check_unarchive(row, user)
         except limits.LimitError as e:
             raise HTTPException(409, e.message) from None
+    if body.archived and row["finished_at"] is None:
+        await ROOMS.stop(game_id)  # a game in the archive is over: nobody plays on it any more
     history.finish(game_id, body.archived)
     audit.note(request, archived=body.archived)
     return await _detail(game_id, user, request)
