@@ -617,7 +617,7 @@ def cmd_templates(args) -> dict:
         if entry.is_file() and entry.name.endswith(".yaml"):
             try:
                 with open(entry.path, encoding="utf-8-sig") as f:
-                    doc = yaml.safe_load(f) or {}
+                    doc = yaml.load(f, Loader=getattr(yaml, "CSafeLoader", yaml.SafeLoader)) or {}  # libyaml: far faster
                 game = doc.get("game")
             except Exception:
                 game = None
@@ -662,6 +662,14 @@ def _keys(keys) -> list:
     return [_plain(k) for k in keys]
 
 
+def _is(cls, *bases) -> bool:
+    """issubclass() for option classes, by their own ancestry. Archipelago's options are ABCs, and an ABC answers "no"
+    by asking each of its subclasses in turn: with every installed world's options that is millions of calls for the
+    forms, most of the time it takes to make them."""
+    mro = getattr(cls, "__mro__", ())
+    return any(base in mro for base in bases)
+
+
 def option_field(key: str, option, world) -> dict | None:
     """How to show one option in a form, or None if it is not one a form can edit (plando, free dictionaries)."""
     import Options
@@ -669,24 +677,24 @@ def option_field(key: str, option, world) -> dict | None:
     rich = option.rich_text_doc if option.rich_text_doc is not None else bool(world.web.rich_text_options_doc)
     field = {"key": key, "label": str(getattr(option, "display_name", None) or key),
              "doc": cleandoc(option.__doc__ or "").strip(), "rich": rich}
-    if issubclass(option, Options.Toggle):
+    if _is(option, Options.Toggle):
         field.update(type="toggle")
-    elif issubclass(option, Options.Choice):
+    elif _is(option, Options.Choice):
         # [name, label, number]; a yaml can also use an alias ("on" for "true") or the number
         choices = [[name, str(option.get_option_name(value)), _plain(value)] for value, name in option.name_lookup.items()
                    if name != "random"]
         aliases = {alias: option.name_lookup[value] for alias, value in option.options.items()
                    if value in option.name_lookup and option.name_lookup[value] != alias}
-        if issubclass(option, Options.TextChoice):
+        if _is(option, Options.TextChoice):
             field.update(type="text_choice", choices=sorted(choices), aliases=aliases)
         else:
             field.update(type="choice", choices=choices, aliases=aliases)
-    elif issubclass(option, Options.Range):
+    elif _is(option, Options.Range):
         field.update(type="range", min=option.range_start, max=option.range_end,
                      named=[[name, value] for name, value in getattr(option, "special_range_names", {}).items()])
-    elif issubclass(option, Options.FreeText):
+    elif _is(option, Options.FreeText):
         field.update(type="text")
-    elif issubclass(option, Options.OptionCounter):
+    elif _is(option, Options.OptionCounter):
         if option.valid_keys:
             field.update(keys=_keys(option.valid_keys))
         elif option.verify_item_name or option.verify_location_name:
@@ -694,8 +702,8 @@ def option_field(key: str, option, world) -> dict | None:
         else:
             return None
         field.update(type="counter", min=option.min, max=option.max)
-    elif issubclass(option, (Options.OptionSet, Options.OptionList)):
-        field.update(type="set" if issubclass(option, Options.OptionSet) else "list")
+    elif _is(option, Options.OptionSet, Options.OptionList):
+        field.update(type="set" if _is(option, Options.OptionSet) else "list")
         if option.valid_keys:
             field.update(keys=_keys(option.valid_keys))
         if option.verify_item_name or option.verify_location_name:
@@ -718,23 +726,23 @@ def option_field(key: str, option, world) -> dict | None:
 def form_value(option, raw):
     """A value the way a form holds it: the option's own name for choices, numbers for ranges, lists for sets."""
     import Options
-    if issubclass(option, Options.FreeText):  # the text itself; some worlds turn it into a number as they read it
+    if _is(option, Options.FreeText):  # the text itself; some worlds turn it into a number as they read it
         return raw if isinstance(raw, str) else str(option.from_any(raw).value)
-    if raw == "random" or (isinstance(raw, str) and raw.startswith("random") and issubclass(option, Options.Range)):
+    if raw == "random" or (isinstance(raw, str) and raw.startswith("random") and _is(option, Options.Range)):
         return "random"
     value = option.from_any(raw)
-    if isinstance(value, Options.Toggle):
+    if _is(type(value), Options.Toggle):
         return bool(value.value)
-    if isinstance(value, Options.Choice):  # TextChoice too: its own text when that is not one of the choices
+    if _is(type(value), Options.Choice):  # TextChoice too: its own text when that is not one of the choices
         key = value.current_key
         if isinstance(key, str) and option.options.get(key.lower()) in option.name_lookup:
             return option.name_lookup[option.options[key.lower()]]  # "M" or an alias as the choice's own name
         return key
-    if isinstance(value, Options.Range):
+    if _is(type(value), Options.Range):
         return int(value.value)
-    if isinstance(value, Options.OptionCounter):
+    if _is(type(value), Options.OptionCounter):
         return {str(k): int(v) for k, v in value.value.items()}
-    if isinstance(value, Options.OptionSet):
+    if _is(type(value), Options.OptionSet):
         return sorted((_plain(v) for v in value.value), key=str)
     return _plain(value.value)
 

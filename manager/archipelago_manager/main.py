@@ -52,6 +52,12 @@ async def init_archipelago() -> None:
     await ROOMS.catch_up_history()
     log.info("Archipelago %s ready, %d games available", apbridge.ap_version(),
              len(apbridge.installed_games(include_hidden=True)))
+    # The yaml templates and options forms, made now when the games changed (a new version, a custom game), rather
+    # than while the first player to open "New config" waits for them
+    try:
+        await apbridge.ensure_templates()
+    except apbridge.APBridgeError as e:
+        log.warning("Could not prepare the yaml templates and options forms: %s", e)
     for row in db.query("SELECT version FROM ap_versions WHERE status = 'installed'"):
         if versions.present(row["version"]):  # what the further versions offer, for checks and the settings page
             try:

@@ -10,8 +10,8 @@ import subprocess
 import pytest
 import yaml
 
-from conftest import AP_DIR, AP_PYTHON
-from helpers import build_apworld, run_job, upload_yaml
+from conftest import AP_DIR, AP_PYTHON, Server
+from helpers import build_apworld, run_job, upload_yaml, wait_for
 
 pytestmark = pytest.mark.ap
 
@@ -192,3 +192,23 @@ def test_a_custom_game_gets_a_form_with_its_own_options(admin, make_user, tmp_pa
         for item in admin.get("/api/apworlds").json()["items"]:
             if item["game"] == game:
                 admin.delete(f"/api/apworlds/{item['id']}")
+
+
+def test_the_templates_are_made_as_the_server_starts(tmp_path):
+    """Making every game's yaml template and options form takes a while: it happens as the server starts, not while
+    the first player to open "New config" waits."""
+    server = Server(tmp_path / "data", ap=True)
+    server.start()
+    try:
+        templates = server.data_dir / "templates"
+        made = wait_for(lambda: list(templates.glob("*/index.json")), timeout=180, message="the templates")
+        before = sorted(p.name for p in templates.iterdir()), made[0].stat().st_mtime_ns
+        admin = server.client()
+        assert admin.post("/api/auth/setup", json={"username": "boss", "password": "bosspass123",
+                                                   "code": server.setup_code()}).status_code == 200
+        listed = admin.get("/api/templates").json()
+        assert any(t["game"] == "ChecksFinder" and t["form"] and t["template"] for t in listed)
+        # the first request read what was made, rather than making it again
+        assert (sorted(p.name for p in templates.iterdir()), made[0].stat().st_mtime_ns) == before
+    finally:
+        server.stop()
