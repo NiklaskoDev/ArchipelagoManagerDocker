@@ -104,6 +104,26 @@ def _dir_size(path: Path) -> int:
     return total
 
 
+# Adding up the data folder means looking at every file in it, thousands for each installed Archipelago version. On a
+# slow share (Unraid's /mnt/user with a cold cache) that can take a minute, and keeps the share busy for everything
+# else the server reads from it. So it is counted only for the page that shows it, at most every few minutes, and once
+# however many ask at a time.
+DATA_SIZE_MAX_AGE = 600
+_data_size: dict[str, float] = {}
+_counting: asyncio.Task | None = None
+
+
+async def data_size() -> int:
+    global _counting
+    if _data_size and time.time() - _data_size["at"] < DATA_SIZE_MAX_AGE:
+        return int(_data_size["bytes"])
+    if _counting is None or _counting.done():
+        _counting = asyncio.ensure_future(asyncio.to_thread(_dir_size, CONFIG.data_dir))
+    size = await asyncio.shield(_counting)  # a page closed while it counts does not stop the count for the others
+    _data_size.update(bytes=size, at=time.time())
+    return size
+
+
 @router.get("/system")
 async def system_info(_admin: sqlite3.Row = Depends(admin_user)) -> dict:
     usage = shutil.disk_usage(CONFIG.data_dir)
@@ -123,12 +143,16 @@ async def system_info(_admin: sqlite3.Row = Depends(admin_user)) -> dict:
         "tls": tls.status(),
         "data_dir": str(CONFIG.data_dir),
         "disk": {"total": usage.total, "free": usage.free},
-        "data_bytes": await asyncio.to_thread(_dir_size, CONFIG.data_dir),
         "port_range": [CONFIG.port_start, CONFIG.port_end],
         "games": db.query_one("SELECT COUNT(*) AS n FROM games")["n"],
         "running_games": running,
         "users": db.query_one("SELECT COUNT(*) AS n FROM users")["n"],
     }
+
+
+@router.get("/system/data-size")
+async def system_data_size(_admin: sqlite3.Row = Depends(admin_user)) -> dict:
+    return {"bytes": await data_size()}
 
 
 @router.post("/system/check-updates")
