@@ -362,7 +362,7 @@ await user.locator(".page-head .badge", { hasText: /Starting|Running/ }).waitFor
 await user.locator(".page-head .badge", { hasText: "Running" }).waitFor({ timeout: 60000 });
 log("the player's visit wakes the game up");
 const launch = await user.locator("a[href^='archipelago://']").evaluateAll((links) => links.map((a) => a.getAttribute("href")));
-if (!launch.length || !launch.every((href) => /^archipelago:\/\/[^:@]+(:[^@]+)?@[^:/]+:\d+\?game=./.test(href))) {
+if (!launch.length || !launch.every((href) => /^archipelago:\/\/[^:@]+:[^@]+@[^:/]+:\d+\?game=./.test(href))) {
   problems.push(`the game page's links that open Archipelago are wrong: ${launch}`);
 }
 log("the game page links to Archipelago's Launcher with the slot and the address");
