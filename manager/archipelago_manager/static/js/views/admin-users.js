@@ -1,7 +1,7 @@
-import { h, clear, icon, toast, action, confirmDialog, openModal, fmtAgo, fmtDate } from "../util.js";
+import { h, clear, icon, toast, action, confirmDialog, openModal, fmtAgo, fmtDate, setText } from "../util.js";
 import { get, post, patch, del, state } from "../api.js";
 import { pageHeader, badge, field, select, adminTabs, copyField } from "../components.js";
-import { t, plural } from "../i18n.js";
+import { t, plural, live } from "../i18n.js";
 
 // Organizers run sign-up rounds and the games they add or generate, without administering the server
 const ROLES = () => [["user", t("User")], ["organizer", t("Organizer")], ["admin", t("Administrator")]];
@@ -38,8 +38,8 @@ export default async function render({ root, isCurrent }) {
           h("td", { class: "actions" }, h("div", { class: "row", style: { justifyContent: "flex-end" } },
             h("button", { class: "btn sm", type: "button", onclick: () => resetDialog(u) }, icon("key", 14), t("Password")),
             u.discord_name ? h("button", { class: "btn sm", type: "button", onclick: action(async () => {
-              const text = t("{user} can no longer sign in with the Discord account {name}, and is signed out everywhere.", { user: u.username, name: u.discord_name })
-                + (u.has_password ? "" : ` ${t("They have no password either: set one, or they cannot sign in at all.")}`);
+              const text = live(() => t("{user} can no longer sign in with the Discord account {name}, and is signed out everywhere.", { user: u.username, name: u.discord_name })
+                + (u.has_password ? "" : ` ${t("They have no password either: set one, or they cannot sign in at all.")}`));
               if (!(await confirmDialog(text, { title: t("Unlink Discord?"), confirmText: t("Unlink") }))) return;
               await patch(`/api/users/${u.id}`, { unlink_discord: true });
               toast(t("Discord unlinked"), "success");
@@ -69,7 +69,7 @@ export default async function render({ root, isCurrent }) {
       const result = await post(`/api/users/${user.id}/reset-link`);
       clear(linkHost).append(copyField(linkTo("reset", result.token)),
         h("span", { class: "muted small" }, t("Shown only now: copy it before you close this. It works until {date}.", { date: fmtDate(result.expires_at) })));
-      makeLink.textContent = t("Make a new reset link");
+      setText(makeLink, t("Make a new reset link"));
     });
     const pw = h("input", { class: "input", type: "password", autocomplete: "new-password" });
     const save = h("button", { class: "btn", type: "button" }, t("Set password"));

@@ -1,7 +1,7 @@
 // The options form of the config editor: a field for every option of a game, the way archipelago.gg's player options
 // page shows them. The server describes the options (ap_helper.py, option_form) and turns the form's values into the
 // YAML (yamlform.py), so this file only draws fields and reads them back.
-import { h, clear, icon, withNodes, confirmDialog } from "./util.js";
+import { h, clear, icon, withNodes, confirmDialog, setText } from "./util.js";
 import { get } from "./api.js";
 import { field, banner, select } from "./components.js";
 import { t, plural } from "./i18n.js";
@@ -42,7 +42,7 @@ export function optionsForm(schema, state, { onChange }) {
     for (const group of groups) {
       const n = group.rows.filter((row) => row.changed()).length;
       group.count.hidden = !n;
-      group.count.textContent = plural(n, "{n} changed", "{n} changed");
+      setText(group.count, plural(n, "{n} changed", "{n} changed"));
     }
   }
   counts();
@@ -195,7 +195,7 @@ function docBlock(text, rich) {
   const more = h("button", { class: "btn ghost sm opt-more", type: "button" }, t("More"));
   more.onclick = () => {
     rest.hidden = !rest.hidden;
-    more.textContent = rest.hidden ? t("More") : t("Less");
+    setText(more, rest.hidden ? t("More") : t("Less"));
   };
   return h("div", {}, first, rest, more);
 }
@@ -245,7 +245,7 @@ function toggleControl(id) {
   const on = listeners();
   const input = h("input", { type: "checkbox", class: "switch", id, onchange: () => { sync(); on.fire(); } });
   const text = h("span", {});
-  const sync = () => { text.textContent = input.checked ? t("Yes") : t("No"); };
+  const sync = () => { setText(text, input.checked ? t("Yes") : t("No")); };
   return {
     node: h("label", { class: "switch-wrap" }, input, text),
     get: () => input.checked,
@@ -422,7 +422,7 @@ function pickerControl(f, id, ctx, amounts) {
     const name = known ? known.get(typed.toLowerCase()) : typed;
     if (!name) {
       error.hidden = false;
-      error.textContent = t("“{name}” is not one of this game's names.", { name: typed });
+      setText(error, t("“{name}” is not one of this game's names.", { name: typed }));
       return;
     }
     error.hidden = true;

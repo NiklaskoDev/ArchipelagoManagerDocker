@@ -1,4 +1,4 @@
-import { h, clear, icon, toast, action, confirmDialog, fmtBytes, fmtDate } from "../util.js";
+import { h, clear, icon, toast, action, confirmDialog, fmtBytes, fmtDate, setText } from "../util.js";
 import { get, patch, put, post, del, refreshStatus } from "../api.js";
 import { pageHeader, field, checkbox, banner, adminTabs, serverOptionsForm, updateBanner, updateStatus, copyField, select, romsCard, deliveryStatus, tlsBanner } from "../components.js";
 import { t, tServer, plural, LANGUAGES } from "../i18n.js";
@@ -83,7 +83,7 @@ export default async function render({ root, cleanup }) {
     h("dl", { class: "kv" },
       h("dt", {}, t("Manager")), h("dd", {}, system.manager_version),
       h("dt", {}, "Archipelago"), h("dd", {}, system.ap_version
-        ? `${system.ap_version} (${plural(system.world_count, "{n} game loaded", "{n} games loaded")})`
+        ? [system.ap_version, " (", plural(system.world_count, "{n} game loaded", "{n} games loaded"), ")"]
         : h("span", { class: "form-error" }, system.ap_error ? tServer(system.ap_error) : t("unavailable"))),
       h("dt", {}, t("Updates")), updateHost,
       h("dt", {}, t("Game ports")), h("dd", {}, `${system.port_range[0]}–${system.port_range[1]}`, h("span", { class: "muted" }, " ", t("(each must be published by Docker)"))),
@@ -299,16 +299,16 @@ function backupCard() {
   const make = h("button", { class: "btn", type: "button" }, icon("download", 14), t("Download a backup"));
   const status = h("span", { class: "muted small" });
   make.onclick = action(async () => {
-    status.textContent = t("Making the backup…");
+    setText(status, t("Making the backup…"));
     try {
       const made = await post("/api/system/backup");
-      status.textContent = t("Backup made ({size}). The download starts now.", { size: fmtBytes(made.size) });
+      setText(status, t("Backup made ({size}). The download starts now.", { size: fmtBytes(made.size) }));
       const link = h("a", { href: made.url, download: "" });
       document.body.append(link);
       link.click();
       link.remove();
     } catch (err) {
-      status.textContent = "";
+      setText(status, "");
       throw err;
     }
   });
@@ -332,7 +332,7 @@ function discordLoginCard(settings, siteUrl) {
   const secretHint = h("span");
   const drawSecretHint = (isSet) => {
     secret.placeholder = isSet ? "••••••••••••" : "";
-    secretHint.textContent = isSet ? t("Saved, and never shown again. Type a new one to replace it.") : t("Not saved yet.");
+    setText(secretHint, isSet ? t("Saved, and never shown again. Type a new one to replace it.") : t("Not saved yet."));
   };
   const siteChanged = () => {
     const base = siteUrl.value.trim().replace(/\/+$/, "");

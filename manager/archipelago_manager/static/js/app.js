@@ -1,7 +1,7 @@
-import { h, clear, icon, toast, openModal, action, confirmDialog, fmtDate } from "./util.js";
+import { h, clear, icon, toast, openModal, action, confirmDialog, fmtDate, setText } from "./util.js";
 import { api, state, refreshStatus, setUnauthorizedHandler, isAdmin, canGenerate, post, put, ApiError } from "./api.js";
 import { banner, loading, field, checkbox } from "./components.js";
-import { t, plural, lang, locale, LANGUAGES, setLanguage } from "./i18n.js";
+import { t, plural, lang, locale, LANGUAGES, setLanguage, live } from "./i18n.js";
 import { liveControl } from "./live.js";
 
 // path, page, section of the nav, and the title of the browser tab (a page with a name of its own sets it: setTitle)
@@ -107,7 +107,7 @@ async function route() {
   } catch (err) {
     if (token !== navToken) return;
     if (!(err instanceof ApiError)) console.error(err);  // API errors are shown on the page; this is for real bugs
-    clear(view).append(banner("error", icon("alert", 18), h("div", {}, h("strong", {}, t("Something went wrong.")), " ", err.message || String(err)),
+    clear(view).append(banner("error", icon("alert", 18), h("div", {}, h("strong", {}, t("Something went wrong.")), " ", err.text ?? err.message ?? String(err)),
       h("button", { class: "btn sm", type: "button", onclick: route }, t("Retry"))));
   }
   if (token === navToken) repaintView();
@@ -134,7 +134,7 @@ function highlightNav(section) {
   }
   // on a phone the menu button names the section the page belongs to
   const label = app.querySelector(".nav-toggle-label");
-  if (label) label.textContent = current ? current.title : t("Menu");
+  if (label) setText(label, current ? navLabels[section] : t("Menu"));
   setNavOpen(false);
 }
 
@@ -150,7 +150,9 @@ function setNavOpen(open) {
 // ---------------------------------------------------------------------------------------------------------------------
 // shell
 // ---------------------------------------------------------------------------------------------------------------------
+const navLabels = {};  // each section's name, for the menu button on a phone (highlightNav)
 function navLink(href, section, label, iconName) {
+  navLabels[section] = label;
   // The label is hidden on narrow screens; title and aria-label keep the icon understandable.
   return h("a", { href, "data-section": section, class: "nav-link", title: label, "aria-label": label }, icon(iconName, 16), h("span", {}, label));
 }
@@ -250,7 +252,7 @@ function drawUserMenu(menu) {
     item("key", t("API tokens"), () => { location.hash = "#/tokens"; }),
     h("button", { class: "menu-item", type: "button", role: "menuitem", "aria-haspopup": "menu",
       onclick: (e) => { e.stopPropagation(); drawLanguageMenu(menu); } },
-      icon("globe", 14), t("Language"), h("span", { class: "menu-value" }, LANGUAGES[lang], icon("chevron", 12))),
+      icon("globe", 14), t("Language"), h("span", { class: "menu-value" }, live(() => LANGUAGES[lang]), icon("chevron", 12))),
     h("button", { class: "menu-item", type: "button", role: "menuitem", "aria-haspopup": "menu",
       onclick: (e) => { e.stopPropagation(); drawThemeMenu(menu); } },
       icon("moon", 14), t("Theme"), h("span", { class: "menu-value" }, THEMES[theme()][1](), icon("chevron", 12))),
@@ -310,25 +312,21 @@ function languageOptions() {
   });
 }
 
-// The page is drawn anew in the other language, without loading it again: unsaved changes on it would be lost
+// The texts on the page change where they are (util.js); nothing is drawn or loaded anew, so whatever was typed stays
 async function switchLanguage(code) {
   if (code === lang) return;
-  if (dirtyCheck?.() && !confirm(t("You have unsaved changes. Leave this page anyway?"))) return;
   try {
-    if (!(await setLanguage(code))) return;
+    await setLanguage(code);
   } catch {
     toast(t("The other language could not be loaded. Check your connection."), "error");
-    return;
-  }
-  if (state.user && view) {
-    dirtyCheck = null;
-    renderShell();
-    currentHash = null;
-    await route();
-  } else {
-    await boot();  // the sign-in page, or an invite or reset link
   }
 }
+
+// What util.js does not change where it is: the tab's title, and the check next to the language in an open user menu
+document.addEventListener("apm-language", () => {
+  drawTitle();
+  if (userMenu?.isConnected && !userMenu.hidden && userMenu.querySelector(".lang-option")) drawLanguageMenu(userMenu);
+});
 
 // Up and down move between the entries of a menu
 function menuKeys(menu) {
@@ -355,7 +353,7 @@ function drawLanguageMenu(menu) {
 function languagePicker() {
   const list = h("div", { class: "menu lang-menu", role: "menu", hidden: true }, languageOptions());
   const button = h("button", { class: "btn ghost sm", type: "button", "aria-haspopup": "menu", "aria-expanded": "false" },
-    icon("globe", 14), LANGUAGES[lang], icon("expand", 12));
+    icon("globe", 14), live(() => LANGUAGES[lang]), icon("expand", 12));
   const close = () => {
     list.hidden = true;
     button.setAttribute("aria-expanded", "false");
@@ -373,6 +371,17 @@ function languagePicker() {
   list.addEventListener("keydown", (e) => {
     if (e.key === "Escape") { close(); button.focus(); }
   });
+  // a choice closes the list (its options stop the click from reaching the document, so catch it on the way down)
+  list.addEventListener("click", (e) => {
+    if (e.target.closest(".lang-option")) { close(); button.focus(); }
+  }, true);
+  // the check moves to the new language
+  const redraw = () => {
+    if (!list.isConnected) { document.removeEventListener("apm-language", redraw); return; }
+    clear(list).append(languageOptions());
+    if (!list.hidden) list.querySelector("[aria-checked=true]")?.focus();
+  };
+  document.addEventListener("apm-language", redraw);
   return h("div", { class: "lang-picker" }, button, list);
 }
 
@@ -555,15 +564,15 @@ function renderAuth(notice) {
       { setup: t("Create administrator"), login: t("Sign in"), register: t("Create account") }[mode]);
     const form = h("form", { class: "stack", onsubmit: async (e) => {
       e.preventDefault();
-      error.textContent = "";
-      if (confirm && confirm.value !== password.value) { error.textContent = t("The passwords do not match"); return; }
+      setText(error, "");
+      if (confirm && confirm.value !== password.value) { setText(error, t("The passwords do not match")); return; }
       submit.disabled = true;
       try {
         const path = { setup: "setup", login: "login", register: "register" }[mode];
         await post(`/api/auth/${path}`, { username: username.value, password: password.value, ...(code ? { code: code.value } : {}) });
         await boot();
       } catch (err) {
-        error.textContent = err.message;
+        setText(error, err.text ?? err.message);
         submit.disabled = false;
       }
     } },
@@ -625,7 +634,7 @@ async function renderLinkPage({ kind, token }) {
   try {
     info = await post(`/api/auth/${kind}`, { token });
   } catch (err) {
-    clear(card).append(authBrand(), banner("error", icon("alert", 16), h("div", { class: "grow" }, err.message)),
+    clear(card).append(authBrand(), banner("error", icon("alert", 16), h("div", { class: "grow" }, err.text ?? err.message)),
       h("p", { class: "center small" }, h("a", { href: "#/", onclick: (e) => { e.preventDefault(); leaveLink(); } },
         state.user ? t("Go to the dashboard") : t("Go to the sign-in page"))),
       languagePicker());
@@ -644,7 +653,7 @@ async function renderLinkPage({ kind, token }) {
     const submit = h("button", { class: "btn primary block", type: "submit" }, t("Set password"));
     const form = h("form", { class: "stack", onsubmit: async (e) => {
       e.preventDefault();
-      error.textContent = "";
+      setText(error, "");
       submit.disabled = true;
       try {
         checked();
@@ -652,7 +661,7 @@ async function renderLinkPage({ kind, token }) {
         const revoked = result.tokens_revoked ? ` ${plural(result.tokens_revoked, "{n} API token was revoked.", "{n} API tokens were revoked.")}` : "";
         await leaveLink(t("Your new password is set. You were signed out everywhere else.") + revoked);
       } catch (err) {
-        error.textContent = err.message;
+        setText(error, err.text ?? err.message);
         submit.disabled = false;
       }
     } },
@@ -668,14 +677,14 @@ async function renderLinkPage({ kind, token }) {
   const submit = h("button", { class: "btn primary block", type: "submit" }, t("Create account"));
   const form = h("form", { class: "stack", onsubmit: async (e) => {
     e.preventDefault();
-    error.textContent = "";
+    setText(error, "");
     submit.disabled = true;
     try {
       checked();
       await post("/api/auth/invite/join", { token, username: username.value, password: password.value });
       await leaveLink(t("Welcome! Your account is ready."));
     } catch (err) {
-      error.textContent = err.message;
+      setText(error, err.text ?? err.message);
       submit.disabled = false;
     }
   } },
@@ -690,7 +699,7 @@ async function renderLinkPage({ kind, token }) {
   }) }, icon("login", 16), t("Sign up with Discord")) : null;
   clear(card).append(authBrand(),
     h("p", {}, info.invited_by ? t("{name} invites you to this Archipelago server.", { name: info.invited_by }) : t("You are invited to this Archipelago server."),
-      info.role === "organizer" ? ` ${t("Your account will be an organizer's: you add games, generate them and run sign-up rounds.")}` : ""),
+      info.role === "organizer" ? [" ", t("Your account will be an organizer's: you add games, generate them and run sign-up rounds.")] : null),
     info.note ? h("p", { class: "muted small" }, `“${info.note}”`) : null,
     signedIn, form, discord ? [h("div", { class: "auth-or" }, t("or")), discord] : null,
     h("p", { class: "muted center small" }, t("The invitation is valid until {date}.", { date: fmtDate(info.expires_at) })),
@@ -707,7 +716,7 @@ export async function boot() {
   try {
     await refreshStatus();
   } catch (err) {
-    clear(app).append(h("div", { class: "auth-wrap" }, banner("error", t("Cannot reach the server: {error}", { error: err.message }))));
+    clear(app).append(h("div", { class: "auth-wrap" }, banner("error", t("Cannot reach the server: {error}", { error: err.text ?? err.message }))));
     return;
   }
   if (linkInAddress()) {

@@ -1,4 +1,4 @@
-import { h, clear, icon, openModal, toast, action } from "../util.js";
+import { h, clear, icon, openModal, toast, action, setText } from "../util.js";
 import { api, get, isAdmin, isOrganizer } from "../api.js";
 import { pageHeader, empty, stateBadge, chips, badge, controlButtons, copyField, checkbox, field, promptMissingGames, apVersionField,
   gamesTabs, canLaunch, launchButton } from "../components.js";
@@ -94,7 +94,7 @@ export default async function render({ root, cleanup, isCurrent }) {
       form.append("name", name.value);
       form.append("start", start.input.checked ? "true" : "false");
       if (version) form.append("ap_version", version.read());
-      note.textContent = t("Uploading and reading the multiworld… large files can take a moment.");
+      setText(note, t("Uploading and reading the multiworld… large files can take a moment."));
       try {
         const game = await api("POST", "/api/games", form);
         modal.close();
@@ -103,7 +103,7 @@ export default async function render({ root, cleanup, isCurrent }) {
         location.hash = `#/games/${game.id}`;
         promptMissingGames(game.missing_games.map((g) => ({ game: g, games: [{ id: game.id, name: game.name }] })));
       } finally {
-        note.textContent = "";
+        setText(note, "");
       }
     });
     const modal = openModal({

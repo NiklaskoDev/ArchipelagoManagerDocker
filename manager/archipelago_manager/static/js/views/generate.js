@@ -1,4 +1,4 @@
-import { h, clear, icon, toast, action, fmtAgo, fmtDuration } from "../util.js";
+import { h, clear, icon, toast, action, fmtAgo, fmtDuration, setText } from "../util.js";
 import { api, get, isAdmin, isOrganizer, state } from "../api.js";
 import { pageHeader, chips, banner, badge, field, checkbox, select, jobBadge, missingGamesPanel, missingRomsPanel, promptMissingGames, empty, apVersionField,
   presetBar, gameSettingsSection } from "../components.js";
@@ -33,7 +33,7 @@ export default async function render({ root, cleanup, isCurrent, query }) {
   const boxes = new Map();
 
   function updateSelection() {
-    countLabel.textContent = t("{n} selected", { n: selected.size });
+    setText(countLabel, t("{n} selected", { n: selected.size }));
     const chosen = configs.filter((c) => selected.has(c.id));
     const missing = [...new Set(chosen.flatMap((c) => c.missing_games))];
     clear(missingHost).append(missingGamesPanel(missing.map((game) => ({
@@ -150,7 +150,7 @@ export default async function render({ root, cleanup, isCurrent, query }) {
       h("tbody", {}, list.slice(0, 12).map((j) => h("tr", {},
         h("td", {}, h("a", { href: `#/jobs/${j.id}`, class: "slot-name" }, j.name || t("Job #{id}", { id: j.id })), j.test ? [" ", badge(t("Test"), "accent")] : null,
           admin && j.creator ? h("div", { class: "muted small" }, j.creator) : null),
-        h("td", {}, jobBadge(j.status), j.queue_position ? h("span", { class: "muted small" }, ` ${t("#{n} in queue", { n: j.queue_position })}`) : null),
+        h("td", {}, jobBadge(j.status), j.queue_position ? h("span", { class: "muted small" }, " ", t("#{n} in queue", { n: j.queue_position })) : null),
         h("td", { class: "muted" }, fmtAgo(j.started_at || j.created_at)),
         h("td", {}, j.game_id ? h("a", { href: `#/games/${j.game_id}` }, t("Open game"))
           : j.test && j.status === "succeeded" ? h("span", { class: "muted small" }, t("Test passed"))

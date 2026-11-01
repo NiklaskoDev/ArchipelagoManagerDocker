@@ -1,9 +1,9 @@
 import { h, clear, icon, toast, action, confirmDialog, openModal, fmtBytes, fmtAgo, fmtDate, fmtUntil, fmtSpan, shortName,
-         toLocalInput, fromLocalInput, withNodes } from "../util.js";
+         toLocalInput, fromLocalInput, withNodes, setText } from "../util.js";
 import { api, get, post, patch, del, isAdmin, canGenerate, state } from "../api.js";
 import { stateBadge, badge, chips, progressBar, copyField, copyButton, controlButtons, banner, field, checkbox, select,
          missingGamesPanel, isActive, serverOptionsForm, deliveryStatus, canLaunch, launchButton } from "../components.js";
-import { t, tServer, plural, lang } from "../i18n.js";
+import { t, tServer, plural, lang, live } from "../i18n.js";
 import { textClientSection } from "../textclient.js";
 import { activitySection } from "../feed.js";
 import { awaySummary } from "../away.js";
@@ -50,11 +50,11 @@ export default async function render({ root, params, cleanup, isCurrent, query, 
         h("div", {},
           h("div", { class: "row" }, h("h1", {}, game.name), stateBadge(game.state), game.race_mode ? badge(t("Race mode"), "warn") : null,
             game.finished_at ? badge(t("Finished"), "ok") : null),
-          h("p", { class: "muted" }, [
+          h("p", { class: "muted" }, live(() => [
             game.seed_name ? t("Seed {name}", { name: game.seed_name }) : null,
             game.source === "generated" ? t("generated here") : t("uploaded"),
             t("added {date}", { date: fmtDate(game.created_at) }),
-          ].filter(Boolean).join(" · "))),
+          ].filter(Boolean).join(" · ")))),
         h("div", { class: "page-actions" }, controlButtons(game, applyGame),
           // the same configs and options once more, with a new seed
           game.job_available && canGenerate()
@@ -82,7 +82,7 @@ export default async function render({ root, params, cleanup, isCurrent, query, 
     const left = h("strong");
     const tick = () => {
       const s = Math.round(start.at - Date.now() / 1000);
-      left.textContent = s <= 0 ? t("now") : s < 60 ? t("in {n} s", { n: s }) : fmtUntil(start.at);
+      setText(left, s <= 0 ? t("now") : s < 60 ? t("in {n} s", { n: s }) : fmtUntil(start.at));
     };
     tick();
     startTimer = setInterval(tick, 1000);
@@ -95,7 +95,7 @@ export default async function render({ root, params, cleanup, isCurrent, query, 
     ].filter(Boolean).join(" ");
     return banner(opened ? "ok" : "info", icon("calendar", 18), h("div", { class: "grow" },
       h("div", {}, t("Starts {date}", { date: fmtDate(start.at) }), " · ", left), h("div", { class: "muted small" }, how)),
-      h("a", { class: "btn sm", href: `/api/games/${id}/start.ics?lang=${lang}`, title: t("A calendar file, with a reminder when the server opens") },
+      h("a", { class: "btn sm", href: live(() => `/api/games/${id}/start.ics?lang=${lang}`), title: t("A calendar file, with a reminder when the server opens") },
         icon("calendar", 14), t("Add to calendar")));
   }
 
@@ -339,7 +339,7 @@ export default async function render({ root, params, cleanup, isCurrent, query, 
             : h("span", { class: "muted" }, s.type === 1 ? (manage || s.mine ? t("no file") : "") : ""))))))),
       !manage && game.claimable && !game.my_slots.length
         ? h("p", { class: "muted small", style: { marginTop: "8px" } }, t("Find your slot above and press “{button}” to get your files.", { button: t("This is mine") }),
-          game.single_claim ? ` ${t("Each player can claim one slot.")}` : "") : null,
+          game.single_claim ? [" ", t("Each player can claim one slot.")] : null) : null,
       !manage && game.claimable && game.single_claim && game.my_slots.length && game.slots.some((s) => s.type === 1 && !s.user_id)
         ? h("p", { class: "muted small", style: { marginTop: "8px" } }, t("Each player can claim one slot. To swap, release yours first.")) : null));
   }
@@ -454,7 +454,7 @@ export default async function render({ root, params, cleanup, isCurrent, query, 
   function trackerSection(slots) {
     let current = (slots.find((s) => s.mine) || slots[0]).slot;
     let tab = "items", data = null, loaded = "";
-    const picker = slots.length > 1 ? select(slots.map((s) => [s.slot, `${s.name} (${s.game})${s.mine ? ` · ${t("you")}` : ""}`]), current) : null;
+    const picker = slots.length > 1 ? select(slots.map((s) => [s.slot, live(() => `${s.name} (${s.game})${s.mine ? ` · ${t("you")}` : ""}`)]), current) : null;
     if (picker) picker.style.maxWidth = "320px";
     const search = h("input", { class: "input", type: "search", placeholder: t("Filter…"), "aria-label": t("Filter the tracker") });
     const summary = h("div", { class: "muted small" });
@@ -592,7 +592,7 @@ export default async function render({ root, params, cleanup, isCurrent, query, 
         });
         return button;
       }) : [];
-      clear(rulesHost).append(h("span", { class: "small" }, points, next ? h("span", { class: "muted" }, ` · ${next}`) : null), ...controls.filter(Boolean));
+      clear(rulesHost).append(h("span", { class: "small" }, points, next ? h("span", { class: "muted" }, " · ", next) : null), ...controls.filter(Boolean));
     }
 
     function draw() {
@@ -600,11 +600,11 @@ export default async function render({ root, params, cleanup, isCurrent, query, 
       drawRules();
       const checked = data.locations.filter((l) => l.checked).length;
       const openHints = data.hints.filter((x) => !x.found && x.for_me).length;
-      clear(summary).append([
+      clear(summary).append(live(() => [
         plural(data.items.length, "{n} item received", "{n} items received"),
         plural(data.locations.length, "{checked} of {n} location checked", "{checked} of {n} locations checked", { checked }),
         plural(openHints, "{n} open hint", "{n} open hints"),
-      ].join(" · "), data.goal ? [" · ", badge(t("Goal complete"), "ok")] : null);
+      ].join(" · ")), data.goal ? [" · ", badge(t("Goal complete"), "ok")] : null);
       const labels = { items: t("Items ({n})", { n: data.items.length }),
         locations: t("Locations ({n})", { n: `${checked}/${data.locations.length}` }), hints: t("Hints ({n})", { n: data.hints.length }) };
       clear(tabs).append(["items", "locations", "hints"].map((key) => h("button", { class: "tab", type: "button", role: "tab",
@@ -913,7 +913,7 @@ export default async function render({ root, params, cleanup, isCurrent, query, 
     const note = h("p", { class: "muted small" });
     const sync = () => {
       go.disabled = isActive(game);
-      note.textContent = isActive(game) ? t("Stop the server first") : "";
+      setText(note, isActive(game) ? t("Stop the server first") : "");
     };
     go.onclick = action(async () => {
       if (!room.value.trim()) throw new Error(t("Paste the address of the room first"));

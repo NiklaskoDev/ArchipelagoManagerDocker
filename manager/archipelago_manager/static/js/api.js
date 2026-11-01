@@ -9,6 +9,7 @@ export const state = {
 export class ApiError extends Error {
   constructor(message, status, data) {
     super(message);
+    this.text = message;  // a Text (i18n.js): shown on the page, it follows a change of language
     this.status = status;
     this.data = data;
   }

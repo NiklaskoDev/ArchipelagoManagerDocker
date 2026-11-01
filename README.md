@@ -506,8 +506,8 @@ an administrator's change was made with.
 
 The web UI is available in English, German (Deutsch), French (Français) and Dutch (Nederlands). It follows the
 browser's preferred languages at first; switch it with the language button on the sign-in page or under *Language* in
-the user menu (the choice is remembered in that browser). The page you are on is drawn again in the new language at
-once, without loading it again; only unsaved changes on it would be lost, and you are asked first. Dates and numbers follow the language, in the browser's own
+the user menu (the choice is remembered in that browser). The texts change where they are: the page is neither
+loaded nor drawn again, so what you typed, the sections you opened and where you scrolled to stay as they were. Dates and numbers follow the language, in the browser's own
 variant of it where there is one (Swiss German, Canadian French, Belgian Dutch, …). Calendar files come in it too.
 
 It is dark, or light when the system asks for that. *Theme* in the user menu picks *Light* or *Dark* instead, for that
@@ -756,7 +756,10 @@ DATA_DIR=../data AP_DIR=$PWD/../Archipelago AP_PYTHON=$PWD/../ap-venv/bin/python
 - **Image smoke test:** `SETUP_CODE=… python tests/smoke.py http://localhost:8080` against a fresh instance, with the
   setup code from its log. CI runs it against the built image before publishing.
 - The front end is plain ES modules in `manager/archipelago_manager/static/`, with no build step: what you edit is what
-  the browser runs. The image takes the comments and spaces out of the scripts and styles and puts a gzip copy next
+  the browser runs. Texts come from `t()` and `plural()` (`i18n.js`), which give a `Text`: a string that remembers how it
+  was made, so that a change of language can rewrite it where it stands. Put it on the page with `h()`, `append()`,
+  `setText()` or `setAttribute()`, not with `el.textContent = …`, and make a sentence of several texts with
+  `live(() => …)`, not by joining them into a plain string. The image takes the comments and spaces out of the scripts and styles and puts a gzip copy next
   to each text file (`docker/build-assets.mjs`, with esbuild); the server sends that copy to browsers that take it.
   To try that locally: `npm install esbuild && node docker/build-assets.mjs <copy of the static folder>`.
 - `ap_helper.py` runs inside Archipelago's own Python environment: it lists worlds, decodes multidata and saves,

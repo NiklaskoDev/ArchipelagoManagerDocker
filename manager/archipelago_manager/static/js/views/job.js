@@ -1,7 +1,7 @@
 import { h, clear, icon, toast, action, confirmDialog, fmtDate, fmtDuration } from "../util.js";
 import { get, post, del, canGenerate } from "../api.js";
 import { pageHeader, jobBadge, chips, banner, badge } from "../components.js";
-import { t, tServer } from "../i18n.js";
+import { t, tServer, live } from "../i18n.js";
 import { every } from "../live.js";
 
 export default async function render({ root, params, cleanup, isCurrent, setTitle }) {
@@ -21,11 +21,11 @@ export default async function render({ root, params, cleanup, isCurrent, setTitl
     clear(head).append(
       h("div", { class: "muted small" }, job.signup ? h("a", { href: `#/signups/${job.signup.id}` }, `← ${job.signup.name}`)
         : h("a", { href: "#/generate" }, t("← Generate"))),
-      pageHeader(job.name || t("Job #{id}", { id: job.id }), [
+      pageHeader(job.name || t("Job #{id}", { id: job.id }), live(() => [
         job.test ? t("Test generation: the result is not kept") : null,
         t("Started by {name}", { name: job.creator || t("unknown") }), fmtDate(job.created_at),
         job.started_at ? t("took {duration}", { duration: fmtDuration(elapsed) }) : null,
-      ].filter(Boolean).join(" · "),
+      ].filter(Boolean).join(" · ")),
         job.test ? badge(t("Test"), "accent") : null,
         jobBadge(job.status),
         job.queue_position ? badge(t("#{n} in queue", { n: job.queue_position }), "muted") : null,

@@ -34,7 +34,7 @@ export function awaySummary({ gameId, cleanup, isCurrent }) {
     }
     for (const s of summary.stuck) {
       lines.push(h("li", {}, withNodes(s.note ? t("{player} is stuck: {note}") : t("{player} is stuck"),
-        { player: player(s.player), note: s.note || "" }), h("span", { class: "muted small" }, ` · ${fmtAgo(s.at)}`)));
+        { player: player(s.player), note: s.note || "" }), h("span", { class: "muted small" }, " · ", fmtAgo(s.at))));
     }
     if (summary.goals.length) {
       lines.push(h("li", {}, withNodes(plural(summary.goals.length, "{players} reached their goal", "{players} reached their goals"),
