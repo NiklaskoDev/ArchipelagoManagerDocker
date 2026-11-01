@@ -4,7 +4,7 @@ import { get, post, del, isAdmin } from "../api.js";
 import { pageHeader, badge, field, select, copyField, empty } from "../components.js";
 import { t } from "../i18n.js";
 
-const EXPIRY = [["90", t("90 days")], ["30", t("30 days")], ["365", t("1 year")], ["", t("Never")]];
+const EXPIRY = () => [["90", t("90 days")], ["30", t("30 days")], ["365", t("1 year")], ["", t("Never")]];
 
 export default async function render({ root, isCurrent }) {
   const admin = isAdmin();
@@ -13,7 +13,7 @@ export default async function render({ root, isCurrent }) {
 
   const name = h("input", { class: "input", maxLength: 60, placeholder: t("e.g. Discord bot, status page") });
   const access = select([["read", t("Read only")], ["write", t("Read and change")]], "read");
-  const expires = select(EXPIRY, "90");
+  const expires = select(EXPIRY(), "90");
   const create = h("button", { class: "btn primary", type: "button" }, icon("plus", 14), t("Create token"));
   create.onclick = action(async () => {
     if (!name.value.trim()) throw new Error(t("Give the token a name, such as what uses it"));

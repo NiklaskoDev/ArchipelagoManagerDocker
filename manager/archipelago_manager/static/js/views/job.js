@@ -2,6 +2,7 @@ import { h, clear, icon, toast, action, confirmDialog, fmtDate, fmtDuration } fr
 import { get, post, del, canGenerate } from "../api.js";
 import { pageHeader, jobBadge, chips, banner, badge } from "../components.js";
 import { t, tServer } from "../i18n.js";
+import { every } from "../live.js";
 
 export default async function render({ root, params, cleanup, isCurrent, setTitle }) {
   const id = Number(params[0]);
@@ -9,7 +10,7 @@ export default async function render({ root, params, cleanup, isCurrent, setTitl
   const out = h("div", { class: "console job-log", tabIndex: 0, "aria-label": t("Generator output") });
   const head = h("div");
   const playersHost = h("div");
-  let after = 0, timer = null, busy = false;
+  let after = 0, stopPolling = () => {}, busy = false;
 
   const finished = () => !["queued", "running"].includes(job.status);
   const generates = canGenerate();
@@ -74,7 +75,7 @@ export default async function render({ root, params, cleanup, isCurrent, setTitl
       job = fresh;
       if (changed || !finished()) drawHead();
       if (finished()) {
-        clearInterval(timer);
+        stopPolling();
         drawPlayers();
         if (fresh.game_id) toast(t("Generation finished"), "success");
       }
@@ -87,6 +88,5 @@ export default async function render({ root, params, cleanup, isCurrent, setTitl
     h("div", { class: "section" }, h("div", { class: "section-head" }, h("h2", {}, t("Generator output"))), out),
     h("div", { class: "section" }, h("div", { class: "section-head" }, h("h2", {}, t("Players ({n})", { n: job.players.length }))), playersHost));
   await poll();
-  if (!finished()) timer = setInterval(() => { if (!document.hidden) poll().catch(() => {}); }, 1200);
-  cleanup(() => clearInterval(timer));
+  if (!finished()) stopPolling = every(1200, poll, cleanup);
 }

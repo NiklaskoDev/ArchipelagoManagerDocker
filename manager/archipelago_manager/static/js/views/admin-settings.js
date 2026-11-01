@@ -200,7 +200,7 @@ function versionsCard(cleanup) {
     host, h("div", { class: "row" }, input, install));
 }
 
-const EVENTS = [
+const EVENTS = () => [
   ["game_online", t("A game goes online"), t("When someone starts it; not when it comes back after a crash or a restart of the container.")],
   ["game_crashed", t("A game server crashes")],
   ["player_goal", t("A player reaches their goal, and when everyone has")],
@@ -222,7 +222,7 @@ function notificationsCard(settings) {
   const webhook = h("input", { class: "input", type: "url", value: settings.discord_webhook_url, autocomplete: "off",
     placeholder: "https://discord.com/api/webhooks/…" });
   const language = select(Object.entries(LANGUAGES), settings.notify_language);
-  const boxes = EVENTS.map(([key, label, hint]) => ({ key, box: checkbox(label, settings.notify_events.includes(key), hint) }));
+  const boxes = EVENTS().map(([key, label, hint]) => ({ key, box: checkbox(label, settings.notify_events.includes(key), hint) }));
   const mentions = checkbox(t("Let players be mentioned"), settings.notify_mentions,
     t("Players who linked their Discord account choose in their user menu what they want to be mentioned for, such as their game going online. Nobody else is ever mentioned, not @everyone and no role."));
   const statusHost = h("div");
@@ -347,7 +347,8 @@ function discordLoginCard(settings, siteUrl) {
     h("p", { class: "muted small" }, t("In the Discord Developer Portal (discord.com/developers/applications): create an application, add the redirect address below under OAuth2 → Redirects, then copy the client ID and the client secret from OAuth2 into the fields here.")),
     enabled,
     field(t("Redirect address"), redirectHost, t("Discord only sends people back to this exact address.")),
-    h("div", { class: "form-grid" },
+    // a form around the secret (saved with the page's button): browsers expect password fields to be in one
+    h("form", { class: "form-grid", onsubmit: (e) => e.preventDefault() },
       field(t("Client ID"), clientId),
       field(t("Client secret"), secret, secretHint)),
     signup,

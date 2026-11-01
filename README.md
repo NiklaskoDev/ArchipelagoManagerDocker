@@ -165,7 +165,8 @@ and the game page marks the address *encrypted*. A client that cannot find out b
    - *Open in Archipelago* next to your slot name does the connecting for you, if Archipelago is installed on your
      computer: its Launcher opens the client of your game, with the address, your slot name and the password filled
      in. Not every game's client takes such a link (`archipelago://`); for the others the Launcher opens the Text
-     Client, connected to your slot.
+     Client, connected to your slot. The button is on your game's card on the dashboard, in the list of games and on
+     the game page (under *Connect* and in your row of the slots), whenever the game's server is running.
 4. While you play, **Your tracker** on the game page shows the items you received (and from whom), the locations you
    still have to check, and your hints: where your items are, and which items of other players are in your world. It
    is read from the server's save, so it can be up to a minute behind.
@@ -505,11 +506,24 @@ an administrator's change was made with.
 
 The web UI is available in English, German (Deutsch), French (Français) and Dutch (Nederlands). It follows the
 browser's preferred languages at first; switch it with the language button on the sign-in page or under *Language* in
-the user menu (the choice is remembered in that browser). Dates and numbers follow the language, in the browser's own
+the user menu (the choice is remembered in that browser). The page you are on is drawn again in the new language at
+once, without loading it again; only unsaved changes on it would be lost, and you are asked first. Dates and numbers follow the language, in the browser's own
 variant of it where there is one (Swiss German, Canadian French, Belgian Dutch, …). Calendar files come in it too.
 
 It is dark, or light when the system asks for that. *Theme* in the user menu picks *Light* or *Dark* instead, for that
 browser (its other tabs follow at once); *As on this device* goes back to the system's choice.
+
+### Automatic updates
+
+Pages that show what changes on their own (the dashboard, the games, a game, the sign-ups, a generation) ask the server
+for news every few seconds, the game page every 4 seconds, the list of games every 5. A line above such a page says
+when it last did. ↻ updates it now; ⏸ pauses the automatic updates, so that the page only changes when you press ↻
+(the choice is kept in that browser, and its other tabs follow). A page in a background tab asks nothing, except that
+the game page counts new messages for the tab's title every 20 seconds, and catches up when you look at it again.
+Signing out, or leaving the page, ends its updates. Pages without the line do not update by themselves. Apart from
+that, only what you start yourself asks the server on its own: the text client and the server console while they are
+open, the settings page while an Archipelago version installs, and the game page of a game you play, which tells the
+server once a minute that you are looking at it (for *While you were away*).
 
 ### Custom games (APWorlds)
 
@@ -710,6 +724,17 @@ approve pull requests*. You can also run the workflow by hand (*Actions → Arch
 - **Generation fails.** The job page shows the generator's output and the relevant error. A missing or wrong base ROM
   is explained in plain words; see [Games that need a base ROM](#games-that-need-a-base-rom).
 - **Edits to `host.yaml` are lost.** That happens when running as root (`PUID=0`); use a regular user.
+- **Messages in the browser's console that are not the manager's.** The pages have no inline scripts and the manager
+  sends no `Permissions-Policy` header, so these come from elsewhere:
+  - *Error with Permissions-Policy header: Unrecognized feature: 'browsing-topics'* (or `attribution-reporting`,
+    `join-ad-interest-group`, `run-ad-auction`, `private-aggregation`): a reverse proxy or CDN in front of the manager
+    adds that header, naming features browsers have dropped. Compare `curl -sI http://<unraid-ip>:8080/` with
+    `curl -sI https://<your-address>/` and remove the names (or the header) in the proxy's settings.
+  - *Content-Security-Policy: The page's settings blocked an inline script*: a browser extension tried to put a script
+    into the page, and the page's policy stopped it, as it should. In a private window without extensions the message
+    is gone.
+  - *MaxListenersExceededWarning: Possible EventEmitter memory leak detected*: written by bundled code of a browser
+    extension (the manager has no such code); the same private window shows that.
 
 ## Development
 
@@ -730,7 +755,10 @@ DATA_DIR=../data AP_DIR=$PWD/../Archipelago AP_PYTHON=$PWD/../ap-venv/bin/python
 - **Browser walkthrough:** `tests/ui/flows.mjs` drives the UI with Playwright (see the file header).
 - **Image smoke test:** `SETUP_CODE=… python tests/smoke.py http://localhost:8080` against a fresh instance, with the
   setup code from its log. CI runs it against the built image before publishing.
-- The front end is plain ES modules in `manager/archipelago_manager/static/`, with no build step.
+- The front end is plain ES modules in `manager/archipelago_manager/static/`, with no build step: what you edit is what
+  the browser runs. The image takes the comments and spaces out of the scripts and styles and puts a gzip copy next
+  to each text file (`docker/build-assets.mjs`, with esbuild); the server sends that copy to browsers that take it.
+  To try that locally: `npm install esbuild && node docker/build-assets.mjs <copy of the static folder>`.
 - `ap_helper.py` runs inside Archipelago's own Python environment: it lists worlds, decodes multidata and saves,
   renders templates and describes each game's options for the options form, so the manager never imports Archipelago's
   code itself. `ap_server.py` starts a game's `MultiServer.py` there, with the passwords it reads from the server's

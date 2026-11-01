@@ -43,9 +43,12 @@ def test_a_player_hands_their_slot_to_someone_they_name(ap_server, admin, make_u
         assert cy_name in message["description"]
 
         # cy now sees the game, with the offer, but not its password or files until taking it
+        assert admin.patch(f"/api/games/{gid}", json={"password": "game-pw"}).status_code == 200
+        assert next(g for g in bob.get("/api/games").json() if g["id"] == gid)["password"] == "game-pw"  # a player
         listed = cy.get("/api/games").json()
         assert [g["id"] for g in listed] == [gid]
         assert [(o["name"], o["to_me"], o["from"]) for o in listed[0]["offered_slots"]] == [("Leaver", True, _ann_name)]
+        assert listed[0]["password"] is None
         seen = cy.get(f"/api/games/{gid}").json()
         assert seen["password"] is None and seen["my_slots"] == []
         assert next(s for s in seen["slots"] if s["name"] == "Leaver")["handover"]["can_accept"] is True

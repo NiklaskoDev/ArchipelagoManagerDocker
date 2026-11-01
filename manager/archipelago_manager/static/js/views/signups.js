@@ -3,6 +3,7 @@ import { get, isOrganizer } from "../api.js";
 import { pageHeader, empty, chips, badge } from "../components.js";
 import { openSignupForm, signupBadge, deadlineText } from "./signup.js";
 import { t, plural } from "../i18n.js";
+import { every } from "../live.js";
 
 export function signupCard(s) {
   return h("div", { class: "card game-card" },
@@ -56,6 +57,5 @@ export default async function render({ root, cleanup, isCurrent }) {
       organizer ? h("button", { class: "btn primary", type: "button", onclick: create }, icon("plus", 14), t("New round")) : null),
     host);
   await load(true);
-  const timer = setInterval(() => { if (!document.hidden) load().catch(() => {}); }, 8000);
-  cleanup(() => clearInterval(timer));
+  every(8000, load, cleanup);
 }

@@ -55,6 +55,17 @@ RUN python -m venv /opt/venv-manager \
  && /opt/venv-manager/bin/pip install -r /tmp/requirements.txt
 
 # ---------------------------------------------------------------------------------------------------------------------
+# Stage 3: the web UI's files as browsers get them: scripts and styles without comments and spaces, and a gzip copy of
+# each text file (docker/build-assets.mjs). The same for every platform, so built once, on the builder's own.
+# ---------------------------------------------------------------------------------------------------------------------
+FROM --platform=$BUILDPLATFORM node:22-alpine AS assets
+WORKDIR /build
+RUN npm install --no-audit --no-fund --loglevel=error esbuild@0.25.10
+COPY docker/build-assets.mjs ./
+COPY manager/archipelago_manager/static /static
+RUN node build-assets.mjs /static
+
+# ---------------------------------------------------------------------------------------------------------------------
 # Final image
 # ---------------------------------------------------------------------------------------------------------------------
 FROM python:${PYTHON_VERSION}-slim-bookworm
@@ -77,6 +88,7 @@ COPY --from=archipelago /opt/archipelago /opt/archipelago
 COPY --from=archipelago /opt/venv-ap /opt/venv-ap
 COPY --from=manager /opt/venv-manager /opt/venv-manager
 COPY manager /app/manager
+COPY --from=assets /static /app/manager/archipelago_manager/static
 COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh \
  && /opt/venv-manager/bin/python -m compileall -q /app/manager

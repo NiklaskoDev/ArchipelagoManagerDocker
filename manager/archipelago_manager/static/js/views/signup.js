@@ -2,9 +2,10 @@ import { h, clear, icon, toast, action, confirmDialog, openModal, fmtAgo, fmtDat
 import { api, get, post, patch, del, state } from "../api.js";
 import { banner, badge, chips, field, checkbox, select, missingGamesPanel, missingRomsPanel, promptMissingGames, presetBar, gameSettingsSection } from "../components.js";
 import { t, plural, tServer, lang } from "../i18n.js";
+import { every } from "../live.js";
 
-const SPOILER_CHOICES = [[1, t("Basic spoiler log")], [0, t("No spoiler log")], [2, t("With playthrough")], [3, t("Playthrough and paths")]];
-const PLANDO = [["bosses", t("Bosses")], ["connections", t("Connections")], ["texts", t("Texts")], ["items", t("Items")]];
+const SPOILER_CHOICES = () => [[1, t("Basic spoiler log")], [0, t("No spoiler log")], [2, t("With playthrough")], [3, t("Playthrough and paths")]];
+const PLANDO = () => [["bosses", t("Bosses")], ["connections", t("Connections")], ["texts", t("Texts")], ["items", t("Items")]];
 
 export function signupBadge(signup) {
   if (signup.status === "open") return signup.open ? badge(t("Open for entries"), "ok") : badge(t("Closing…"), "warn");
@@ -140,10 +141,10 @@ export async function openSignupForm({ signup = null, onSaved }) {
 
   const autoGenerate = checkbox(t("Generate the game automatically when sign-ups close"), signup ? signup.auto_generate : true);
   const hostAfter = checkbox(t("Start the server once the game is generated"), opts.host_after);
-  const spoiler = select(SPOILER_CHOICES, opts.spoiler);
+  const spoiler = select(SPOILER_CHOICES(), opts.spoiler);
   const race = checkbox(t("Race mode"), opts.race, t("Spoiler log is withheld and patches are encrypted where supported."));
   const skipBalance = checkbox(t("Skip progression balancing"), opts.skip_prog_balancing);
-  const plando = PLANDO.map(([key, label]) => ({ key, box: checkbox(label, opts.plando.includes(key)) }));
+  const plando = PLANDO().map(([key, label]) => ({ key, box: checkbox(label, opts.plando.includes(key)) }));
   const gameSettings = presetData.server_defaults ? gameSettingsSection(opts.server_options, presetData.server_defaults) : null;
   const generationDetails = h("details", {}, h("summary", { class: "muted" }, t("Generation options")),
     h("div", { class: "stack", style: { marginTop: "10px" } },
@@ -508,6 +509,5 @@ export default async function render({ root, params, cleanup, isCurrent, setTitl
   signature = JSON.stringify(signup);
   draw();
   root.append(host);
-  const timer = setInterval(() => { if (!document.hidden) refresh().catch(() => {}); }, 5000);
-  cleanup(() => clearInterval(timer));
+  every(5000, refresh, cleanup);
 }

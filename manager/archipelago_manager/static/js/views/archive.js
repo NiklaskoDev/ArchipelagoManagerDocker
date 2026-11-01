@@ -2,6 +2,7 @@ import { h, clear, fmtDate, fmtSpan } from "../util.js";
 import { get } from "../api.js";
 import { pageHeader, empty, chips, badge, gamesTabs } from "../components.js";
 import { t } from "../i18n.js";
+import { every } from "../live.js";
 
 // Games that are over: every player reached their goal ("finished"), or they were moved here before that ("aborted")
 const OUTCOMES = [["all", () => t("All")], ["finished", () => t("Finished")], ["aborted", () => t("Aborted")]];
@@ -62,6 +63,5 @@ export default async function render({ root, cleanup, isCurrent }) {
 
   root.append(pageHeader(t("Archive"), t("Games that are over: finished by every player, or aborted before that.")), tabsHost, host);
   await load(true);
-  const timer = setInterval(() => { if (!document.hidden) load().catch(() => {}); }, 15000);
-  cleanup(() => clearInterval(timer));
+  every(15000, load, cleanup);
 }

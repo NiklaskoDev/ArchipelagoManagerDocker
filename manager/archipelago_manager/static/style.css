@@ -102,6 +102,15 @@ code, .mono { font-family: var(--mono); font-size: .9em; }
 .nav-link:hover { color: var(--text); background: var(--surface-2); text-decoration: none; }
 .nav-link[aria-current="page"] { color: var(--text); background: var(--surface-2); box-shadow: inset 0 -2px 0 var(--accent); }
 .user-menu { position: relative; }
+/* automatic updates (live.js): a line above a page that updates itself, with when it last did, a button that updates it
+   now and one that pauses the updates */
+.live { max-width: 1180px; margin: 0 auto; padding: 10px 16px 0; display: flex; justify-content: flex-end; align-items: center; gap: 2px; }
+.live:not([hidden]) + .view { padding-top: 4px; }
+.live-text { color: var(--muted); font-size: .8rem; font-weight: 400; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.live.paused .live-text { color: var(--warn); }
+.live.failed .live-text { color: var(--bad); }
+.live.busy .live-refresh .icon { animation: spin .8s linear infinite; }
+@media (prefers-reduced-motion: reduce) { .live.busy .live-refresh .icon { animation: none; } }
 .user-btn { gap: 8px; }
 /* Names come from players: one that changes the text direction stays inside its own element (see i18n.js fill) */
 span, code, strong, em, a, bdi { unicode-bidi: isolate; }
@@ -393,6 +402,7 @@ input.switch:disabled { opacity: .5; cursor: not-allowed; }
   h1 { font-size: 1.35rem; }
   .card { padding: 14px; }
   .user-btn span:not(.badge) { display: none; }
+  .live { padding: 6px 12px 0; }
   .kv { grid-template-columns: 1fr; gap: 2px; }
   .kv dt { margin-top: 8px; }
   .opt-row { grid-template-columns: 1fr; }

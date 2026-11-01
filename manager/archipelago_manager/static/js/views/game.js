@@ -2,17 +2,18 @@ import { h, clear, icon, toast, action, confirmDialog, openModal, fmtBytes, fmtA
          toLocalInput, fromLocalInput, withNodes } from "../util.js";
 import { api, get, post, patch, del, isAdmin, canGenerate, state } from "../api.js";
 import { stateBadge, badge, chips, progressBar, copyField, copyButton, controlButtons, banner, field, checkbox, select,
-         missingGamesPanel, isActive, serverOptionsForm, deliveryStatus } from "../components.js";
+         missingGamesPanel, isActive, serverOptionsForm, deliveryStatus, canLaunch, launchButton } from "../components.js";
 import { t, tServer, plural, lang } from "../i18n.js";
 import { textClientSection } from "../textclient.js";
 import { activitySection } from "../feed.js";
 import { awaySummary } from "../away.js";
 import { progressSection, playedText } from "../progresschart.js";
+import { every } from "../live.js";
 
 // what a backup was made for, and the kind of a game file, as the server names them
-const BACKUP_REASONS = { auto: t("automatic"), manual: t("made by hand"), "before-reset": t("before a reset"), "before-restore": t("before a restore"),
-  "before-import": t("before taking over from archipelago.gg") };
-const FILE_KINDS = { patch: t("patch"), spoiler: t("spoiler"), yaml: t("yaml"), other: t("other") };
+const BACKUP_REASONS = () => ({ auto: t("automatic"), manual: t("made by hand"), "before-reset": t("before a reset"), "before-restore": t("before a restore"),
+  "before-import": t("before taking over from archipelago.gg") });
+const FILE_KINDS = () => ({ patch: t("patch"), spoiler: t("spoiler"), yaml: t("yaml"), other: t("other") });
 // what a player says about how they are doing (PUT /api/games/{id}/slots/{slot}/status)
 const SLOT_STATUSES = { playing: ["ok", () => t("Playing")], stuck: ["warn", () => t("Stuck")], away: ["muted", () => t("On a break")] };
 const STATUS_NOTE_LENGTH = 140;
@@ -222,9 +223,7 @@ export default async function render({ root, params, cleanup, isCurrent, query, 
         game.password ? [h("dt", {}, t("Password")), h("dd", {}, copyField(game.password))] : null,
         game.my_slots.length ? [h("dt", {}, plural(game.my_slots.length, "Your slot", "Your slots")),
           h("dd", { class: "stack tight" }, game.my_slots.map((s) => h("div", { class: "row" },
-            copyField(s.name), h("span", { class: "muted" }, s.game),
-            game.address ? h("a", { class: "btn sm", href: launchLink(s), title: t("Opens Archipelago's Launcher on this computer, connected to your slot") },
-              icon("external", 14), t("Open in Archipelago")) : null)))] : null,
+            copyField(s.name), h("span", { class: "muted" }, s.game), canLaunch(game) ? launchButton(game, s) : null)))] : null,
         h("dt", {}, "Archipelago"), h("dd", {}, game.ap_version || "—",
           game.ap_version_own ? h("span", { class: "muted small" }, " ", t("(use a client of this version)")) : null),
         h("dt", {}, t("Progress")), h("dd", {}, progressBar(game.progress.checked, game.progress.total))),
@@ -233,15 +232,8 @@ export default async function render({ root, params, cleanup, isCurrent, query, 
         : t("In your Archipelago client, enter the server address and your slot name."),
         game.tls && game.address ? [" ", withNodes(t("The connection is encrypted; a client that does not find that out by itself takes {address}."),
           { address: h("span", { class: "mono" }, `wss://${game.address}`) })] : null,
-        game.my_slots.length && game.address ? [" ", t("Or press “{button}”: with Archipelago installed, its Launcher opens the client for your game already connected (the Text Client, if your game's client does not take links).",
+        game.my_slots.length && canLaunch(game) ? [" ", t("Or press “{button}”: with Archipelago installed, its Launcher opens the client for your game already connected (the Text Client, if your game's client does not take links).",
           { button: t("Open in Archipelago") })] : null)));
-  }
-
-  // Archipelago's Launcher opens archipelago://slot:password@host:port links (Launcher.handle_uri): it offers the clients
-  // of the game that take such a link, else the Text Client, and they connect to the slot.
-  function launchLink(slot) {
-    const password = game.password ? `:${encodeURIComponent(game.password)}` : "";
-    return `archipelago://${encodeURIComponent(slot.name)}${password}@${game.address}?game=${encodeURIComponent(slot.game)}`;
   }
 
   // -------------------------------------------------------------------------------------------------------------------
@@ -335,7 +327,8 @@ export default async function render({ root, params, cleanup, isCurrent, query, 
         h("thead", {}, h("tr", {}, ["#", t("Player"), t("Game"), t("Owner"), t("Progress"), t("Status"), t("Files")].map((text) => h("th", {}, text)))),
         h("tbody", {}, rows.map((s) => h("tr", {},
           h("td", { class: "muted" }, s.slot),
-          h("td", {}, h("span", { class: "slot-name" }, s.name), s.mine ? [" ", badge(t("you"), "accent")] : null),
+          h("td", {}, h("span", { class: "slot-name" }, s.name), s.mine ? [" ", badge(t("you"), "accent")] : null,
+            s.mine && s.type === 1 && canLaunch(game) ? h("div", { style: { marginTop: "6px" } }, launchButton(game, s)) : null),
           h("td", {}, s.game),
           h("td", {}, ownerCell(s)),
           h("td", {}, s.type === 1 ? progressBar(s.checked, s.locations, { compact: true }) : h("span", { class: "muted" }, "—")),
@@ -389,8 +382,7 @@ export default async function render({ root, params, cleanup, isCurrent, query, 
       progressSection(data, { mine, cleanup: (fn) => historyStops.push(fn) }),
       h("p", { class: "muted small", style: { margin: 0 } }, t("Read from the server's save about once a minute while the server runs.")))));
   }
-  const historyTimer = setInterval(() => { if (!document.hidden) loadHistory().catch(() => {}); }, 30000);
-  cleanup(() => clearInterval(historyTimer));
+  every(30000, loadHistory, cleanup);
 
   // Games finish by themselves when everyone reached their goal. Whoever runs one, and the player who generated it, can
   // move it to the archive by hand: aborted, if not everyone got there.
@@ -443,8 +435,9 @@ export default async function render({ root, params, cleanup, isCurrent, query, 
   // -------------------------------------------------------------------------------------------------------------------
   // tracker: what a slot received, which of its locations are checked, and its hints
   // -------------------------------------------------------------------------------------------------------------------
-  let trackerKey = null, trackerTimer = null;
-  cleanup(() => clearInterval(trackerTimer));
+  let trackerKey = null;
+  const trackerStops = [];
+  cleanup(() => trackerStops.splice(0).forEach((fn) => fn()));
 
   // Players get their own slots, whoever runs the game every player slot; rebuilt only when that list changes (a claim,
   // an assignment).
@@ -453,7 +446,7 @@ export default async function render({ root, params, cleanup, isCurrent, query, 
     const key = slots.map((s) => s.slot).join(",");
     if (key === trackerKey) return;
     trackerKey = key;
-    clearInterval(trackerTimer);
+    trackerStops.splice(0).forEach((fn) => fn());
     clear(trackerHost);
     if (slots.length) trackerHost.append(trackerSection(slots));
   }
@@ -637,7 +630,7 @@ export default async function render({ root, params, cleanup, isCurrent, query, 
     content.append(h("span", { class: "muted" }, t("Loading…")));
     load();
     // the server reads the save again only when it changed, so asking often is cheap
-    trackerTimer = setInterval(() => { if (!document.hidden) load(); }, 10000);
+    every(10000, load, (fn) => trackerStops.push(fn));
     return h("div", { class: "section" }, h("div", { class: "card stack" },
       h("div", { class: "card-head" }, h("h2", {}, manage && !slots.some((s) => s.mine) ? t("Tracker") : t("Your tracker")), picker),
       summary, rulesHost, h("div", { class: "row spread" }, tabs, h("div", { style: { minWidth: "200px" } }, search)), content,
@@ -819,7 +812,7 @@ export default async function render({ root, params, cleanup, isCurrent, query, 
               onchange: action2(async () => { game = await patch(`/api/games/${id}/files/${f.id}`, { public: pubBox.checked }); drawLive(); redrawFiles(); }) });
             return h("tr", {},
               h("td", {}, h("span", { class: "mono" }, f.filename), h("div", { class: "muted small" }, fmtBytes(f.size))),
-              h("td", {}, badge(FILE_KINDS[f.kind] || f.kind, kindBadge[f.kind])), h("td", {}, sel),
+              h("td", {}, badge(FILE_KINDS()[f.kind] || f.kind, kindBadge[f.kind])), h("td", {}, sel),
               h("td", {}, f.kind === "patch" ? h("span", { class: "muted small" }, t("its owner")) : null, pubBox),
               h("td", {}, h("a", { class: "btn sm ghost icon-only", href: `/api/games/${id}/files/${f.id}`, "aria-label": t("Download") }, icon("download", 14))),
               h("td", {}, h("button", { class: "btn sm ghost icon-only", type: "button", "aria-label": t("Delete"),
@@ -887,7 +880,7 @@ export default async function render({ root, params, cleanup, isCurrent, query, 
           h("thead", {}, h("tr", {}, [t("Progress as of"), t("Kind"), t("Size"), ""].map((text) => h("th", {}, text)))),
           h("tbody", {}, data.backups.map((b) => h("tr", {},
             h("td", {}, fmtDate(b.saved_at), h("div", { class: "muted small" }, fmtAgo(b.saved_at))),
-            h("td", {}, BACKUP_REASONS[b.reason] || b.reason),
+            h("td", {}, BACKUP_REASONS()[b.reason] || b.reason),
             h("td", { class: "muted" }, fmtBytes(b.size)),
             h("td", { class: "actions" }, h("div", { class: "row", style: { justifyContent: "flex-end" } },
               h("button", { class: "btn sm", type: "button", disabled: isActive(game), title: isActive(game) ? t("Stop the server first") : undefined,
@@ -972,8 +965,7 @@ export default async function render({ root, params, cleanup, isCurrent, query, 
       dangerSection());
     if (query.get("tab") === "console") adminHost.querySelector("details:nth-of-type(4)")?.setAttribute("open", "");
   }
-  const timer = setInterval(() => { if (!document.hidden) refresh().catch(() => {}); }, 4000);
-  cleanup(() => clearInterval(timer));
+  every(4000, refresh, cleanup);
   if (wakes()) wake().catch((err) => toast(err.message, "error"));
 }
 

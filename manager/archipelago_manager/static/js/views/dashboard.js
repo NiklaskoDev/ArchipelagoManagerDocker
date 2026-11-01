@@ -3,6 +3,7 @@ import { get, state, isAdmin, isOrganizer } from "../api.js";
 import { pageHeader, missingGamesPanel, gameCard, empty, updateBanner, tlsBanner } from "../components.js";
 import { signupCard } from "./signups.js";
 import { t, plural } from "../i18n.js";
+import { every } from "../live.js";
 
 export default async function render({ root, cleanup, isCurrent }) {
   const admin = isAdmin();
@@ -104,8 +105,7 @@ export default async function render({ root, cleanup, isCurrent }) {
         h("a", { class: "btn", href: "#/configs/new" }, icon("file", 14), t("Create a config"))))));
   }
 
-  const timer = setInterval(() => { if (!document.hidden) load().catch(() => {}); }, 6000);
-  cleanup(() => clearInterval(timer));
+  every(6000, load, cleanup);
 }
 
 function tile(value, label) {

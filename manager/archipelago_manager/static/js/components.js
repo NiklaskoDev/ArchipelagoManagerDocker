@@ -3,27 +3,28 @@ import { h, clear, icon, copyText, openModal, toast, action, confirmDialog, fmtB
 import { api, get, post, put, del, state, isAdmin, isOrganizer } from "./api.js";
 import { t, tServer, plural } from "./i18n.js";
 
-const STATE_LABELS = {
+// tables of texts are functions, so that they are in the language chosen at the time (i18n.js setLanguage)
+const STATE_LABELS = () => ({
   running: ["ok", t("Running")], starting: ["warn", t("Starting…")], stopping: ["warn", t("Stopping…")],
   stopped: ["muted", t("Stopped")], crashed: ["bad", t("Crashed")], sleeping: ["muted", t("Asleep")],
-};
+});
 
-const JOB_LABELS = {
+const JOB_LABELS = () => ({
   queued: ["muted", t("Queued")], running: ["warn", t("Generating…")], succeeded: ["ok", t("Done")],
   failed: ["bad", t("Failed")], cancelled: ["muted", t("Cancelled")],
-};
+});
 
 export function badge(text, kind = "muted") {
   return h("span", { class: `badge ${kind}` }, text);
 }
 
 export function stateBadge(stateName) {
-  const [kind, label] = STATE_LABELS[stateName] || ["muted", stateName];
+  const [kind, label] = STATE_LABELS()[stateName] || ["muted", stateName];
   return h("span", { class: `badge ${kind}` }, h("span", { class: `dot ${kind}` }), label);
 }
 
 export function jobBadge(status) {
-  const [kind, label] = JOB_LABELS[status] || ["muted", status];
+  const [kind, label] = JOB_LABELS()[status] || ["muted", status];
   return h("span", { class: `badge ${kind}` }, label);
 }
 
@@ -439,6 +440,25 @@ export function apVersionField(listing, value = "") {
   return { node: field(t("Archipelago version"), choice, t("The game runs on it, and players need a client of it.")), read: () => choice.value, set };
 }
 
+// Archipelago's Launcher opens archipelago://slot:password@host:port links (Launcher.handle_uri): it offers the clients
+// of the game that take such a link, else the Text Client, and they connect to the slot. Only while the server can be
+// reached: a stopped or sleeping game has no one to connect to.
+export function canLaunch(game) {
+  return !!game.address && ["running", "starting"].includes(game.state);
+}
+
+export function launchLink(game, slot) {
+  const password = game.password ? `:${encodeURIComponent(game.password)}` : "";
+  return `archipelago://${encodeURIComponent(slot.name)}${password}@${game.address}?game=${encodeURIComponent(slot.game)}`;
+}
+
+// The button for one of the player's slots; `named` says which slot when the button stands apart from its name
+export function launchButton(game, slot, { named = false } = {}) {
+  return h("a", { class: "btn sm", href: launchLink(game, slot),
+    title: t("Opens Archipelago's Launcher on this computer, connected to {slot}", { slot: slot.name }) },
+  icon("external", 14), named ? t("Play {slot}", { slot: slot.name }) : t("Open in Archipelago"));
+}
+
 export function gameCard(game, onUpdate) {
   return h("div", { class: "card game-card" },
     h("div", { class: "card-head" },
@@ -452,7 +472,8 @@ export function gameCard(game, onUpdate) {
     game.address ? h("div", { class: "row" }, h("span", { class: "muted small" }, t("Server")), copyField(game.address)) : null,
     game.my_slots.length
       ? h("div", { class: "stack tight" }, h("span", { class: "muted small" }, plural(game.my_slots.length, "Your slot", "Your slots")),
-        game.my_slots.map((s) => h("div", {}, h("span", { class: "slot-name" }, s.name), h("span", { class: "muted" }, ` · ${s.game}`))))
+        game.my_slots.map((s) => h("div", { class: "row spread" }, h("div", {}, h("span", { class: "slot-name" }, s.name), h("span", { class: "muted" }, ` · ${s.game}`)),
+          canLaunch(game) ? launchButton(game, s) : null)))
       : h("div", { class: "muted small" }, t("{claimed} of {total} slots have an owner", { claimed: game.claimed_count, total: game.player_count })),
     h("div", { class: "row" },
       h("a", { class: "btn sm", href: `#/games/${game.id}` }, t("Open")),
@@ -464,18 +485,18 @@ export function gameCard(game, onUpdate) {
 // ---------------------------------------------------------------------------------------------------------------------
 // Archipelago server rules, used for per-game settings and for the global defaults
 // ---------------------------------------------------------------------------------------------------------------------
-const RELEASE_CHOICES = [["auto", t("auto (on goal)")], ["enabled", t("enabled (always)")], ["disabled", t("disabled (never)")],
+const RELEASE_CHOICES = () => [["auto", t("auto (on goal)")], ["enabled", t("enabled (always)")], ["disabled", t("disabled (never)")],
   ["goal", t("goal (after goal)")], ["auto-enabled", t("auto + manual")]];
-const REMAINING_CHOICES = [["goal", t("goal (after goal)")], ["enabled", t("enabled (always)")], ["disabled", t("disabled (never)")]];
-const COUNTDOWN_CHOICES = [["auto", t("auto")], ["enabled", t("enabled")], ["disabled", t("disabled (never)")]];
+const REMAINING_CHOICES = () => [["goal", t("goal (after goal)")], ["enabled", t("enabled (always)")], ["disabled", t("disabled (never)")]];
+const COUNTDOWN_CHOICES = () => [["auto", t("auto")], ["enabled", t("enabled")], ["disabled", t("disabled (never)")]];
 
 export function serverOptionsForm(opts) {
   const number = (key, min, max) => h("input", { class: "input", type: "number", min, max, value: opts[key] });
   const o = {
     hint_cost: number("hint_cost", 0, 100), location_check_points: number("location_check_points", 0, 1000),
     auto_shutdown_minutes: number("auto_shutdown_minutes", 1, 43200),
-    release_mode: select(RELEASE_CHOICES, opts.release_mode), collect_mode: select(RELEASE_CHOICES, opts.collect_mode),
-    remaining_mode: select(REMAINING_CHOICES, opts.remaining_mode), countdown_mode: select(COUNTDOWN_CHOICES, opts.countdown_mode),
+    release_mode: select(RELEASE_CHOICES(), opts.release_mode), collect_mode: select(RELEASE_CHOICES(), opts.collect_mode),
+    remaining_mode: select(REMAINING_CHOICES(), opts.remaining_mode), countdown_mode: select(COUNTDOWN_CHOICES(), opts.countdown_mode),
     compatibility: select([[2, t("Casual: any client version")], [0, t("Strict: exact version only")]], opts.compatibility),
     loglevel: select(["info", "debug", "warning", "error"].map((v) => [v, v]), opts.loglevel),
   };
