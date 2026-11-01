@@ -1,11 +1,71 @@
 // Small DOM helpers. Everything user-supplied goes through text nodes, never innerHTML.
-import { t, plural, locale } from "./i18n.js";
+import { t, plural, locale, Text, live } from "./i18n.js";
+
+// ---------------------------------------------------------------------------------------------------------------------
+// texts that follow the language (i18n.js Text): a text node made from one, an attribute set to one and a sentence with
+// elements in it (withNodes) remember it, and a change of language puts them in the new language where they are,
+// without drawing anything anew. Text set any other way (el.textContent = ...) stays as it is: use setText().
+// ---------------------------------------------------------------------------------------------------------------------
+const MADE = Symbol("text");          // on a text node: its Text; on an element: { attribute: Text }
+const SENTENCE = Symbol("sentence");  // on a withNodes() sentence: its Text and the elements in it
+
+function textNode(value) {
+  const node = document.createTextNode(value);
+  if (value instanceof Text) node[MADE] = value;
+  return node;
+}
+const asChild = (child) => (child instanceof Text ? textNode(child) : child);
+
+const nativeSetAttribute = Element.prototype.setAttribute;
+Element.prototype.setAttribute = function (name, value) {
+  if (value instanceof Text) (this[MADE] ??= {})[name] = value;
+  else if (this[MADE]) delete this[MADE][name];  // a plain value takes the place of one that followed the language
+  return nativeSetAttribute.call(this, name, value);
+};
+const nativeRemoveAttribute = Element.prototype.removeAttribute;
+Element.prototype.removeAttribute = function (name) {
+  if (this[MADE]) delete this[MADE][name];
+  return nativeRemoveAttribute.call(this, name);
+};
+const nativeReplaceChildren = Element.prototype.replaceChildren;
+Element.prototype.replaceChildren = function (...nodes) {
+  return nativeReplaceChildren.apply(this, nodes.map(asChild));
+};
+
+// The text of an element, following the language if it is a Text
+export function setText(el, value) {
+  el.replaceChildren(...(value == null || value === "" ? [] : [value]));
+}
+
+function retranslate() {
+  const sentences = [];
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT);
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    if (node[SENTENCE]) sentences.push(node);
+    const made = node[MADE];
+    if (!made) continue;
+    if (node.nodeType === Node.TEXT_NODE) {
+      const text = String(made);
+      if (node.data !== text) node.data = text;
+    } else {
+      for (const [name, value] of Object.entries(made)) nativeSetAttribute.call(node, name, String(value));
+    }
+  }
+  // a sentence anew, with the same elements in it, wherever the other language puts them
+  for (const sentence of sentences) {
+    const { text, nodes } = sentence[SENTENCE];
+    clear(sentence).append(pieces(text, nodes));
+  }
+  document.querySelectorAll("table.table").forEach(labelCells);  // the phone layout's labels, from the headers
+}
+document.addEventListener("apm-language", retranslate);
 
 export function h(tag, props, ...children) {
   const el = document.createElement(tag);
   for (const [key, value] of Object.entries(props || {})) {
     if (value == null || value === false) continue;
-    if (key === "class") el.className = value;
+    if (value instanceof Text && key !== "value") el.setAttribute(key, value);  // what was typed stays as it is
+    else if (key === "class") el.className = value;
     else if (key === "style" && typeof value === "object") Object.assign(el.style, value);
     else if (key === "for") el.htmlFor = value;
     else if (key.startsWith("on") && typeof value === "function") el.addEventListener(key.slice(2).toLowerCase(), value);
@@ -20,13 +80,13 @@ export function h(tag, props, ...children) {
 // as the text "null" or "[object ...]", so make it skip empty values and flatten arrays for this app.
 const nativeAppend = Element.prototype.append;
 Element.prototype.append = function (...nodes) {
-  return nativeAppend.apply(this, nodes.flat(Infinity).filter((n) => n != null && n !== false));
+  return nativeAppend.apply(this, nodes.flat(Infinity).filter((n) => n != null && n !== false).map(asChild));
 };
 
 export function append(el, children) {
   for (const child of children.flat(Infinity)) {
     if (child == null || child === false) continue;
-    el.append(child instanceof Node ? child : document.createTextNode(String(child)));
+    el.append(child instanceof Node || child instanceof Text ? child : String(child));
   }
   return el;
 }
@@ -67,9 +127,17 @@ new MutationObserver((records) => {
 
 // A translated sentence with elements in it, such as a game name in <strong>: withNodes(text, { game: h("strong", {}, name) })
 // puts the element where the text has {game}. Translate the text without values, so its placeholders are still there.
-export function withNodes(text, nodes) {
-  return text.split(/\{(\w+)\}/).map((piece, i) => (i % 2 ? (piece in nodes ? nodes[piece] : `{${piece}}`) : piece))
+// A sentence of a Text is a <span class="sentence"> (display: contents) that is put together anew in another language.
+function pieces(text, nodes) {
+  return String(text).split(/\{(\w+)\}/).map((piece, i) => (i % 2 ? (piece in nodes ? nodes[piece] : `{${piece}}`) : piece))
     .filter((piece) => piece !== "");
+}
+
+export function withNodes(text, nodes) {
+  if (!(text instanceof Text)) return pieces(text, nodes);
+  const sentence = h("span", { class: "sentence" }, pieces(text, nodes));
+  sentence[SENTENCE] = { text, nodes };
+  return sentence;
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -137,7 +205,10 @@ export function icon(name, size = 16) {
 // formatting
 // ---------------------------------------------------------------------------------------------------------------------
 export function fmtBytes(n) {
-  if (n == null) return "";
+  return n == null ? "" : live(() => bytes(n));
+}
+
+function bytes(n) {
   const units = ["B", "KB", "MB", "GB", "TB"];
   let i = 0;
   while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
@@ -154,11 +225,15 @@ export function shortName(name, max = 34) {
 }
 
 export function fmtDate(ts) {
-  return ts ? new Date(ts * 1000).toLocaleString(locale, { dateStyle: "medium", timeStyle: "short" }) : "—";
+  return ts ? live(() => new Date(ts * 1000).toLocaleString(locale, { dateStyle: "medium", timeStyle: "short" })) : "—";
 }
 
 // "3 min ago". The singular of the days has its own text: German says "vor 1 Tag" but "vor 4 Tagen".
 export function fmtAgo(ts) {
+  return live(() => ago(ts));
+}
+
+function ago(ts) {
   if (!ts) return t("never");
   const s = Math.max(0, Date.now() / 1000 - ts);
   if (s < 60) return t("just now");
@@ -169,6 +244,10 @@ export function fmtAgo(ts) {
 
 // "in 2 d 4 h", for deadlines
 export function fmtUntil(ts) {
+  return live(() => until(ts));
+}
+
+function until(ts) {
   const s = ts - Date.now() / 1000;
   if (s <= 0) return t("passed");
   if (s < 3600) return t("in {n} min", { n: Math.max(1, Math.round(s / 60)) });
@@ -194,6 +273,10 @@ export function fromLocalInput(value) {
 
 // A playing time: "2 d 5 h", "3 h 12 min", "40 min"
 export function fmtSpan(seconds) {
+  return live(() => span(seconds));
+}
+
+function span(seconds) {
   const minutes = Math.max(0, Math.floor(seconds / 60));
   const d = Math.floor(minutes / 1440), hrs = Math.floor(minutes / 60) % 24, m = minutes % 60;
   if (d) return t("{d} d {h} h", { d, h: hrs });
@@ -202,6 +285,10 @@ export function fmtSpan(seconds) {
 }
 
 export function fmtDuration(seconds) {
+  return live(() => duration(seconds));
+}
+
+function duration(seconds) {
   seconds = Math.max(0, Math.round(seconds));
   const m = Math.floor(seconds / 60), s = seconds % 60;
   return m ? t("{m}m {s}s", { m, s: String(s).padStart(2, "0") }) : t("{s}s", { s });

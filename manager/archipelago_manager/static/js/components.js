@@ -1,7 +1,7 @@
 // Reusable pieces shared by several views.
-import { h, clear, icon, copyText, openModal, toast, action, confirmDialog, fmtBytes, fmtAgo, fmtDate, fmtUntil, withNodes } from "./util.js";
+import { h, clear, icon, copyText, openModal, toast, action, confirmDialog, fmtBytes, fmtAgo, fmtDate, fmtUntil, withNodes, setText } from "./util.js";
 import { api, get, post, put, del, state, isAdmin, isOrganizer } from "./api.js";
-import { t, tServer, plural } from "./i18n.js";
+import { t, tServer, plural, live } from "./i18n.js";
 
 // tables of texts are functions, so that they are in the language chosen at the time (i18n.js setLanguage)
 const STATE_LABELS = () => ({
@@ -123,7 +123,7 @@ export function uploadApworldModal({ game, onDone } = {}) {
   submit.onclick = action(async () => {
     const file = input.files[0];
     if (!file) throw new Error(t("Choose an .apworld file first"));
-    status.textContent = t("Uploading…");
+    setText(status, t("Uploading…"));
     const form = new FormData();
     form.append("file", file);
     try {
@@ -135,7 +135,7 @@ export function uploadApworldModal({ game, onDone } = {}) {
       if (game && result.game !== game) toast(t("Note: that file is for \"{actual}\", not \"{game}\".", { actual: result.game, game }), "info");
       onDone?.(result);
     } finally {
-      status.textContent = "";
+      setText(status, "");
     }
   });
   const modal = openModal({
@@ -175,7 +175,7 @@ export function githubSourceModal({ onDone } = {}) {
       clear(found).append(banner("error", icon("alert", 16), err.message));
       return;
     }
-    assetSelect = release.assets.length > 1 ? select(release.assets.map((a) => [a.name, `${a.name} (${fmtBytes(a.size)})`]), release.assets[0].name) : null;
+    assetSelect = release.assets.length > 1 ? select(release.assets.map((a) => [a.name, live(() => `${a.name} (${fmtBytes(a.size)})`)]), release.assets[0].name) : null;
     clear(found).append(
       h("div", {}, h("a", { href: `https://github.com/${release.repo}`, target: "_blank", rel: "noopener" }, h("strong", {}, release.repo)),
         release.description ? h("div", { class: "muted small" }, release.description) : null),
@@ -290,14 +290,14 @@ export function romUploadModal(rom, onDone) {
     form.append("game", rom.game);
     form.append("setting", rom.setting || "");
     form.append("file", input.files[0]);
-    note.textContent = rom.checked === false ? t("Uploading…") : t("Uploading and checking the file…");
+    setText(note, rom.checked === false ? t("Uploading…") : t("Uploading and checking the file…"));
     try {
       const list = await api("POST", "/api/roms", form);
       modal.close();
       toast(t("The ROM for {game} is in place", { game: rom.game }), "success");
       onDone?.(list);
     } finally {
-      note.textContent = "";
+      setText(note, "");
     }
   });
   const modal = openModal({
@@ -394,7 +394,7 @@ function drawConfigCheck(body, r) {
   const warned = fileWarnings.length || r.players.some((p) => p.warnings.length);
   clear(body).append(
     r.ok ? banner("ok", icon("check", 18), h("div", { class: "grow" }, h("strong", {}, t("Archipelago takes this config.")),
-      warned ? ` ${t("Have a look at the warnings, though.")}` : null))
+      warned ? [" ", t("Have a look at the warnings, though.")] : null))
       : banner("error", icon("alert", 18), h("div", { class: "grow" }, h("strong", {}, t("The generator would stop at this config.")),
         " ", t("Fix what is listed below, then check again."))),
     list(r.errors, "bad"), list(fileWarnings, "warn"),

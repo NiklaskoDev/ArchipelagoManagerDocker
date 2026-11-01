@@ -366,6 +366,14 @@ if (!launch.length || !launch.every((href) => /^archipelago:\/\/[^:@]+(:[^@]+)?@
   problems.push(`the game page's links that open Archipelago are wrong: ${launch}`);
 }
 log("the game page links to Archipelago's Launcher with the slot and the address");
+// while the game is awake (with nobody connected, this test server lets it fall asleep after ten seconds)
+await nav(user, "#/");
+await user.locator(".game-card a[href^='archipelago://']").first().waitFor();
+await nav(user, "#/games");
+await user.locator("table a[href^='archipelago://']").first().waitFor();
+log("the dashboard and the list of games link to Archipelago too");
+await nav(user, claimGameUrl.slice(BASE.length + 1));
+await expectText(user, "Your tracker");
 // what the page asks the server by itself is out in the open, and can be paused
 await user.locator(".live .live-text").filter({ hasText: /Updated/ }).waitFor();
 await user.locator(".live-toggle").click();
@@ -380,21 +388,26 @@ await user.locator(".live-refresh").click();
 await user.locator(".live-toggle").click();
 await user.locator(".live .live-text").filter({ hasText: /Updated/ }).waitFor();
 log("the page says when it last updated; paused, it asks the server nothing until resumed");
-// another language without loading the page again
+// another language: the texts change where they are, without loading or drawing the page again
 let navigations = 0;
 const countNavigations = (frame) => { if (frame === user.mainFrame()) navigations++; };
 user.on("framenavigated", countNavigations);
+const trackerFilter = await user.locator("input[type=search][placeholder='Filter…']").elementHandle();  // the same element
+await trackerFilter.fill("typed before switching");
 await user.locator(".user-btn").click();
 await user.getByRole("menuitem", { name: /Language/ }).click();
 await user.locator(".lang-option", { hasText: "Deutsch" }).click();
 await user.locator("h2", { hasText: "Dein Tracker" }).waitFor();
-await user.locator(".user-btn").click();
-await user.getByRole("menuitem", { name: /Sprache/ }).click();
-await user.locator(".lang-option", { hasText: "English" }).click();
+await user.locator(".menu .lang-option[aria-checked=true]", { hasText: "Deutsch" }).waitFor();  // the check moved with it
+if ((await trackerFilter.getAttribute("placeholder")) !== "Filtern…") problems.push("a placeholder kept its language");
+await user.locator(".menu .lang-option", { hasText: "English" }).click();
 await user.locator("h2", { hasText: "Your tracker" }).waitFor();
+await user.keyboard.press("Escape");
 user.off("framenavigated", countNavigations);
 if (navigations) problems.push(`switching the language loaded the page again (${navigations} times)`);
-log("the language changes at once, without loading the page again");
+if ((await trackerFilter.inputValue()) !== "typed before switching") problems.push("switching the language lost what was typed");
+await trackerFilter.fill("");
+log("the language changes at once where the texts are, and what was typed stays");
 await expectText(user, "Your tracker");
 const trackerCard = user.locator(".section", { has: user.locator("h2", { hasText: "Your tracker" }) });
 await trackerCard.getByRole("tab", { name: /Locations/ }).click();
@@ -410,11 +423,6 @@ if (await user.locator("details", { hasText: "Console" }).count()) problems.push
 await shot(user, "claimed");
 await nav(user, "#/");
 await expectText(user, "Your games");
-await user.locator(".game-card a[href^='archipelago://']").first().waitFor();
-await nav(user, "#/games");
-await user.locator("table a[href^='archipelago://']").first().waitFor();
-log("the dashboard and the list of games link to Archipelago too");
-await nav(user, "#/");
 await nav(user, "#/worlds");
 await expectText(user, "reviewed by an administrator");
 await user.getByRole("button", { name: "Submit APWorld" }).first().click();

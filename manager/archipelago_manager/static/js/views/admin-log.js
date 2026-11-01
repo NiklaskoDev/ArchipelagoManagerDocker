@@ -2,7 +2,7 @@
 import { h, clear, fmtDate, fmtAgo, fmtBytes } from "../util.js";
 import { get } from "../api.js";
 import { pageHeader, adminTabs, select, field, empty } from "../components.js";
-import { t } from "../i18n.js";
+import { t, live } from "../i18n.js";
 
 const ACTIONS = {
   "game.add": () => t("Added a game"), "game.settings": () => t("Changed a game's settings"), "game.delete": () => t("Deleted a game"),
@@ -49,11 +49,11 @@ const LINKS = { game: (id) => `#/games/${id}`, user: () => "#/admin/users", invi
 
 function details(d) {
   if (!d) return null;
-  const parts = Object.entries(d).map(([key, value]) => {
+  const parts = () => Object.entries(d).map(([key, value]) => {
     const shown = key === "size" ? fmtBytes(value) : Array.isArray(value) ? value.join(", ") : value === true ? t("yes") : value === false ? t("no") : String(value);
     return `${(DETAIL_KEYS[key] || (() => key))()}: ${shown}`;
   });
-  return h("span", { class: "muted small mono" }, parts.join(" · "));
+  return h("span", { class: "muted small mono" }, live(() => parts().join(" · ")));
 }
 
 export default async function render({ root, isCurrent }) {

@@ -1,7 +1,7 @@
 // Progress over time: each player's share of their locations checked, from the history the manager records
 // (history.py), with the standings below it. The table is also the chart's text alternative.
 import { h, clear, fmtDate, fmtSpan } from "./util.js";
-import { t, locale } from "./i18n.js";
+import { t, locale, live } from "./i18n.js";
 
 const SVG = "http://www.w3.org/2000/svg";
 const HEIGHT = 240;
@@ -25,7 +25,7 @@ function timeTicks(start, end, width) {
   for (let tick = Math.ceil((start - offset) / step) * step + offset; tick <= end; tick += step) ticks.push(tick);
   const fmt = step >= 86400 ? { day: "numeric", month: "short" }
     : span > 86400 ? { weekday: "short", hour: "2-digit", minute: "2-digit" } : { hour: "2-digit", minute: "2-digit" };
-  return ticks.map((tick) => [tick, new Date(tick * 1000).toLocaleString(locale, fmt)]);
+  return ticks.map((tick) => [tick, live(() => new Date(tick * 1000).toLocaleString(locale, fmt))]);
 }
 
 // The last value at or before `at` of a step series [[time, value], ...]; null before the first point
@@ -117,7 +117,7 @@ export function progressSection(data, { mine = new Set(), cleanup, table = true 
       shown.map(({ p, pct, checked }) => h("div", { class: "row-line" },
         h("span", { class: "line-key", style: { background: p.color } }),
         h("span", { class: "value" }, `${Math.round(pct)}%`),
-        h("span", { class: "name" }, p.name, ` · ${checked}/${p.total}`, p.goal_at && p.goal_at <= at ? ` · ${t("goal")}` : ""))),
+        h("span", { class: "name" }, p.name, ` · ${checked}/${p.total}`, p.goal_at && p.goal_at <= at ? [" · ", t("goal")] : null))),
       rows.length > shown.length ? h("div", { class: "name" }, t("…and {n} more", { n: rows.length - shown.length })) : null);
     tip.hidden = false;
     const left = x(at);

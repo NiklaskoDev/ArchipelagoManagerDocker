@@ -1,7 +1,7 @@
 import { h, clear, icon, toast, action, confirmDialog, openModal, fmtAgo, fmtDate, fmtUntil, toLocalInput, fromLocalInput } from "../util.js";
 import { api, get, post, patch, del, state } from "../api.js";
 import { banner, badge, chips, field, checkbox, select, missingGamesPanel, missingRomsPanel, promptMissingGames, presetBar, gameSettingsSection } from "../components.js";
-import { t, plural, tServer, lang } from "../i18n.js";
+import { t, plural, tServer, lang, live } from "../i18n.js";
 import { every } from "../live.js";
 
 const SPOILER_CHOICES = () => [[1, t("Basic spoiler log")], [0, t("No spoiler log")], [2, t("With playthrough")], [3, t("Playthrough and paths")]];
@@ -256,7 +256,7 @@ export default async function render({ root, params, cleanup, isCurrent, setTitl
   function header() {
     const actions = [];
     if (signup.status === "open" && signup.deadline) {
-      actions.push(h("a", { class: "btn", href: `/api/signups/${id}/deadline.ics?lang=${lang}`,
+      actions.push(h("a", { class: "btn", href: live(() => `/api/signups/${id}/deadline.ics?lang=${lang}`),
         title: t("A calendar file, with a reminder before the sign-ups close") }, icon("calendar", 14), t("Add to calendar")));
     }
     if (manager) {
@@ -290,7 +290,7 @@ export default async function render({ root, params, cleanup, isCurrent, setTitl
       h("div", { class: "muted small" }, h("a", { href: "#/signups" }, t("← All sign-ups"))),
       h("div", { class: "page-head", style: { marginTop: "8px" } },
         h("div", {}, h("div", { class: "row" }, h("h1", {}, signup.name), signupBadge(signup)),
-          h("p", { class: "muted" }, [deadlineText(signup), signup.creator ? t("by {name}", { name: signup.creator }) : null].filter(Boolean).join(" · "))),
+          h("p", { class: "muted" }, live(() => [deadlineText(signup), signup.creator ? t("by {name}", { name: signup.creator }) : null].filter(Boolean).join(" · ")))),
         h("div", { class: "page-actions" }, actions)));
   }
 
@@ -350,7 +350,7 @@ export default async function render({ root, params, cleanup, isCurrent, setTitl
     const changed = test.current ? null : h("div", { class: "small" }, t("Entries or options have changed since."));
     if (testRunning()) {
       return banner("info", h("span", { class: "spinner" }), h("div", { class: "grow" }, h("strong", {}, t("Testing the entries…")), " ",
-        test.queue_position ? t("#{n} in queue", { n: test.queue_position }) + " · " : "", log));
+        test.queue_position ? [t("#{n} in queue", { n: test.queue_position }), " · "] : null, log));
     }
     if (test.status === "succeeded") {
       return banner(test.current ? "ok" : "info", icon("check", 18), h("div", { class: "grow" },
@@ -385,7 +385,7 @@ export default async function render({ root, params, cleanup, isCurrent, setTitl
           : [h("dt", {}, t("Games")), h("dd", {}, signup.allowed_games.length ? chips(signup.allowed_games) : h("span", { class: "muted" }, t("Any game installed on this server")))],
         h("dt", {}, t("Slots per player")), h("dd", {}, String(signup.slots_per_user)),
         h("dt", {}, t("Entries")), h("dd", {}, plural(signup.user_count, "{entries} from {n} player", "{entries} from {n} players", { entries: signup.entry_count })),
-        h("dt", {}, t("Settings")), h("dd", { class: "muted" }, extras.join(" · "))));
+        h("dt", {}, t("Settings")), h("dd", { class: "muted" }, live(() => extras.join(" · ")))));
   }
 
   // ---------------------------------------------------------------------------------------------------------------------
@@ -400,7 +400,7 @@ export default async function render({ root, params, cleanup, isCurrent, setTitl
     const missing = [...new Set(mine.flatMap((e) => e.missing_games))];
 
     if (signup.mystery) return mysteryCard(mine, editable, canEnter);
-    const picker = choices.length ? select(choices.map((c) => [c.id, `${c.name} (${c.player_names.join(", ") || t("name from file")} · ${c.games.join(", ")})`]), choices[0].id) : null;
+    const picker = choices.length ? select(choices.map((c) => [c.id, live(() => `${c.name} (${c.player_names.join(", ") || t("name from file")} · ${c.games.join(", ")})`)]), choices[0].id) : null;
     const enter = picker ? h("button", { class: "btn primary", type: "button",
       onclick: action(() => run("POST", `/api/signups/${id}/entries`, { config_id: Number(picker.value) })) }, icon("check", 14), t("Enter")) : null;
     const file = h("input", { type: "file", accept: ".yaml,.yml", hidden: true });
@@ -423,8 +423,8 @@ export default async function render({ root, params, cleanup, isCurrent, setTitl
       mine.length ? h("div", { class: "stack" }, mine.map((e) => h("div", { class: "stack tight" },
         h("div", { class: "row spread" },
           h("div", {}, h("span", { class: "slot-name" }, e.player_names.join(", ") || e.name), " ", chips(e.games, e.missing_games),
-            h("div", { class: "muted small" }, `${e.name}${e.slots > 1 ? ` · ${t("{n} slots", { n: e.slots })}` : ""} · ${t("entered {ago}", { ago: fmtAgo(e.created_at) })}`,
-              e.updated_at > e.created_at + 1 ? `, ${t("updated {ago}", { ago: fmtAgo(e.updated_at) })}` : "")),
+            h("div", { class: "muted small" }, e.name, e.slots > 1 ? [" · ", t("{n} slots", { n: e.slots })] : null, " · ",
+              t("entered {ago}", { ago: fmtAgo(e.created_at) }), e.updated_at > e.created_at + 1 ? [", ", t("updated {ago}", { ago: fmtAgo(e.updated_at) })] : null)),
           h("div", { class: "row" },
             h("a", { class: "btn sm", href: `/api/signups/${id}/entries/${e.id}/download` }, icon("download", 14), "YAML"),
             signup.open ? h("button", { class: "btn sm", type: "button", onclick: action(async () => {
@@ -476,7 +476,7 @@ export default async function render({ root, params, cleanup, isCurrent, setTitl
       h("thead", {}, h("tr", {}, [t("Player"), t("Games"), t("Entered by"), t("When"), ""].map((text) => h("th", {}, text)))),
       h("tbody", {}, signup.entries.map((e) => h("tr", {},
         h("td", {}, h("span", { class: "slot-name" }, e.player_names.join(", ") || h("span", { class: "muted" }, t("name from file"))),
-          e.slots > 1 ? h("span", { class: "muted small" }, ` (${t("{n} slots", { n: e.slots })})`) : null,
+          e.slots > 1 ? h("span", { class: "muted small" }, " (", t("{n} slots", { n: e.slots }), ")") : null,
           e.issues.map((issue) => h("div", { class: "form-error small" }, tServer(issue))), manager ? generationError(e, "small") : null),
         h("td", {}, chips(e.games, e.missing_games)),
         h("td", {}, e.username, e.mine ? h("span", { class: "muted" }, " ", t("(you)")) : null),

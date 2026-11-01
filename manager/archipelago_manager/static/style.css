@@ -112,6 +112,8 @@ code, .mono { font-family: var(--mono); font-size: .9em; }
 .live.busy .live-refresh .icon { animation: spin .8s linear infinite; }
 @media (prefers-reduced-motion: reduce) { .live.busy .live-refresh .icon { animation: none; } }
 .user-btn { gap: 8px; }
+/* A translated sentence with elements in it (util.js withNodes): its parts lay out as if the wrapper were not there */
+.sentence { display: contents; }
 /* Names come from players: one that changes the text direction stays inside its own element (see i18n.js fill) */
 span, code, strong, em, a, bdi { unicode-bidi: isolate; }
 /* what checking a config found (components.js configCheckDialog) */

@@ -95,6 +95,9 @@ document.addEventListener("visibilitychange", () => {
   drawControl();
 });
 
+// its texts in the new language at once, not only at the next second
+document.addEventListener("apm-language", () => drawControl());
+
 // The browser's other tabs of this server follow a choice made in one of them
 window.addEventListener("storage", (e) => {
   if (e.key !== KEY && e.key !== null) return;
@@ -131,9 +134,8 @@ function drawControl() {
   if (!jobs.size) {
     clearInterval(clock);
     clock = null;
-    return;
   }
-  const seconds = Math.round(Math.min(...[...jobs].map((job) => job.ms)) / 1000) || 1;
+  const seconds = jobs.size ? Math.round(Math.min(...[...jobs].map((job) => job.ms)) / 1000) || 1 : 0;
   root.setAttribute("aria-label", t("Automatic updates"));
   root.classList.toggle("busy", busy > 0);
   root.classList.toggle("paused", paused);
@@ -151,5 +153,5 @@ function drawControl() {
   toggle.setAttribute("aria-label", toggle.title);
   toggle.setAttribute("aria-pressed", String(paused));
   // "updated 12 s ago" counts on by itself, while it can be seen
-  if (!clock) clock = setInterval(() => { if (!document.hidden) drawControl(); }, 1000);
+  if (!clock && jobs.size) clock = setInterval(() => { if (!document.hidden) drawControl(); }, 1000);
 }

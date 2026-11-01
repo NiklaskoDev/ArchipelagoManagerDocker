@@ -4,6 +4,11 @@
 // - t(text, { name }) fills in {name}; plural(n, one, other, vars) first picks the form for n (and fills in {n}).
 // - The server answers in English. tServer() turns its messages into the chosen language: exact texts from the
 //   "server" part of i18n/<language>.json, and messages with changing parts ("Game {0} not found") by their pattern.
+// - What they give is a Text: a string that knows how it was made. It works wherever a string does, and turned into one
+//   (`${text}`, text + "", a property of an element) it is in the language of that moment. Put on the page through
+//   util.js (h(), append(), setText(), setAttribute()), it changes in place when the language does: setLanguage()
+//   tells the page ("apm-language" on document), and util.js puts every such text in the new language. live(() => ...)
+//   makes a Text of anything else, such as several texts put together.
 
 // Each language by its own name
 export const LANGUAGES = { en: "English", de: "Deutsch", fr: "Français", nl: "Nederlands" };
@@ -81,17 +86,39 @@ function fill(text, vars) {
   return vars ? text.replace(/\{(\w+)\}/g, (match, name) => (name in vars ? isolated(String(vars[name])) : match)) : text;
 }
 
+export class Text extends String {
+  constructor(make) {
+    super(String(make()));
+    this.make = make;  // may give a Text itself (fmtAgo gives t()'s)
+  }
+
+  toString() { return String(this.make()); }
+
+  valueOf() { return this.toString(); }
+
+  [Symbol.toPrimitive]() { return this.toString(); }
+}
+
+export const live = (make) => new Text(make);
+
 export function t(text, vars) {
-  return fill(strings[text] ?? text, vars);
+  return new Text(() => fill(strings[text] ?? text, vars));
 }
 
 // The singular is for whatever the language counts as one: 1 in English, German and Dutch, 0 and 1 in French
 export function plural(n, one, other, vars) {
-  return t(pluralRules.select(n) === "one" ? one : other, { n, ...vars });
+  return new Text(() => {
+    const form = pluralRules.select(n) === "one" ? one : other;
+    return fill(strings[form] ?? form, { n, ...vars });
+  });
 }
 
-export function tServer(message, depth = 0) {
-  if (lang === "en" || typeof message !== "string") return message;
+export function tServer(message) {
+  return typeof message === "string" ? new Text(() => serverText(message)) : message;
+}
+
+function serverText(message, depth = 0) {
+  if (lang === "en") return message;
   if (message in server) return server[message];
   if (message in strings) return strings[message];
   for (const { re, order, value } of patterns) {
@@ -99,17 +126,19 @@ export function tServer(message, depth = 0) {
     if (!match) continue;
     const values = {};
     // the changing parts may be English messages themselves ("Could not start: {0}")
-    order.forEach((index, i) => { values[index] = depth < 2 ? tServer(match[i + 1], depth + 1) : match[i + 1]; });
+    order.forEach((index, i) => { values[index] = depth < 2 ? serverText(match[i + 1], depth + 1) : match[i + 1]; });
     return value.replace(/\{(\d+)\}/g, (m, index) => (index in values ? values[index] : m));
   }
   return message;
 }
 
-// Switches the language without loading the page again: the dictionary first (if that fails, nothing changes), then
-// the choice is kept in this browser. Whoever shows text draws it anew afterwards (app.js). True if it changed.
+// Switches the language without loading or drawing the page again: the dictionary first (if that fails, nothing
+// changes), then the choice is kept in this browser and the page told, which puts its texts in the new language where
+// they are (util.js). True if it changed.
 export async function setLanguage(code) {
   if (!LANGUAGES[code] || code === lang) return false;
   use(code, await dictionary(code));
   try { localStorage.setItem(STORAGE_KEY, code); } catch { /* private mode: the choice lasts until reload only */ }
+  document.dispatchEvent(new Event("apm-language"));
   return true;
 }
