@@ -277,9 +277,12 @@ async def sync_apworlds() -> None:
     where = await get_where()
     folder = Path(where["worlds_folder"])
     folder.mkdir(parents=True, exist_ok=True)
-    for row in db.query("SELECT id, module FROM apworlds WHERE status = 'installed'"):
+    for row in db.query("SELECT id, module, manifest FROM apworlds WHERE status = 'installed'"):
         source = apworld_library_path(row["id"])
         target = folder / f"{row['module']}.apworld"
+        if not (db.jloads(row["manifest"], {}) or {}) and not works_with({}, version_tuple()):
+            target.unlink(missing_ok=True)  # no manifest, and the image's version is 0.7 or newer: it would break them all
+            continue
         if not source.is_file():
             log.warning("APWorld %s is missing from the library", source)
             continue
@@ -301,10 +304,16 @@ def parse_version(text: Any) -> tuple[int, ...] | None:
         return None
 
 
+NEEDS_MANIFEST = (0, 7, 0)  # from this version on, one .apworld without a manifest stops Archipelago loading any world
+
+
 def works_with(manifest: dict, version: tuple[int, ...] | None) -> bool:
-    """Whether a custom world says it works with this Archipelago version (it does if it says nothing)."""
+    """Whether a custom world says it works with this Archipelago version (it does if it says nothing). A world whose
+    file has no manifest at all ({}) only works before NEEDS_MANIFEST."""
     if not version:
         return True
+    if not manifest:
+        return version < NEEDS_MANIFEST
     low = parse_version(manifest.get("minimum_ap_version") or "")
     high = parse_version(manifest.get("maximum_ap_version") or "")
     return not (low and version < low) and not (high and version > high)

@@ -5,6 +5,7 @@ only *submit* a world, which then waits for approval ('pending').
 """
 from __future__ import annotations
 
+import ast
 import asyncio
 import json
 import logging
@@ -27,11 +28,52 @@ log = logging.getLogger(__name__)
 MAX_APWORLD_UNPACKED = 1024 * 1024 * 1024
 MAX_APWORLD_ENTRIES = 20000
 MAX_PENDING_PER_USER = 5
+MAX_CODE_READ = 8 * 1024 * 1024
 _MANIFEST_RE = re.compile(r"^([^/]+)/archipelago\.json$")
+_PACKAGE_RE = re.compile(r"^([^/]+)/__init__\.pyc?$")
 
 
 class InvalidAPWorld(ValueError):
     pass
+
+
+def _class_games(source: bytes) -> set[str]:
+    """The games the World classes in this Python source say they are for (`game = "..."`). Only parsed, never run."""
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError, RecursionError, MemoryError):
+        return set()
+    games = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ClassDef):
+            continue
+        bases = {base.attr if isinstance(base, ast.Attribute) else getattr(base, "id", "") for base in node.bases}
+        if not any(base.endswith("World") and base != "WebWorld" for base in bases):
+            continue
+        for statement in node.body:
+            if isinstance(statement, ast.Assign) and any(getattr(t, "id", None) == "game" for t in statement.targets) \
+                    or isinstance(statement, ast.AnnAssign) and getattr(statement.target, "id", None) == "game":
+                value = statement.value
+                if isinstance(value, ast.Constant) and isinstance(value.value, str) and value.value.strip():
+                    games.add(value.value)
+    return games
+
+
+def _game_from_code(zf: zipfile.ZipFile, infos: list[zipfile.ZipInfo], module: str) -> str | None:
+    """The game a world without a manifest is for, read from its World class: __init__.py first, then the module's other
+    files. None unless exactly one game is found."""
+    files = sorted((i for i in infos if i.filename.startswith(f"{module}/") and i.filename.endswith(".py")),
+                   key=lambda i: (i.filename != f"{module}/__init__.py", i.filename.count("/"), i.filename))
+    found: set[str] = set()
+    budget = MAX_CODE_READ
+    for info in files:
+        if info.file_size > budget:
+            continue  # a big data table, most likely; the class is in a smaller file
+        budget -= info.file_size
+        found |= _class_games(zf.read(info))
+        if info.filename == f"{module}/__init__.py" and found:
+            break  # the world's own file says it; the rest of the code is not asked
+    return next(iter(found)) if len(found) == 1 else None
 
 
 def _entry_count(path: Path) -> int:
@@ -51,6 +93,9 @@ def _entry_count(path: Path) -> int:
 def inspect_apworld(path: Path) -> dict:
     """Validates the archive structure and returns {game, module, version, manifest}. Nothing is imported or run.
 
+    Some worlds are zipped without a manifest (by hand, or before Archipelago wrote one); Archipelago loads them until
+    0.7.0. The game of such a world is read from its code instead, and its manifest is {}.
+
     Takes a while for big archives: call it in a worker thread.
     """
     if _entry_count(path) > MAX_APWORLD_ENTRIES:
@@ -61,21 +106,29 @@ def inspect_apworld(path: Path) -> dict:
             if sum(i.file_size for i in infos) > MAX_APWORLD_UNPACKED:
                 raise InvalidAPWorld("The archive is unreasonably large when unpacked")
             manifests = [m for i in infos if (m := _MANIFEST_RE.match(i.filename))]
-            if len(manifests) != 1:
+            packages = {m.group(1) for i in infos if (m := _PACKAGE_RE.match(i.filename))}
+            if not manifests and len(packages) == 1:
+                module = next(iter(packages))
+                game = _game_from_code(zf, infos, module)
+                if not game:
+                    raise InvalidAPWorld("This .apworld has no archipelago.json manifest, and which game it is for "
+                                         "cannot be read from its code. Ask its author for a version with a manifest.")
+                manifest = {}
+            elif len(manifests) != 1:
                 raise InvalidAPWorld("Not a valid .apworld: expected exactly one '<world>/archipelago.json' manifest")
-            module = manifests[0].group(1)
-            names = {i.filename for i in infos}
-            if f"{module}/__init__.py" not in names and f"{module}/__init__.pyc" not in names:
-                raise InvalidAPWorld(f"Not a valid .apworld: '{module}/__init__.py' is missing")
-            if zf.getinfo(f"{module}/archipelago.json").file_size > 1024 * 1024:
-                raise InvalidAPWorld("The archipelago.json manifest is unreasonably large")
-            try:
-                manifest = json.loads(zf.read(f"{module}/archipelago.json"))
-            except ValueError:
-                raise InvalidAPWorld("The archipelago.json manifest is not valid JSON") from None
+            else:
+                module = manifests[0].group(1)
+                if module not in packages:
+                    raise InvalidAPWorld(f"Not a valid .apworld: '{module}/__init__.py' is missing")
+                if zf.getinfo(f"{module}/archipelago.json").file_size > 1024 * 1024:
+                    raise InvalidAPWorld("The archipelago.json manifest is unreasonably large")
+                try:
+                    manifest = json.loads(zf.read(f"{module}/archipelago.json"))
+                except ValueError:
+                    raise InvalidAPWorld("The archipelago.json manifest is not valid JSON") from None
+                game = manifest.get("game") if isinstance(manifest, dict) else None
     except zipfile.BadZipFile:
         raise InvalidAPWorld("The file is not a valid zip archive") from None
-    game = manifest.get("game") if isinstance(manifest, dict) else None
     if not isinstance(game, str) or not game.strip():
         raise InvalidAPWorld("The manifest does not name a 'game'")
     if not module.isidentifier() or module.startswith("_"):
@@ -210,6 +263,9 @@ async def add_to_library(path: Path, filename: str, *, uploaded_by: int | None, 
     """
     meta = await asyncio.to_thread(inspect_apworld, path)
     version_tuple = apbridge.version_tuple()
+    if not meta["manifest"] and version_tuple and version_tuple >= apbridge.NEEDS_MANIFEST:
+        raise InvalidAPWorld("This world has no archipelago.json manifest, which Archipelago 0.7.0 and newer need, "
+                             f"but this server runs {apbridge.ap_version()}")
     minimum = str(meta["manifest"].get("minimum_ap_version") or "")
     if version_tuple and re.fullmatch(r"\d+\.\d+\.\d+", minimum):
         if tuple(int(p) for p in minimum.split(".")) > version_tuple:

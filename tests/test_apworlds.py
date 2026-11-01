@@ -175,6 +175,20 @@ def test_a_world_that_cannot_load_is_reported(admin, tmp_path, clean_custom):
     assert "ChecksFinder" in game_names(admin)
 
 
+def test_a_world_released_without_a_manifest_is_installed(admin, make_user, tmp_path, clean_custom):
+    """Some worlds come zipped without archipelago.json (A Dance of Fire and Ice 1.3.1). Archipelago 0.6 loads them, so
+    the game is read from the world's code."""
+    r = post_apworld(admin, build_apworld(tmp_path / "customchecks.apworld", manifest=False))
+    assert r.status_code == 200, r.text
+    item = r.json()
+    assert (item["status"], item["game"], item["version"], item["load_error"]) == ("installed", CUSTOM, None, None)
+    _n, user = make_user()
+    assert CUSTOM in game_names(user)
+    cfg = upload_yaml(user, "custom", player_yaml("Cust", game=CUSTOM)).json()["created"][0]
+    job = run_job(admin, [cfg["id"]])
+    assert job["status"] == "succeeded", job["error"]
+
+
 def test_installed_worlds_survive_a_restart(ap_server, admin, tmp_path, clean_custom):
     post_apworld(admin, build_apworld(tmp_path / "customchecks.apworld"))
     assert CUSTOM in game_names(admin)
