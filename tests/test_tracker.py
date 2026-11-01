@@ -154,7 +154,8 @@ def test_a_player_marks_the_hints_for_their_items(admin, make_user):
     assert admin.post(f"/api/games/{gid}/command", json={"command": "/hint Mark Map Width"}).status_code == 200
     wait_for(lambda: any("Map Width is at" in line for line in log()), timeout=15, message="the hint")
     save_now(admin, gid)
-    hint = next(h for h in ann.get(f"{url}/tracker").json()["hints"] if h["for_me"] and not h["found"])
+    hints = ann.get(f"{url}/tracker").json()["hints"]
+    hint = next(h for h in hints if h["for_me"] and not h["found"])
     assert hint["finder_slot"] in slots.values() and hint["location_id"] > 0
     hint_url = f"{url}/hints/{hint['finder_slot']}/{hint['location_id']}"
 
@@ -175,7 +176,9 @@ def test_a_player_marks_the_hints_for_their_items(admin, make_user):
     assert r.status_code == 409 and "No Permission" in r.json()["detail"], r.text
     assert admin.put(hint_url, json={"status": 20}).status_code == 404
     assert ann.put(hint_url, json={"status": 40}).status_code == 400  # found is up to the server
-    assert ann.put(f"{url}/hints/{hint['finder_slot']}/1", json={"status": 30}).status_code == 404
+    # a location of the same world that holds no hint: the seed decides where the hinted items are, so not a fixed one
+    no_hint = max(h["location_id"] for h in hints if h["finder_slot"] == hint["finder_slot"]) + 1
+    assert ann.put(f"{url}/hints/{hint['finder_slot']}/{no_hint}", json={"status": 30}).status_code == 404
 
     admin.post(f"/api/games/{gid}/stop")
     wait_state(admin, gid, "stopped")
