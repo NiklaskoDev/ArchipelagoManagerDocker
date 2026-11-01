@@ -1904,7 +1904,9 @@
   "This link to set a new password cannot be used any more: it expired or was used. Ask an administrator for a new one.": "Ce lien pour un nouveau mot de passe ne peut plus être utilisé : il a expiré ou a déjà servi. Demandez-en un nouveau à un administrateur.",
   "Every player reached their goal in this game, so it stays in the archive": "Tous les joueurs de cette partie ont atteint leur objectif : elle reste donc dans les archives",
   "Archipelago {0} is not being installed": "Archipelago {0} n'est pas en cours d'installation",
-  "The installation was stopped": "L'installation a été arrêtée"
+  "The installation was stopped": "L'installation a été arrêtée",
+  "This .apworld has no archipelago.json manifest, and which game it is for cannot be read from its code. Ask its author for a version with a manifest.": "Ce .apworld n'a pas de manifeste archipelago.json, et le jeu auquel il est destiné ne peut pas être lu dans son code. Demandez à son auteur une version avec un manifeste.",
+  "This world has no archipelago.json manifest, which Archipelago 0.7.0 and newer need, but this server runs {0}": "Ce monde n'a pas de manifeste archipelago.json, dont Archipelago 0.7.0 et plus récent ont besoin, mais ce serveur utilise {0}"
  },
  "server_extra": [
   " (line {0})",
@@ -1978,6 +1980,8 @@
   "Enter the key with its full path in the container, e.g. /config/tls/privkey.pem",
   "Document #{0}: the player name has no visible characters, so nobody can read it",
   "Document #{0}: the player name contains characters that change the direction of the text, so it shows differently from how it is spelled",
-  "Two players in this file are named '{0}'. Player names must be unique."
+  "Two players in this file are named '{0}'. Player names must be unique.",
+  "This .apworld has no archipelago.json manifest, and which game it is for cannot be read from its code. Ask its author for a version with a manifest.",
+  "This world has no archipelago.json manifest, which Archipelago 0.7.0 and newer need, but this server runs {0}"
  ]
 }

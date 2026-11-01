@@ -1,6 +1,8 @@
 """Pure unit tests: no server, no Archipelago."""
+import asyncio
 import json
 import re
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -9,6 +11,7 @@ from archipelago_manager import apbridge, configstore, ics, settings, yamlform, 
 from archipelago_manager.config import CONFIG
 from archipelago_manager.generation import _player_file_errors, _summarize_failure
 from archipelago_manager.rooms import slot_rules
+from archipelago_manager.routes.apworlds import InvalidAPWorld, inspect_apworld
 from archipelago_manager.gamestore import classify
 from archipelago_manager.security import client_address, hash_password, verify_password, LoginThrottle
 from archipelago_manager.textclient import Session, concerns_me, render
@@ -452,13 +455,66 @@ def test_the_activity_feed_keeps_what_players_see(tmp_path, monkeypatch):
 def test_custom_worlds_go_into_the_versions_they_work_with():
     assert apbridge.parse_version("0.6.2") == (0, 6, 2) and apbridge.parse_version("v0.5.1") == (0, 5, 1)
     assert apbridge.parse_version("") is None and apbridge.parse_version("next") is None
-    assert apbridge.works_with({}, (0, 5, 0))
+    assert apbridge.works_with({"game": "X"}, (0, 5, 0)) and apbridge.works_with({"game": "X"}, (0, 7, 0))
+    # a file without a manifest ({}): Archipelago 0.7.0 refuses it, and with it every other world
+    assert apbridge.works_with({}, (0, 5, 0)) and apbridge.works_with({}, (0, 6, 8))
+    assert not apbridge.works_with({}, (0, 7, 0)) and not apbridge.works_with({}, (1, 0, 0))
     assert apbridge.works_with({"minimum_ap_version": "0.6.0"}, (0, 6, 2))
     assert not apbridge.works_with({"minimum_ap_version": "0.6.0"}, (0, 5, 1))
     assert not apbridge.works_with({"maximum_ap_version": "0.5.1"}, (0, 6, 2))
     assert apbridge.works_with({"minimum_ap_version": "0.5.0", "maximum_ap_version": "0.6.9"}, (0, 6, 2))
     assert apbridge.works_with({"minimum_ap_version": "nonsense"}, (0, 6, 2))
 
+
+
+
+def test_a_world_without_a_manifest_is_kept_out_of_archipelago_0_7(tmp_path, monkeypatch):
+    """Upgrading the image to Archipelago 0.7 with such a world installed must not stop every world loading there."""
+    folder, library = tmp_path / "custom_worlds", tmp_path / "library"
+    folder.mkdir()
+    library.mkdir()
+    (library / "1.apworld").write_bytes(b"no manifest")
+    (library / "2.apworld").write_bytes(b"with manifest")
+    (folder / "adofai.apworld").write_bytes(b"no manifest")  # copied there while the image had 0.6.8
+    rows = [{"id": 1, "module": "adofai", "manifest": "{}"}, {"id": 2, "module": "modern", "manifest": '{"game": "M"}'}]
+    monkeypatch.setattr(apbridge.db, "query", lambda sql, params=(): rows if "FROM apworlds" in sql else [])
+    monkeypatch.setattr(apbridge, "apworld_library_path", lambda apworld_id: library / f"{apworld_id}.apworld")
+    monkeypatch.setattr(apbridge.STATE, "info", None)
+    for version, present in (([0, 7, 0], ["modern.apworld"]), ([0, 6, 8], ["adofai.apworld", "modern.apworld"])):
+        monkeypatch.setattr(apbridge.STATE, "where", {"worlds_folder": str(folder), "version_tuple": version})
+        asyncio.run(apbridge.sync_apworlds())
+        assert sorted(path.name for path in folder.iterdir()) == present
+
+def test_a_world_without_a_manifest_is_known_by_the_game_its_code_names(tmp_path):
+    def apworld(files: dict[str, str]) -> Path:
+        path = tmp_path / f"world{len(list(tmp_path.iterdir()))}.apworld"
+        with zipfile.ZipFile(path, "w") as zf:
+            for name, text in files.items():
+                zf.writestr(name, text)
+        return path
+
+    world = ('raise RuntimeError("only read, never run")\n'
+             'from worlds.AutoWorld import World, WebWorld\n'
+             'class DanceWeb(WebWorld):\n    theme = "dirt"\n'
+             'class DanceItem(Item):\n    game = "Not this"\n'
+             'class ADOFAIWorld(World):\n    game = "A Dance of Fire and Ice"\n    topology_present = True\n')
+    meta = inspect_apworld(apworld({"adofai/__init__.py": world, "adofai/docs/setup_en.md": "x"}))
+    assert (meta["game"], meta["module"], meta["version"], meta["manifest"]) == ("A Dance of Fire and Ice", "adofai", None, {})
+    # the class can be in another file of the world, under a dotted base and with an annotation
+    meta = inspect_apworld(apworld({"split/__init__.py": "from .world import SplitWorld\n",
+                                    "split/world.py": 'import worlds.AutoWorld\nclass SplitWorld(worlds.AutoWorld.World):\n'
+                                                      '    game: str = "Split"\n'}))
+    assert (meta["game"], meta["module"]) == ("Split", "split")
+    # nothing is guessed: no World class, two games, a name that is not plain text, code that does not parse
+    for code in ('game = "Loose"\n', world + 'class OtherWorld(World):\n    game = "Other"\n',
+                 'class DanceWorld(World):\n    game = GAME_NAME\n', 'class DanceWorld(World):\n    game = (\n',
+                 'class DanceTest(WorldTestBase):\n    game = "Dance"\n'):
+        with pytest.raises(InvalidAPWorld, match="cannot be read from its code"):
+            inspect_apworld(apworld({"dance/__init__.py": code}))
+    # and it still has to be a world: one folder with an __init__.py
+    for files in ({"readme.txt": "x"}, {"a/__init__.py": world, "b/__init__.py": world}):
+        with pytest.raises(InvalidAPWorld, match="exactly one"):
+            inspect_apworld(apworld(files))
 
 def test_calendar_files_keep_to_the_standard():
     summary = "Race; with, commas \\ and\na line break\x07" + "é" * 60

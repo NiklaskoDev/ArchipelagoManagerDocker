@@ -160,12 +160,14 @@ CUSTOM_ROM_WORLD = '''
 
 
 def build_apworld(path: Path, *, game="Custom Checks", module="customchecks", version="1.2.0", minimum="0.6.0",
-                  slow_seconds: int = 0, with_options: bool = False, rom: bytes | None = None) -> Path:
+                  slow_seconds: int = 0, with_options: bool = False, rom: bytes | None = None,
+                  manifest: bool = True) -> Path:
     """Repackages the built-in ChecksFinder world under another name: a real, loadable custom world. `with_options`
     gives it options of its own (CUSTOM_OPTIONS) besides the ones every game has; `rom` makes it need a base ROM to
-    generate, the file with these contents."""
+    generate, the file with these contents. `manifest=False` leaves out archipelago.json, as some worlds are
+    released."""
     src = Path(AP_DIR) / "worlds" / "checksfinder"
-    manifest = {"version": 7, "compatible_version": 7, "game": game, "world_version": version, "minimum_ap_version": minimum}
+    contents = {"version": 7, "compatible_version": 7, "game": game, "world_version": version, "minimum_ap_version": minimum}
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
         for f in src.rglob("*"):
             if f.is_dir() or "__pycache__" in f.parts:
@@ -187,7 +189,8 @@ def build_apworld(path: Path, *, game="Custom Checks", module="customchecks", ve
                                     b"from Options import PerGameCommonOptions\n" + CUSTOM_OPTIONS)
                 data = data.replace(b"options_dataclass = PerGameCommonOptions", b"options_dataclass = CustomOptions")
             zf.writestr(f"{module}/{f.relative_to(src)}", data)
-        zf.writestr(f"{module}/archipelago.json", json.dumps(manifest))
+        if manifest:
+            zf.writestr(f"{module}/archipelago.json", json.dumps(contents))
     return path
 
 

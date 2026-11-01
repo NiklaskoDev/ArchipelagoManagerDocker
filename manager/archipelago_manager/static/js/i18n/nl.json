@@ -1904,7 +1904,9 @@
   "This link to set a new password cannot be used any more: it expired or was used. Ask an administrator for a new one.": "Deze link voor een nieuw wachtwoord kan niet meer gebruikt worden: hij is verlopen of al gebruikt. Vraag een beheerder om een nieuwe.",
   "Every player reached their goal in this game, so it stays in the archive": "Alle spelers in dit spel hebben hun doel bereikt, dus het blijft in het archief",
   "Archipelago {0} is not being installed": "Archipelago {0} wordt niet geïnstalleerd",
-  "The installation was stopped": "De installatie is gestopt"
+  "The installation was stopped": "De installatie is gestopt",
+  "This .apworld has no archipelago.json manifest, and which game it is for cannot be read from its code. Ask its author for a version with a manifest.": "Deze .apworld heeft geen manifest archipelago.json, en voor welk spel hij is, valt niet uit zijn code te lezen. Vraag de maker om een versie met een manifest.",
+  "This world has no archipelago.json manifest, which Archipelago 0.7.0 and newer need, but this server runs {0}": "Deze wereld heeft geen manifest archipelago.json, dat Archipelago 0.7.0 en nieuwer nodig hebben, maar deze server draait {0}"
  },
  "server_extra": [
   " (line {0})",
@@ -1978,6 +1980,8 @@
   "Enter the key with its full path in the container, e.g. /config/tls/privkey.pem",
   "Document #{0}: the player name has no visible characters, so nobody can read it",
   "Document #{0}: the player name contains characters that change the direction of the text, so it shows differently from how it is spelled",
-  "Two players in this file are named '{0}'. Player names must be unique."
+  "Two players in this file are named '{0}'. Player names must be unique.",
+  "This .apworld has no archipelago.json manifest, and which game it is for cannot be read from its code. Ask its author for a version with a manifest.",
+  "This world has no archipelago.json manifest, which Archipelago 0.7.0 and newer need, but this server runs {0}"
  ]
 }
