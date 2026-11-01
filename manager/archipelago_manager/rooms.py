@@ -781,7 +781,8 @@ class RoomManager:
                     continue
                 try:
                     await self._check_progress(game_id)
-                    backups.maybe_auto(game_id)
+                    # lists the copies and may read the whole save (waiting while the server writes it): not on the loop
+                    await asyncio.to_thread(backups.maybe_auto, game_id)
                 except Exception:  # noqa: BLE001 - one broken game must not stop the others
                     log.exception("Checking the progress of game %s failed", game_id)
 

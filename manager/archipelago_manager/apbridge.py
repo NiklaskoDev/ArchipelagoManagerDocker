@@ -185,11 +185,24 @@ def version_tuple(version: str | None = None) -> tuple[int, ...] | None:
     return tuple(value) if value else None
 
 
-def installed_games(*, include_hidden: bool = False, version: str | None = None) -> dict[str, dict[str, Any]]:
+# Every game of a version by name, hidden ones too. Built once for each list Archipelago gives (pages ask which of
+# their games are missing for every config and every game they show).
+_BY_NAME: dict[str | None, tuple[dict[str, Any], dict[str, dict[str, Any]]]] = {}
+
+
+def _games_by_name(version: str | None = None) -> dict[str, dict[str, Any]]:
     info = info_of(version)
     if not info:
         return {}
-    return {g["name"]: g for g in info["games"] if include_hidden or not g["hidden"]}
+    cached = _BY_NAME.get(version)
+    if cached is None or cached[0] is not info:
+        cached = (info, {g["name"]: g for g in info["games"]})
+        _BY_NAME[version] = cached
+    return cached[1]
+
+
+def installed_games(*, include_hidden: bool = False, version: str | None = None) -> dict[str, dict[str, Any]]:
+    return {name: g for name, g in _games_by_name(version).items() if include_hidden or not g["hidden"]}
 
 
 def describe_file(path: str | Path) -> dict[str, Any]:
@@ -217,37 +230,41 @@ def roms() -> list[dict[str, Any]]:
     files a custom game looked for without such a setting. Whether a file is there is checked now, so a ROM put into
     place counts at once; whether it is the right one was checked when the games were loaded or it was uploaded.
     """
-    result = []
-    for name, game in sorted(installed_games(include_hidden=True).items(), key=lambda kv: kv[0].lower()):
-        paths = set()
-        for rom in game.get("roms") or []:
-            exists = os.path.exists(rom["path"])
-            paths.add(rom["path"])
-            result.append({"game": name, "setting": rom["setting"], "path": rom["path"], **describe_file(rom["path"]),
-                           "description": rom["description"], "checked": True, "needed": rom["needed"],
-                           "exists": exists, "valid": rom["valid"] if exists else None})
-        need = game.get("needs_file")
-        if need and need.get("path") and os.path.abspath(need["path"]) not in paths:
-            exists = os.path.exists(need["path"])
-            result.append({"game": name, "setting": None, "path": need["path"], **describe_file(need["path"]),
-                           "description": "", "checked": False, "needed": True, "exists": exists, "valid": None})
+    games = _games_by_name()
+    return [rom for name in sorted(games, key=str.lower) for rom in _game_roms(name, games[name])]
+
+
+def _game_roms(name: str, game: dict[str, Any]) -> list[dict[str, Any]]:
+    """The base ROMs one game asks for (see roms())."""
+    result, paths = [], set()
+    for rom in game.get("roms") or []:
+        exists = os.path.exists(rom["path"])
+        paths.add(rom["path"])
+        result.append({"game": name, "setting": rom["setting"], "path": rom["path"], **describe_file(rom["path"]),
+                       "description": rom["description"], "checked": True, "needed": rom["needed"],
+                       "exists": exists, "valid": rom["valid"] if exists else None})
+    need = game.get("needs_file")
+    if need and need.get("path") and os.path.abspath(need["path"]) not in paths:
+        exists = os.path.exists(need["path"])
+        result.append({"game": name, "setting": None, "path": need["path"], **describe_file(need["path"]),
+                       "description": "", "checked": False, "needed": True, "exists": exists, "valid": None})
     return result
 
 
 def rom_checked(game: str, setting: str | None, valid: bool | None) -> None:
     """Notes the outcome of checking a ROM that was just put into place (or removed: None)."""
-    for rom in (installed_games(include_hidden=True).get(game) or {}).get("roms") or []:
+    for rom in (_games_by_name().get(game) or {}).get("roms") or []:
         if rom["setting"] == setting:
             rom["valid"] = valid
 
 
 def missing_files(games: list[str] | set[str]) -> list[dict[str, Any]]:
     """Games among these that cannot be generated yet because a file they need, their base ROM, is not on the server."""
-    wanted = set(games)
-    result, seen = [], set()
-    for rom in roms():
-        if rom["game"] in wanted and rom["needed"] and not rom["exists"] and rom["game"] not in seen:
-            seen.add(rom["game"])
+    installed = _games_by_name()
+    result = []
+    for name in sorted({g for g in games if g in installed}, key=str.lower):  # only these games' files are looked at
+        rom = next((r for r in _game_roms(name, installed[name]) if r["needed"] and not r["exists"]), None)
+        if rom:
             result.append({key: rom[key] for key in ("game", "setting", "file", "folder", "in_data_dir")})
     return result
 
@@ -258,10 +275,9 @@ def missing_file_text(item: dict[str, Any]) -> str:
 
 def missing_games(games: list[str] | set[str], version: str | None = None) -> list[str]:
     """Games that are not installed (in that version). Empty if we cannot tell (Archipelago unavailable)."""
-    info = info_of(version)
-    if not info:
+    known = _games_by_name(version)
+    if not known:
         return []
-    known = {g["name"] for g in info["games"]}
     return sorted({g for g in games if g and g not in known and g != "Archipelago"})
 
 

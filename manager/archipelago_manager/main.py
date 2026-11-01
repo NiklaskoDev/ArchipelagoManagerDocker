@@ -199,21 +199,20 @@ def _token_refusal(request: Request) -> JSONResponse | None:
     return None
 
 
-@app.middleware("http")
-async def guard(request: Request, call_next):
+def _refusal(request: Request) -> JSONResponse | None:
     if request.url.path.startswith("/api/") and bearer_token(request) is not None:
         # A browser cannot send an Authorization header of its own choosing to another site without a CORS preflight,
         # which we never allow, so a token is no CSRF risk and needs no extra header
-        refusal = _token_refusal(request)
-        if refusal is not None:
-            return refusal
+        return _token_refusal(request)
     # Browsers cannot attach a custom header to a cross-site request without a CORS preflight, which we never allow.
     # Requiring it on every state-changing call is therefore a complete CSRF defence next to the SameSite cookie.
-    elif (request.method not in SAFE_METHODS and request.url.path.startswith("/api/")
+    if (request.method not in SAFE_METHODS and request.url.path.startswith("/api/")
             and request.headers.get(CSRF_HEADER) != CSRF_VALUE):
         return JSONResponse(status_code=403, content={"detail": "Missing request header"})
-    _warn_about_untrusted_proxy(request)
-    response = await call_next(request)
+    return None
+
+
+def _secure(request: Request, response: Response) -> None:
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "same-origin"
@@ -222,41 +221,43 @@ async def guard(request: Request, call_next):
         response.headers["Cache-Control"] = "no-store"
     elif "cache-control" not in response.headers:
         response.headers["Cache-Control"] = "no-cache"
-    return response
 
-
-@app.middleware("http")
-async def audit_trail(request: Request, call_next):
-    """Records administrators' changes and game starts and stops (audit.py), once they succeeded."""
-    if not audit.watched(request):
-        return await call_next(request)
-    user = user_for_request(request)
-    before = audit.target(request.url.path) if user else None  # its name, before a delete takes it away
-    response = await call_next(request)
-    if user is not None and response.status_code < 400:
-        try:
-            audit.finish(request, user, before)
-        except Exception:  # noqa: BLE001 - the change happened; a missing line must not turn it into an error
-            log.exception("Writing the audit log failed")
-    return response
-
-
-app.add_middleware(BodyLimit)
 
 SLOW_REQUEST = 5.0  # seconds
 
 
-@app.middleware("http")
-async def note_slow_requests(request: Request, call_next):
+def note_if_slow(request: Request, took: float) -> None:
     """Writes API requests that kept a page waiting to the log, by route (some paths hold a token): a page stays empty
     until its requests are answered, and the log then says which one held it up."""
-    started = time.monotonic()
-    response = await call_next(request)
-    took = time.monotonic() - started
     if took >= SLOW_REQUEST and request.url.path.startswith("/api/"):
         route = getattr(request.scope.get("route"), "path", "(no route)")
         log.warning("Slow request: %s %s took %.1f s", request.method, route, took)
+
+
+@app.middleware("http")
+async def around_requests(request: Request, call_next):
+    """What every request goes through, in one middleware (each of Starlette's costs a quarter of a millisecond a
+    request): the CSRF and token checks, the audit trail of administrators' changes and game starts and stops
+    (audit.py, once they succeeded), security headers, and the log of slow requests."""
+    started = time.monotonic()
+    refusal = _refusal(request)
+    if refusal is not None:
+        return refusal
+    _warn_about_untrusted_proxy(request)
+    audited = user_for_request(request) if audit.watched(request) else None
+    before = audit.target(request.url.path) if audited else None  # its name, before a delete takes it away
+    response = await call_next(request)
+    if audited is not None and response.status_code < 400:
+        try:
+            audit.finish(request, audited, before)
+        except Exception:  # noqa: BLE001 - the change happened; a missing line must not turn it into an error
+            log.exception("Writing the audit log failed")
+    _secure(request, response)
+    note_if_slow(request, time.monotonic() - started)
     return response
+
+
+app.add_middleware(BodyLimit)
 
 
 @app.exception_handler(apbridge.APBridgeError)
