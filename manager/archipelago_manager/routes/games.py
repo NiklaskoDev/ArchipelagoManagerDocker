@@ -59,9 +59,13 @@ def managed_game(game_id: int, user: sqlite3.Row) -> sqlite3.Row:
     return row
 
 
-def can_control(game: sqlite3.Row, user: sqlite3.Row) -> bool:
-    return manages(game, user) or (app_settings.get_setting("users_can_start_rooms")
-                                   and is_participant(game["id"], user["id"]))
+def can_control(game: sqlite3.Row, user: sqlite3.Row, participant: bool | None = None) -> bool:
+    """Who starts and stops a game. `participant`: whether the user has a slot in it, when the caller knows."""
+    if manages(game, user):
+        return True
+    if not app_settings.get_setting("users_can_start_rooms"):
+        return False
+    return participant if participant is not None else is_participant(game["id"], user["id"])
 
 
 def can_archive(game: sqlite3.Row, user: sqlite3.Row) -> bool:
@@ -130,7 +134,24 @@ def handover_json(s: sqlite3.Row, game: sqlite3.Row, user: sqlite3.Row, my_slots
             "can_accept": for_me and s["user_id"] != user["id"] and not (game["single_claim"] and my_slots)}
 
 
-def game_summary(row: sqlite3.Row, slots: list[sqlite3.Row], user: sqlite3.Row, host: str) -> dict:
+def _for_my_slots(rows: list[sqlite3.Row], slots: dict[int, list[sqlite3.Row]], user: sqlite3.Row) -> dict:
+    """What game_summary tells a player about their own slots and needs the database for: for all of a list's games in
+    two queries, not two for each game."""
+    game_ids = [r["id"] for r in rows if any(s["user_id"] == user["id"] for s in slots.get(r["id"], []))]
+    patch_counts: dict[int, int] = {}
+    if game_ids:
+        marks = ",".join("?" * len(game_ids))
+        patch_counts = {r["game_id"]: r["n"] for r in db.query(
+            f"SELECT f.game_id, COUNT(*) AS n FROM game_files f JOIN game_slots s ON s.game_id = f.game_id "
+            f"AND s.slot = f.slot WHERE f.game_id IN ({marks}) AND f.kind = 'patch' AND s.user_id = ? "
+            f"GROUP BY f.game_id", [*game_ids, user["id"]])}
+    return {"patch_counts": patch_counts, "last_checks": reminders.last_checks(game_ids)}
+
+
+def game_summary(row: sqlite3.Row, slots: list[sqlite3.Row], user: sqlite3.Row, host: str,
+                 mine_info: dict | None = None) -> dict:
+    if mine_info is None:
+        mine_info = _for_my_slots([row], {row["id"]: slots}, user)
     runtime = ROOMS.status(row["id"])
     if runtime["state"] == "stopped" and ROOMS.is_asleep(row):
         runtime["state"] = "sleeping"
@@ -164,14 +185,13 @@ def game_summary(row: sqlite3.Row, slots: list[sqlite3.Row], user: sqlite3.Row, 
         "goal_count": sum(1 for s in players if s["goal_at"] is not None),
         # with, for a slot whose player was reminded that the others wait (reminders.py), since when they did not play
         "my_slots": [{"slot": s["slot"], "name": s["name"], "game": s["game"],
-                      "idle_since": reminders.idle_since(row, s) if s["reminders"] else None} for s in mine],
+                      "idle_since": reminders.idle_since(row, s, mine_info["last_checks"].get(row["id"], {}))
+                      if s["reminders"] else None} for s in mine],
         # slots offered to this user, or to whoever takes them
         "offered_slots": [{"slot": s["slot"], "name": s["name"], "game": s["game"], **handover}
                           for s in slots if (handover := handover_json(s, row, user, mine)) and handover["can_accept"]],
-        "my_file_count": db.query_one(
-            "SELECT COUNT(*) AS n FROM game_files f JOIN game_slots s ON s.game_id = f.game_id AND s.slot = f.slot "
-            "WHERE f.game_id = ? AND f.kind = 'patch' AND s.user_id = ?", (row["id"], user["id"]))["n"] if mine else 0,
-        "can_control": bool(can_control(row, user)),
+        "my_file_count": mine_info["patch_counts"].get(row["id"], 0),
+        "can_control": can_control(row, user, participant=bool(mine)),
         "can_manage": manages(row, user),
         "can_archive": can_archive(row, user),
         "return_blocked": return_blocked(row, players),
@@ -198,7 +218,8 @@ def list_games(request: Request, user: sqlite3.Row = Depends(current_user)) -> l
                         (user["role"] == "organizer", user["id"], user["id"], user["id"]))
     slots = _slots_for([r["id"] for r in rows])
     host = public_host(request)
-    return [game_summary(r, slots.get(r["id"], []), user, host) for r in rows]
+    mine_info = _for_my_slots(rows, slots, user)
+    return [game_summary(r, slots.get(r["id"], []), user, host, mine_info) for r in rows]
 
 
 @router.post("/games")

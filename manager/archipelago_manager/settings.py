@@ -1,7 +1,9 @@
 """Global manager settings and validation of Archipelago server options."""
 from __future__ import annotations
 
+import copy
 import re
+import threading
 from typing import Any
 
 from . import db
@@ -115,7 +117,37 @@ def discord_webhook(value: str) -> bool:
     return len(value) <= 512 and bool(_DISCORD_WEBHOOK.match(value))
 
 
+# The settings are read for nearly every request, and several times in some (whether players may start a game, for
+# each game in a list). They change only through update_settings() in this process, so they are read from the database
+# once and again after each change. A read that a change overtook is not kept (the generation tells).
+_cache: dict[str, Any] | None = None
+_generation = 0
+_lock = threading.Lock()
+
+
+def _forget() -> None:
+    global _cache, _generation
+    with _lock:
+        _cache, _generation = None, _generation + 1
+
+
+def _current() -> dict[str, Any]:
+    global _cache
+    if (cached := _cache) is not None:
+        return cached
+    generation = _generation
+    values = _read()
+    with _lock:
+        if generation == _generation:
+            _cache = values
+    return values
+
+
 def get_settings() -> dict[str, Any]:
+    return copy.deepcopy(_current())
+
+
+def _read() -> dict[str, Any]:
     stored = {row["key"]: db.jloads(row["value"]) for row in db.query("SELECT key, value FROM settings")}
     result = dict(DEFAULTS)
     for key in DEFAULTS:
@@ -140,7 +172,7 @@ def discord_login_ready(values: dict[str, Any] | None = None) -> bool:
 
 
 def get_setting(key: str) -> Any:
-    return get_settings()[key]
+    return copy.deepcopy(_current()[key])
 
 
 # How the settings below are called in the web UI, for error messages
@@ -196,10 +228,13 @@ def update_settings(patch: dict[str, Any]) -> dict[str, Any]:
                             "address of this web UI")
     if after["tls_key"] and not after["tls_cert"]:
         raise SettingsError("Enter the certificate as well as its key")
-    with db.connection() as conn:
-        for key, value in clean.items():
-            conn.execute("INSERT INTO settings(key, value) VALUES (?, ?) "
-                         "ON CONFLICT(key) DO UPDATE SET value = excluded.value", (key, db.jdumps(value)))
+    try:
+        with db.connection() as conn:
+            for key, value in clean.items():
+                conn.execute("INSERT INTO settings(key, value) VALUES (?, ?) "
+                             "ON CONFLICT(key) DO UPDATE SET value = excluded.value", (key, db.jdumps(value)))
+    finally:
+        _forget()
     return get_settings()
 
 

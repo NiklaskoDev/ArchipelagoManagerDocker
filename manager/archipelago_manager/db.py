@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
+import threading
 import time
 from contextlib import contextmanager
 from typing import Any
@@ -488,12 +489,25 @@ def connection() -> Iterator[sqlite3.Connection]:
         conn.close()
 
 
+# Single statements run on a connection each thread keeps open. Opening one costs far more than most queries (some 60
+# times as much on a fast disk), and in WAL mode closing the last one also removes the -wal and -shm files, which the
+# next statement makes again: on a slow share every one of those is a trip to the disk. Transactions (connection()
+# above) still get a connection of their own, so what they see and do is not mixed with other statements.
+_local = threading.local()
+
+
+def _shared() -> sqlite3.Connection:
+    conn: sqlite3.Connection | None = getattr(_local, "conn", None)
+    if conn is None or _local.path != CONFIG.db_path:
+        if conn is not None:
+            conn.close()
+        conn = _connect()
+        _local.conn, _local.path = conn, CONFIG.db_path
+    return conn
+
+
 def query(sql: str, params: Iterable[Any] = ()) -> list[sqlite3.Row]:
-    conn = _connect()
-    try:
-        return conn.execute(sql, tuple(params)).fetchall()
-    finally:
-        conn.close()
+    return _shared().execute(sql, tuple(params)).fetchall()
 
 
 def query_one(sql: str, params: Iterable[Any] = ()) -> sqlite3.Row | None:
@@ -502,12 +516,8 @@ def query_one(sql: str, params: Iterable[Any] = ()) -> sqlite3.Row | None:
 
 
 def execute(sql: str, params: Iterable[Any] = ()) -> int:
-    """Runs one statement and returns lastrowid."""
-    conn = _connect()
-    try:
-        return conn.execute(sql, tuple(params)).lastrowid or 0
-    finally:
-        conn.close()
+    """Runs one statement (its own transaction) and returns lastrowid."""
+    return _shared().execute(sql, tuple(params)).lastrowid or 0
 
 
 def now() -> float:

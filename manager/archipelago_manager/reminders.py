@@ -32,11 +32,21 @@ def days_for(game: sqlite3.Row) -> int:
     return game["remind_days"] if game["remind_days"] is not None else app_settings.get_setting("remind_days")
 
 
+def last_checks(game_ids: list[int]) -> dict[int, dict[int, float]]:
+    """When each slot of these games last checked a location, by game and slot. The history notes where a slot stands
+    when it first looks at the save, checks or not: a point without checks is no sign of playing."""
+    if not game_ids:
+        return {}
+    marks = ",".join("?" * len(game_ids))
+    result: dict[int, dict[int, float]] = {}
+    for r in db.query(f"SELECT game_id, slot, MAX(at) AS at FROM game_progress WHERE game_id IN ({marks}) "
+                      f"AND checked > 0 GROUP BY game_id, slot", game_ids):
+        result.setdefault(r["game_id"], {})[r["slot"]] = r["at"]
+    return result
+
+
 def _last_checks(game_id: int) -> dict[int, float]:
-    """When each slot last checked a location. The history notes where a slot stands when it first looks at the save,
-    checks or not: a point without checks is no sign of playing."""
-    return {r["slot"]: r["at"] for r in db.query("SELECT slot, MAX(at) AS at FROM game_progress "
-                                                 "WHERE game_id = ? AND checked > 0 GROUP BY slot", (game_id,))}
+    return last_checks([game_id]).get(game_id, {})
 
 
 def idle_since(game: sqlite3.Row, slot: sqlite3.Row, last_checks: dict[int, float] | None = None) -> float | None:

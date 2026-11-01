@@ -610,11 +610,10 @@ def test_the_data_folder_is_counted_once_however_many_ask_and_kept_a_while(monke
     assert asyncio.run(ask(1)) == [1234] and len(walks) == 2  # later: counted again
 
 
-def test_slow_requests_are_logged_by_their_route(monkeypatch, caplog):
+def test_slow_requests_are_logged_by_their_route(caplog):
     from starlette.requests import Request
 
     from archipelago_manager import main
-    monkeypatch.setattr(main, "SLOW_REQUEST", 0.05)
 
     class Route:
         path = "/api/watch/{token}"
@@ -623,17 +622,40 @@ def test_slow_requests_are_logged_by_their_route(monkeypatch, caplog):
         return Request({"type": "http", "method": "GET", "path": path, "root_path": "", "scheme": "http",
                         "server": ("test", 80), "headers": [], "query_string": b"", "route": Route()})
 
-    async def slow(_request):
-        await asyncio.sleep(0.1)
-        return "response"
-
-    async def quick(_request):
-        return "response"
-
     with caplog.at_level(logging.WARNING, logger="archipelago_manager"):
-        assert asyncio.run(main.note_slow_requests(request("/api/watch/s3cret"), slow)) == "response"
-        asyncio.run(main.note_slow_requests(request("/api/games"), quick))
-        asyncio.run(main.note_slow_requests(request("/assets/app.js"), slow))  # not one of the API's
+        main.note_if_slow(request("/api/watch/s3cret"), main.SLOW_REQUEST + 1)
+        main.note_if_slow(request("/api/games"), main.SLOW_REQUEST - 1)  # quick enough
+        main.note_if_slow(request("/assets/app.js"), main.SLOW_REQUEST + 1)  # not one of the API's
     logged = [r.getMessage() for r in caplog.records if r.name == "archipelago_manager"]
     # by its route: a path can hold a token, which does not belong in the log
     assert len(logged) == 1 and "GET /api/watch/{token} took" in logged[0] and "s3cret" not in logged[0]
+
+
+def test_missing_files_and_games_follow_what_archipelago_reported(tmp_path, monkeypatch):
+    present = tmp_path / "alpha.sfc"
+    present.write_bytes(b"rom")
+
+    def rom(name, needed=True):
+        return {"setting": f"{name}.rom_file", "path": str(tmp_path / name), "description": "", "needed": needed,
+                "valid": None}
+
+    info = {"games": [
+        {"name": "Zed", "hidden": False, "roms": [rom("zed.nes")]},
+        {"name": "alpha", "hidden": False, "roms": [{**rom("alpha.sfc"), "valid": True}]},
+        {"name": "Beta", "hidden": True, "roms": [rom("beta.gb", needed=False)], "needs_file": {"path": str(tmp_path / "x.bin")}},
+        {"name": "Plain", "hidden": False, "roms": []},
+    ]}
+    monkeypatch.setattr(apbridge.STATE, "info", info)
+    asked = {"Zed", "alpha", "Beta", "Plain", "Unknown"}
+    # the same as narrowing the full list to the games asked about: one entry per game, the first file it misses
+    expected, seen = [], set()
+    for entry in apbridge.roms():
+        if entry["game"] in asked and entry["needed"] and not entry["exists"] and entry["game"] not in seen:
+            seen.add(entry["game"])
+            expected.append({key: entry[key] for key in ("game", "setting", "file", "folder", "in_data_dir")})
+    assert apbridge.missing_files(asked) == expected and [e["game"] for e in expected] == ["Beta", "Zed"]
+    assert apbridge.missing_files({"alpha", "Plain"}) == []
+    assert apbridge.missing_games(asked) == ["Unknown"] and "Beta" in apbridge.installed_games(include_hidden=True)
+    # a new list from Archipelago counts at once
+    monkeypatch.setattr(apbridge.STATE, "info", {"games": info["games"][1:]})
+    assert apbridge.missing_games(asked) == ["Unknown", "Zed"]
