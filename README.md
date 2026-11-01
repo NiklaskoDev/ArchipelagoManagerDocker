@@ -109,7 +109,9 @@ by your players:
   want players to log in remotely. If you do, put it behind a reverse proxy with HTTPS, and set
   `FORWARDED_ALLOW_IPS` to the proxy's address: otherwise every visitor seems to come from the proxy and shares its
   limit of failed logins (the log says so when it happens). Also set *Address of this web UI* (Admin → Settings) to the
-  `https://` address; cookies are then always marked secure.
+  `https://` address. Signing in there marks the cookie secure (sent over https only), behind the proxy or tunnel too;
+  signing in on the local network's plain `http://` address works as well, with a cookie that is not, because a browser
+  drops a secure cookie that comes over http.
 - **Host networking:** works too and avoids publishing ports. Then set `PORT` to a free port for the web UI.
 
 ### Encrypted game connections
@@ -652,7 +654,9 @@ approve pull requests*. You can also run the workflow by hand (*Actions → Arch
 
 ## Security notes
 
-- Passwords are stored as salted scrypt hashes; sessions are `HttpOnly`, `SameSite=Lax` cookies; state-changing API
+- Passwords are stored as salted scrypt hashes; sessions are `HttpOnly`, `SameSite=Lax` cookies, also `Secure` when the
+  browser talks https with the server (judged by the request, or the page it comes from behind a proxy that does not
+  say so, never by the configured address alone); state-changing API
   calls require a custom header, which blocks cross-site requests; failed logins are rate limited per address (an IPv6
   address counts with its whole /64 network, which one connection usually has, so hopping between them buys no
   guesses).

@@ -153,8 +153,8 @@ def test_settings_keep_the_secret_on_the_server(tmp_path, discord):
         assert status["discord_login"] is True and status["site_url"] == "https://ap.example.org"
         # leaving the secret out of a later save keeps it
         assert admin.patch("/api/settings", json={"discord_signup": True}).json()["discord_client_secret_set"] is True
-        # the state cookie gets the Secure flag when the site is served over https
-        r = server.client().get("/api/auth/discord/login", follow_redirects=False)
+        # the state cookie gets the Secure flag when the site is served over https (the sign-in link leads there)
+        r = server.client().get("/api/auth/discord/login", follow_redirects=False, headers={"Host": "ap.example.org"})
         assert "secure" in r.headers["set-cookie"].lower() and "httponly" in r.headers["set-cookie"].lower()
     finally:
         server.stop()
