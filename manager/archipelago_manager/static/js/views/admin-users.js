@@ -4,10 +4,10 @@ import { pageHeader, badge, field, select, adminTabs, copyField } from "../compo
 import { t, plural } from "../i18n.js";
 
 // Organizers run sign-up rounds and the games they add or generate, without administering the server
-const ROLES = [["user", t("User")], ["organizer", t("Organizer")], ["admin", t("Administrator")]];
+const ROLES = () => [["user", t("User")], ["organizer", t("Organizer")], ["admin", t("Administrator")]];
 
 // What an invite link makes: never an administrator (routes/auth.py, invites.py)
-const INVITE_ROLES = [["user", t("User")], ["organizer", t("Organizer")]];
+const INVITE_ROLES = () => [["user", t("User")], ["organizer", t("Organizer")]];
 
 // A link to this server's web UI with a token in its fragment, which browsers never send to a server
 const linkTo = (kind, token) => `${state.status.site_url || location.origin}/#/${kind}/${token}`;
@@ -23,7 +23,7 @@ export default async function render({ root, isCurrent }) {
       h("thead", {}, h("tr", {}, [t("User"), t("Role"), t("Configs"), t("Slots"), t("Last sign-in"), ""].map((text) => h("th", {}, text)))),
       h("tbody", {}, users.map((u) => {
         const self = u.id === state.user.id;
-        const role = select(ROLES, u.role);
+        const role = select(ROLES(), u.role);
         role.disabled = self;
         role.onchange = async () => {
           try { await patch(`/api/users/${u.id}`, { role: role.value }); toast(t("Role updated"), "success"); } catch (e) { toast(e.message, "error"); }
@@ -104,7 +104,7 @@ export default async function render({ root, isCurrent }) {
         h("tbody", {}, list.map((i) => h("tr", { style: i.state === "active" ? undefined : { opacity: 0.65 } },
           h("td", {}, i.note || h("span", { class: "muted" }, "—"), h("div", { class: "muted small" },
             i.created_by ? t("by {name}, {ago}", { name: i.created_by, ago: fmtAgo(i.created_at) }) : fmtAgo(i.created_at))),
-          h("td", {}, (INVITE_ROLES.find(([key]) => key === i.role) || [null, i.role])[1]),
+          h("td", {}, (INVITE_ROLES().find(([key]) => key === i.role) || [null, i.role])[1]),
           h("td", {}, `${i.uses} / ${i.max_uses}`),
           h("td", {}, stateOf(i)),
           h("td", {}, i.joined.length ? i.joined.join(", ") : h("span", { class: "muted" }, "—")),
@@ -117,7 +117,7 @@ export default async function render({ root, isCurrent }) {
   }
 
   function inviteDialog() {
-    const role = select(INVITE_ROLES, "user");
+    const role = select(INVITE_ROLES(), "user");
     const uses = h("input", { class: "input", type: "number", min: 1, max: 100, value: 1 });
     const days = select([1, 7, 30].map((n) => [n, plural(n, "{n} day", "{n} days")]), 7);
     const note = h("input", { class: "input", maxLength: 100, autocomplete: "off", placeholder: t("For example: the Friday group") });
@@ -139,7 +139,7 @@ export default async function render({ root, isCurrent }) {
   function addDialog() {
     const username = h("input", { class: "input", autocomplete: "off" });
     const pw = h("input", { class: "input", type: "password", autocomplete: "new-password" });
-    const role = select(ROLES, "user");
+    const role = select(ROLES(), "user");
     const save = h("button", { class: "btn primary", type: "button" }, t("Create user"));
     save.onclick = action(async () => {
       await post("/api/users", { username: username.value, password: pw.value, role: role.value });

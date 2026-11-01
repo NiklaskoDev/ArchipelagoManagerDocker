@@ -5,6 +5,7 @@ import { h, clear, withNodes } from "./util.js";
 import { get } from "./api.js";
 import { t } from "./i18n.js";
 import { checkbox } from "./components.js";
+import { every } from "./live.js";
 
 const KEEP = 500;  // entries on the page
 const FILTERS = [
@@ -30,7 +31,7 @@ export function activitySection({ gameId, mySlots, cleanup, isCurrent, source = 
   onUnread = null }) {
   const mine = new Set(mySlots);
   const filters = spectator ? FILTERS.filter(([key]) => key !== "chat") : FILTERS;
-  let entries = [], last = 0, filter = "all", timer = null, loaded = false, unread = 0;
+  let entries = [], last = 0, filter = "all", loaded = false, unread = 0;
   const list = h("div", { class: "console feed", role: "log", "aria-live": "polite", tabindex: 0 });
   const tabs = h("div", { class: "tabs", role: "tablist", style: { marginBottom: 0 } });
   const onlyMine = mine.size ? checkbox(t("Only about me"), false) : null;
@@ -116,9 +117,7 @@ export function activitySection({ gameId, mySlots, cleanup, isCurrent, source = 
   draw();
   load();
   // in the background only to count the news, and less often
-  let ticks = 0;
-  timer = setInterval(() => { if (!document.hidden || (onUnread && ++ticks % 4 === 0)) load(); }, 5000);
-  cleanup(() => clearInterval(timer));
+  every(5000, load, cleanup, { hiddenMs: onUnread ? 20000 : 0 });
   if (onUnread) {
     const seen = () => { if (!document.hidden && unread) onUnread((unread = 0)); };
     document.addEventListener("visibilitychange", seen);

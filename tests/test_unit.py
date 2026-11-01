@@ -481,3 +481,39 @@ def test_the_chosen_light_theme_has_the_light_colors_of_the_system():
     chosen = re.search(r':root\[data-theme="light"\] \{(.*?)\}', css, re.S)
     colors = lambda block: re.findall(r"(--[\w-]+):\s*([^;]+);", block.group(1))  # noqa: E731
     assert colors(system) and colors(chosen) == colors(system)
+
+
+def test_the_web_ui_is_sent_compressed_to_browsers_that_take_it(tmp_path):
+    # The image has a gzip copy next to each of the web UI's text files (docker/build-assets.mjs)
+    import gzip
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from archipelago_manager.main import WebUIFiles, accepts_gzip
+
+    script = b"export const a=1;" * 200
+    (tmp_path / "js").mkdir()
+    (tmp_path / "js" / "app.js").write_bytes(script)
+    (tmp_path / "js" / "app.js.gz").write_bytes(gzip.compress(script))
+    (tmp_path / "plain.css").write_text("body{margin:0}")  # no copy: as it is, as before
+    (tmp_path / "index.html").write_text("<!doctype html>")
+    app = FastAPI()
+    app.mount("/", WebUIFiles(directory=tmp_path, html=True))
+    client = TestClient(app)
+
+    r = client.get("/js/app.js", headers={"Accept-Encoding": "gzip, br"})
+    assert r.headers["content-encoding"] == "gzip" and r.headers["vary"] == "Accept-Encoding"
+    assert r.headers["content-type"].startswith("text/javascript") and r.content == script  # the client unpacks it
+    assert int(r.headers["content-length"]) < len(script)
+    again = client.get("/js/app.js", headers={"Accept-Encoding": "gzip", "If-None-Match": r.headers["etag"]})
+    assert again.status_code == 304 and again.headers["vary"] == "Accept-Encoding"
+
+    plain = client.get("/js/app.js", headers={"Accept-Encoding": "identity"})
+    assert "content-encoding" not in plain.headers and plain.content == script and plain.headers["vary"] == "Accept-Encoding"
+    assert plain.headers["etag"] != r.headers["etag"]  # two different bodies
+    css = client.get("/plain.css", headers={"Accept-Encoding": "gzip"})
+    assert "content-encoding" not in css.headers and css.text == "body{margin:0}"
+    assert client.get("/", headers={"Accept-Encoding": "gzip"}).text == "<!doctype html>"
+
+    for header, takes in (("gzip, deflate, br", True), ("", False), ("br", False), ("*", True), ("gzip;q=0", False),
+                          ("*, gzip;q=0", False), ("gzip; q=0.5", True), ("GZIP", True), ("*;q=0", False)):
+        assert accepts_gzip(header) is takes, header

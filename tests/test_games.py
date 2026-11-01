@@ -330,6 +330,8 @@ def test_play_a_game_end_to_end(admin, make_user):
     with APClient(port, "Aly", "ChecksFinder", "letmein") as client:
         assert client.connected and len(client.response["checked_locations"]) == 4  # progress is kept
     assert alice.get(f"/api/games/{gid}").json()["password"] == "letmein"
+    # in the list of games too, for the links that open Archipelago (only for players and whoever runs the game)
+    assert next(g for g in alice.get("/api/games").json() if g["id"] == gid)["password"] == "letmein"
     assert stranger.get("/api/games").json() == []
 
     # stopping and starting keeps progress and settings

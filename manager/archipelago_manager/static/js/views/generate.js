@@ -3,9 +3,10 @@ import { api, get, isAdmin, isOrganizer, state } from "../api.js";
 import { pageHeader, chips, banner, badge, field, checkbox, select, jobBadge, missingGamesPanel, missingRomsPanel, promptMissingGames, empty, apVersionField,
   presetBar, gameSettingsSection } from "../components.js";
 import { t, tServer } from "../i18n.js";
+import { every } from "../live.js";
 
-const SPOILER_CHOICES = [[1, t("Basic spoiler log")], [0, t("No spoiler log")], [2, t("With playthrough")], [3, t("Playthrough and paths")]];
-const PLANDO = [["bosses", t("Bosses")], ["connections", t("Connections")], ["texts", t("Texts")], ["items", t("Items")]];
+const SPOILER_CHOICES = () => [[1, t("Basic spoiler log")], [0, t("No spoiler log")], [2, t("With playthrough")], [3, t("Playthrough and paths")]];
+const PLANDO = () => [["bosses", t("Bosses")], ["connections", t("Connections")], ["texts", t("Texts")], ["items", t("Items")]];
 
 export default async function render({ root, cleanup, isCurrent, query }) {
   const admin = isAdmin();
@@ -70,11 +71,11 @@ export default async function render({ root, cleanup, isCurrent, query }) {
 
   // options -------------------------------------------------------------------------------------------------------------
   const name = h("input", { class: "input", placeholder: t("Optional, e.g. Friday run"), maxLength: 120, value: source?.name || "" });
-  const spoiler = select(SPOILER_CHOICES, opts.spoiler ?? 1);
+  const spoiler = select(SPOILER_CHOICES(), opts.spoiler ?? 1);
   const seed = h("input", { class: "input", inputMode: "numeric", placeholder: t("Random"), pattern: "[0-9]*" });
   const race = checkbox(t("Race mode"), !!opts.race, t("Spoiler log is withheld and patches are encrypted where supported."));
   const skipBalance = checkbox(t("Skip progression balancing"), !!opts.skip_prog_balancing);
-  const plando = PLANDO.map(([key, label]) => ({ key, box: checkbox(label, (opts.plando || ["bosses", "connections", "texts"]).includes(key)) }));
+  const plando = PLANDO().map(([key, label]) => ({ key, box: checkbox(label, (opts.plando || ["bosses", "connections", "texts"]).includes(key)) }));
   const meta = h("textarea", { class: "input", rows: 8, placeholder: t("meta_description: My meta file\nnull:\n  progression_balancing: 50"), spellcheck: false, value: source?.meta || "" });
   const version = apVersionField(apVersions, opts.ap_version || "");
   const metaDetails = h("details", { open: !!source?.meta }, h("summary", { class: "muted" }, t("Advanced: meta.yaml")),
@@ -198,6 +199,5 @@ export default async function render({ root, cleanup, isCurrent, query }) {
     updateSelection();
     drawJobs(jobs);
   }
-  const timer = setInterval(() => { if (!document.hidden) pollJobs().catch(() => {}); }, 3000);
-  cleanup(() => clearInterval(timer));
+  every(3000, pollJobs, cleanup);
 }

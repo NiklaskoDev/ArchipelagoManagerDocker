@@ -1,8 +1,9 @@
 import { h, clear, icon, openModal, toast, action } from "../util.js";
 import { api, get, isAdmin, isOrganizer } from "../api.js";
 import { pageHeader, empty, stateBadge, chips, badge, controlButtons, copyField, checkbox, field, promptMissingGames, apVersionField,
-  gamesTabs } from "../components.js";
+  gamesTabs, canLaunch, launchButton } from "../components.js";
 import { t, tServer } from "../i18n.js";
+import { every } from "../live.js";
 
 export default async function render({ root, cleanup, isCurrent }) {
   const admin = isAdmin();
@@ -61,6 +62,7 @@ export default async function render({ root, cleanup, isCurrent }) {
         h("td", {}, `${g.claimed_count} / ${g.player_count}`, h("div", { class: "muted small" }, t("with an owner"))),
         h("td", {}, chips(g.games, g.missing_games)),
         h("td", { class: "actions" }, h("div", { class: "row", style: { justifyContent: "flex-end" } },
+          canLaunch(g) ? g.my_slots.map((s) => launchButton(g, s, { named: g.my_slots.length > 1 })) : null,
           controlButtons(g, () => load(true)), h("a", { class: "btn sm", href: `#/games/${g.id}` }, t("Open")))))))));
   }
 
@@ -121,6 +123,5 @@ export default async function render({ root, cleanup, isCurrent }) {
       organizer ? h("a", { class: "btn", href: "#/generate" }, icon("zap", 14), t("Generate")) : null),
     emptyHost, tabsHost, none, card);
   await load(true);
-  const timer = setInterval(() => { if (!document.hidden) load().catch(() => {}); }, 5000);
-  cleanup(() => clearInterval(timer));
+  every(5000, () => load(), cleanup);
 }

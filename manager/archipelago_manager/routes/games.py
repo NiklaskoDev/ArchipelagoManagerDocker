@@ -135,6 +135,8 @@ def game_summary(row: sqlite3.Row, slots: list[sqlite3.Row], user: sqlite3.Row, 
         # encrypted connections (wss): as the server runs, or as it will start
         "tls": runtime["tls"] if runtime["tls"] is not None else tls.wanted(row),
         "has_password": bool(row["password"]),
+        # the password for joining, for the game's players and whoever runs it (the links that open Archipelago need it)
+        "password": row["password"] if (mine or manages(row, user)) else None,
         "games": games, "missing_games": apbridge.missing_games(games, row["ap_version"]),
         # the Archipelago version the server runs (players need a client that goes with it); own: not the image's
         "ap_version": apbridge.ap_version(row["ap_version"]), "ap_version_own": row["ap_version"],
@@ -266,7 +268,6 @@ async def _detail(game_id: int, user: sqlite3.Row, request: Request) -> dict:
         **summary,
         "slots": slot_items, "shared_files": shared,
         "progress": {"checked": checked, "total": total},
-        "password": row["password"] if (manager or summary["my_slots"]) else None,
         "options": db.jloads(row["options"], {}),
         "generator_version": row["generator_version"], "min_server_version": row["min_server_version"],
         "job_id": row["job_id"],

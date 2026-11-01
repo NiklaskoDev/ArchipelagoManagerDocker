@@ -3,12 +3,17 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import mimetypes
+import os
+import stat
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
+from starlette.datastructures import Headers
+from starlette.staticfiles import NotModifiedResponse
 
 from . import __version__, apbridge, audit, db, notify, reminders, schedule, signups, sources, updates, versions
 from .config import CONFIG
@@ -254,4 +259,42 @@ for module in (auth, configs, apworlds, source_routes, games, jobs, signup_route
                preset_routes):
     app.include_router(module.router)
 
-app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
+def accepts_gzip(accept_encoding: str) -> bool:
+    """Whether an Accept-Encoding header takes gzip: by name or by "*", and not with q=0 ("gzip;q=0" turns it down even
+    next to "*")."""
+    weights = {}
+    for part in accept_encoding.lower().split(","):
+        name, *params = (piece.strip() for piece in part.split(";"))
+        try:
+            weights[name] = float(next((p[2:] for p in params if p.startswith("q=")), "1"))
+        except ValueError:
+            weights[name] = 0.0
+    return weights.get("gzip", weights.get("*", 0.0)) > 0
+
+
+class WebUIFiles(StaticFiles):
+    """The web UI's files. The image has a gzip copy next to each text file (docker/build-assets.mjs, which also takes
+    the comments and spaces out of the scripts and styles); a browser that takes gzip gets that copy instead."""
+
+    def file_response(self, full_path, stat_result: os.stat_result, scope, status_code: int = 200) -> Response:
+        request_headers = Headers(scope=scope)
+        compressed = f"{full_path}.gz"
+        try:
+            compressed_stat = os.stat(compressed)
+        except OSError:
+            compressed_stat = None
+        if compressed_stat is None or not stat.S_ISREG(compressed_stat.st_mode):
+            return super().file_response(full_path, stat_result, scope, status_code)
+        if accepts_gzip(request_headers.get("accept-encoding", "")):
+            response = FileResponse(compressed, status_code=status_code, stat_result=compressed_stat,
+                                    media_type=mimetypes.guess_type(str(full_path))[0] or "text/plain",
+                                    headers={"Content-Encoding": "gzip"})
+        else:
+            response = FileResponse(full_path, status_code=status_code, stat_result=stat_result)
+        response.headers["Vary"] = "Accept-Encoding"  # the two answers differ by it, for caches in between
+        if self.is_not_modified(response.headers, request_headers):
+            return NotModifiedResponse(response.headers)
+        return response
+
+
+app.mount("/", WebUIFiles(directory=STATIC_DIR, html=True), name="static")

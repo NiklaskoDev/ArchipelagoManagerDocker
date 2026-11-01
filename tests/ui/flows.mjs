@@ -238,11 +238,14 @@ await admin.locator("h2", { hasText: "Progress over time" }).waitFor({ timeout: 
 await admin.locator(".chart svg path.series").first().waitFor({ state: "attached" });
 log("the game's progress over time appears once the server runs");
 await admin.getByRole("button", { name: "Move to the archive" }).click();
+// nobody reached their goal, so it is asked first: the game goes to the archive as aborted
+await admin.locator(".modal").getByRole("button", { name: "Move to the archive" }).click();
 await admin.locator(".page-head .badge", { hasText: "Finished" }).waitFor();
 await admin.locator("h2", { hasText: "Results" }).waitFor({ timeout: 15000 });
 await nav(admin, "#/games");
-await admin.locator("h2", { hasText: "Archive" }).waitFor();
 await expectText(admin, "No game is being played right now");
+await admin.locator(".tabs a", { hasText: "Archive (1)" }).click();
+await admin.locator("tbody tr", { hasText: "Aborted" }).waitFor();
 await shot(admin, "archive");
 await nav(admin, gameUrl.slice(BASE.length + 1));
 await admin.getByRole("button", { name: "Back to the running games" }).click();
@@ -358,6 +361,40 @@ await nav(user, claimGameUrl.slice(BASE.length + 1));
 await user.locator(".page-head .badge", { hasText: /Starting|Running/ }).waitFor({ timeout: 20000 });
 await user.locator(".page-head .badge", { hasText: "Running" }).waitFor({ timeout: 60000 });
 log("the player's visit wakes the game up");
+const launch = await user.locator("a[href^='archipelago://']").evaluateAll((links) => links.map((a) => a.getAttribute("href")));
+if (!launch.length || !launch.every((href) => /^archipelago:\/\/[^:@]+(:[^@]+)?@[^:/]+:\d+\?game=./.test(href))) {
+  problems.push(`the game page's links that open Archipelago are wrong: ${launch}`);
+}
+log("the game page links to Archipelago's Launcher with the slot and the address");
+// what the page asks the server by itself is out in the open, and can be paused
+await user.locator(".live .live-text").filter({ hasText: /Updated/ }).waitFor();
+await user.locator(".live-toggle").click();
+await user.locator(".live .live-text", { hasText: "Updates paused" }).waitFor();
+const whilePaused = [];
+const countRequests = (r) => { if (new URL(r.url()).pathname.startsWith("/api/") && !r.url().includes("/visit")) whilePaused.push(r.url()); };
+user.on("request", countRequests);
+await user.waitForTimeout(9000);
+user.off("request", countRequests);
+if (whilePaused.length) problems.push(`the paused page still asked the server: ${whilePaused}`);
+await user.locator(".live-refresh").click();
+await user.locator(".live-toggle").click();
+await user.locator(".live .live-text").filter({ hasText: /Updated/ }).waitFor();
+log("the page says when it last updated; paused, it asks the server nothing until resumed");
+// another language without loading the page again
+let navigations = 0;
+const countNavigations = (frame) => { if (frame === user.mainFrame()) navigations++; };
+user.on("framenavigated", countNavigations);
+await user.locator(".user-btn").click();
+await user.getByRole("menuitem", { name: /Language/ }).click();
+await user.locator(".lang-option", { hasText: "Deutsch" }).click();
+await user.locator("h2", { hasText: "Dein Tracker" }).waitFor();
+await user.locator(".user-btn").click();
+await user.getByRole("menuitem", { name: /Sprache/ }).click();
+await user.locator(".lang-option", { hasText: "English" }).click();
+await user.locator("h2", { hasText: "Your tracker" }).waitFor();
+user.off("framenavigated", countNavigations);
+if (navigations) problems.push(`switching the language loaded the page again (${navigations} times)`);
+log("the language changes at once, without loading the page again");
 await expectText(user, "Your tracker");
 const trackerCard = user.locator(".section", { has: user.locator("h2", { hasText: "Your tracker" }) });
 await trackerCard.getByRole("tab", { name: /Locations/ }).click();
@@ -373,13 +410,20 @@ if (await user.locator("details", { hasText: "Console" }).count()) problems.push
 await shot(user, "claimed");
 await nav(user, "#/");
 await expectText(user, "Your games");
+await user.locator(".game-card a[href^='archipelago://']").first().waitFor();
+await nav(user, "#/games");
+await user.locator("table a[href^='archipelago://']").first().waitFor();
+log("the dashboard and the list of games link to Archipelago too");
+await nav(user, "#/");
 await nav(user, "#/worlds");
 await expectText(user, "reviewed by an administrator");
 await user.getByRole("button", { name: "Submit APWorld" }).first().click();
 await expectText(user, "approve it before");
 await user.keyboard.press("Escape");
-await nav(user, "#/admin/users");  // not allowed: the page must fail gracefully
-await expectText(user, "Administrator access required");
+const refused = clientErrors.length;
+await nav(user, "#/admin/users");  // not allowed: the page says so, without asking the server (no 403 in the console)
+await expectText(user, "Only administrators can open this page.");
+if (clientErrors.length !== refused) problems.push(`an admin page asked the server for a player: ${clientErrors.slice(refused)}`);
 log("admin-only page refuses the user with a readable message");
 await user.setViewportSize({ width: 390, height: 800 });
 await nav(user, "#/");
@@ -394,8 +438,9 @@ await expectText(admin, "No sign-up rounds yet");
 await admin.getByRole("button", { name: "New round" }).first().click();
 dialog = admin.locator(".modal");
 await dialog.locator("input").first().fill("UI round");
-await dialog.locator("input[list]").fill("checksfinder");
-await dialog.locator("input[list]").press("Enter");
+// the allowed games (the other such input, for a mystery round's weights, is hidden)
+await dialog.locator("input[list]:visible").fill("checksfinder");
+await dialog.locator("input[list]:visible").press("Enter");
 await dialog.locator(".chip", { hasText: "ChecksFinder" }).waitFor();
 await dialog.getByLabel("No deadline: close the sign-ups by hand").check();
 await dialog.getByRole("button", { name: "Open sign-ups" }).click();
@@ -557,6 +602,16 @@ const [backupFile] = await Promise.all([admin.waitForEvent("download", { timeout
   admin.getByRole("button", { name: "Download a backup" }).click()]);
 if (!backupFile.suggestedFilename().endsWith(".zip")) problems.push(`backup download is ${backupFile.suggestedFilename()}`);
 log("a backup of everything downloads as a zip");
+// signing out ends what the page was asking the server, on the sign-in page too
+await nav(admin, "#/games");
+await admin.locator(".user-btn").click();
+await admin.getByRole("menuitem", { name: "Sign out" }).click();
+await admin.waitForSelector("form");
+const afterSignOut = [];
+admin.on("request", (r) => { if (new URL(r.url()).pathname.startsWith("/api/")) afterSignOut.push(r.url()); });
+await admin.waitForTimeout(12000);
+if (afterSignOut.length) problems.push(`the sign-in page still asked the server: ${afterSignOut}`);
+log("after signing out, nothing more is asked of the server");
 
 } catch (error) {
   problems.push(`aborted: ${error.message.split("\n")[0]}`);

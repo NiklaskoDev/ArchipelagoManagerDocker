@@ -2,6 +2,7 @@ import { h, clear, icon, toast, openModal, action, confirmDialog, fmtDate } from
 import { api, state, refreshStatus, setUnauthorizedHandler, isAdmin, canGenerate, post, put, ApiError } from "./api.js";
 import { banner, loading, field, checkbox } from "./components.js";
 import { t, plural, lang, locale, LANGUAGES, setLanguage } from "./i18n.js";
+import { liveControl } from "./live.js";
 
 // path, page, section of the nav, and the title of the browser tab (a page with a name of its own sets it: setTitle)
 const ROUTES = [
@@ -80,7 +81,12 @@ async function route() {
       h("a", { class: "btn", href: "#/" }, t("Go to the dashboard"))));
     return;
   }
-  const [m, load] = match;
+  const [m, load, section] = match;
+  if (section === "admin" && !isAdmin()) {  // a link to an admin page: say so instead of asking the server and failing
+    clear(view).append(h("div", { class: "empty" }, h("h3", {}, t("Only administrators can open this page.")),
+      h("a", { class: "btn", href: "#/" }, t("Go to the dashboard"))));
+    return;
+  }
   // Each page renders into its own element. A page that is still loading when the user moves on can then only fill
   // its own, already removed element, never the next page.
   const page = h("div", { class: "page" });
@@ -164,6 +170,7 @@ function renderShell() {
     userPicture(), h("span", {}, state.user.username), isAdmin() ? h("span", { class: "badge accent" }, t("admin"))
       : state.user.role === "organizer" ? h("span", { class: "badge accent" }, t("organizer")) : null);
   const menu = h("div", { class: "menu", hidden: true, role: "menu" });
+  userMenu = menu;
   menuKeys(menu);
   userButton.onclick = (e) => {
     e.stopPropagation();
@@ -178,25 +185,26 @@ function renderShell() {
     menu.hidden = true;
     setNavOpen(!navToggle.closest(".topbar").classList.contains("nav-open"));
   };
-  document.addEventListener("click", () => {
-    menu.hidden = true;
-    setNavOpen(false);
-  });
-  document.addEventListener("keydown", (e) => {
-    if (e.key !== "Escape") return;
-    menu.hidden = true;
-    setNavOpen(false);
-  });
   const topbar = h("header", { class: "topbar" },
       h("div", { class: "topbar-inner" },
         h("a", { class: "brand", href: "#/" }, h("img", { class: "brand-mark", src: "favicon.svg", alt: "" }), h("span", { class: "brand-name" }, "Archipelago Manager")),
         navToggle,
         h("nav", { class: "nav", id: "main-nav", "aria-label": t("Main") }, links),
         h("div", { class: "user-menu" }, userButton, menu)));
-  clear(app).append(topbar, view, h("footer", { class: "footer muted small" }, `Archipelago Manager ${state.status.version}`));
+  clear(app).append(topbar, liveControl(), view, h("footer", { class: "footer muted small" }, `Archipelago Manager ${state.status.version}`));
   fitNav();
   document.fonts?.ready.then(fitNav);
 }
+
+// A click elsewhere or Escape closes the user menu and the phone's list of sections. Registered once: the shell is drawn
+// anew after signing in and after a change of language.
+let userMenu = null;
+function closeMenus() {
+  if (userMenu) userMenu.hidden = true;
+  setNavOpen(false);
+}
+document.addEventListener("click", closeMenus);
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeMenus(); });
 
 // The nav scrolls sideways when its links do not fit, which would hide the last ones (Admin, for administrators).
 // Measure instead of guessing a breakpoint: link count and font widths differ.
@@ -302,10 +310,24 @@ function languageOptions() {
   });
 }
 
-function switchLanguage(code) {
+// The page is drawn anew in the other language, without loading it again: unsaved changes on it would be lost
+async function switchLanguage(code) {
   if (code === lang) return;
   if (dirtyCheck?.() && !confirm(t("You have unsaved changes. Leave this page anyway?"))) return;
-  setLanguage(code);
+  try {
+    if (!(await setLanguage(code))) return;
+  } catch {
+    toast(t("The other language could not be loaded. Check your connection."), "error");
+    return;
+  }
+  if (state.user && view) {
+    dirtyCheck = null;
+    renderShell();
+    currentHash = null;
+    await route();
+  } else {
+    await boot();  // the sign-in page, or an invite or reset link
+  }
 }
 
 // Up and down move between the entries of a menu
@@ -678,6 +700,9 @@ async function renderLinkPage({ kind, token }) {
 
 // ---------------------------------------------------------------------------------------------------------------------
 export async function boot() {
+  // whatever the last page started stops: after signing out, its updates would go on behind the sign-in page
+  runCleanups();
+  navToken++;
   const discordResult = takeDiscordResult();
   try {
     await refreshStatus();

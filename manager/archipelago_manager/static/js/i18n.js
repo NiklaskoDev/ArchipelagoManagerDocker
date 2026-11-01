@@ -24,28 +24,52 @@ function browserLocales() {
   });
 }
 
-export const lang = LANGUAGES[stored()] ? stored()
+// The language: as chosen in the user menu, else the first one the browser asks for that there is a dictionary for.
+// These are live bindings: setLanguage() changes them, and every module that imports them sees the new value.
+export let lang = LANGUAGES[stored()] ? stored()
   : browserLocales().map((tag) => tag.split("-")[0].toLowerCase()).find((code) => LANGUAGES[code]) || "en";
-document.documentElement.lang = lang;
-export const locale = browserLocales().find((tag) => tag.split("-")[0].toLowerCase() === lang) || LOCALES[lang];
-const pluralRules = new Intl.PluralRules(locale);
+export let locale = LOCALES[lang];
+let pluralRules = new Intl.PluralRules(locale);
+let strings = {}, server = {}, patterns = [];
+const loaded = { en: {} };  // the dictionaries fetched so far, so switching back is instant
 
-let strings = {}, server = {};
-const patterns = [];
-if (lang !== "en") {
-  try {
-    const response = await fetch(new URL(`./i18n/${lang}.json`, import.meta.url), { cache: "no-cache" });
-    if (response.ok) ({ strings = {}, server = {} } = await response.json());
-  } catch (err) {
-    console.error("The translation could not be loaded", err);
+async function dictionary(code) {
+  if (!loaded[code]) {
+    const response = await fetch(new URL(`./i18n/${code}.json`, import.meta.url), { cache: "no-cache" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    loaded[code] = await response.json();
   }
+  return loaded[code];
+}
+
+// Server messages with changing parts ("Game {0} not found") as patterns that find the parts again
+function serverPatterns() {
+  const found = [];
   for (const [key, value] of Object.entries(server)) {
     if (!/\{\d+\}/.test(key)) continue;
     const parts = key.split(/\{(\d+)\}/);  // text, index, text, index, ..., text
     const order = parts.filter((_, i) => i % 2).map(Number);
     const source = parts.map((part, i) => (i % 2 ? "([\\s\\S]+?)" : part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))).join("");
-    patterns.push({ re: new RegExp(`^${source}$`), order, value });
+    found.push({ re: new RegExp(`^${source}$`), order, value });
   }
+  return found;
+}
+
+function use(code, words) {
+  lang = code;
+  // dates and numbers in the variant of the language the browser prefers, if it asks for one (en-GB, fr-CA, nl-BE, ...)
+  locale = browserLocales().find((tag) => tag.split("-")[0].toLowerCase() === code) || LOCALES[code];
+  pluralRules = new Intl.PluralRules(locale);
+  ({ strings = {}, server = {} } = words);
+  patterns = serverPatterns();
+  document.documentElement.lang = code;
+}
+
+try {
+  use(lang, await dictionary(lang));
+} catch (err) {
+  console.error("The translation could not be loaded", err);
+  use(lang, {});  // English text, rather than no page at all
 }
 
 // A value that changes the direction of the text (a player name with such characters, say) is kept to itself, so it
@@ -81,8 +105,11 @@ export function tServer(message, depth = 0) {
   return message;
 }
 
-export function setLanguage(code) {
-  if (!LANGUAGES[code] || code === lang) return;
+// Switches the language without loading the page again: the dictionary first (if that fails, nothing changes), then
+// the choice is kept in this browser. Whoever shows text draws it anew afterwards (app.js). True if it changed.
+export async function setLanguage(code) {
+  if (!LANGUAGES[code] || code === lang) return false;
+  use(code, await dictionary(code));
   try { localStorage.setItem(STORAGE_KEY, code); } catch { /* private mode: the choice lasts until reload only */ }
-  location.reload();
+  return true;
 }

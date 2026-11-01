@@ -6,6 +6,7 @@
 Needs an instance with no users yet, and its setup code. It creates an administrator, generates a two-player multiworld,
 hosts it and checks that the game server answers on its published port. Uses only the standard library.
 """
+import gzip
 import http.cookiejar
 import json
 import os
@@ -58,6 +59,15 @@ def step(message):
 
 ready = wait("the manager to be ready", lambda: (h := health()) and h.get("ready") and h, timeout=300)
 step(f"manager {ready['version']} is ready with Archipelago {ready['archipelago']}")
+
+# The image's web UI: scripts without comments, sent compressed (docker/build-assets.mjs, main.py WebUIFiles)
+with urllib.request.urlopen(urllib.request.Request(BASE + "/js/app.js", headers={"Accept-Encoding": "gzip"}), timeout=30) as r:
+    assert r.headers.get("Content-Encoding") == "gzip", f"app.js is not sent compressed: {dict(r.headers)}"
+    script = gzip.decompress(r.read()).decode()
+assert not script.startswith("//") and "\n  " not in script, "app.js still has its comments and indentation"
+with urllib.request.urlopen(BASE + "/js/app.js", timeout=30) as r:  # and plain to a client that does not take gzip
+    assert r.headers.get("Content-Encoding") is None and r.read().decode() == script
+step(f"web UI minified and compressed ({len(script) // 1024} KiB of app.js)")
 
 status = call("GET", "/api/auth/status")
 assert status["needs_setup"], "this smoke test needs an instance without users"
