@@ -164,9 +164,13 @@ and the game page marks the address *encrypted*. A client that cannot find out b
    it slept, it may come back on a different port, so take the address from the page.
    - *Open in Archipelago* next to your slot name does the connecting for you, if Archipelago is installed on your
      computer: its Launcher opens the client of your game, with the address, your slot name and the password filled
-     in. Not every game's client takes such a link (`archipelago://`); for the others the Launcher opens the Text
-     Client, connected to your slot. The button is on your game's card on the dashboard, in the list of games and on
-     the game page (under *Connect* and in your row of the slots), whenever the game's server is running.
+     in. A game without a password gets `None` in the link, as on archipelago.gg. Only a few games' clients take such
+     a link (`archipelago://`, for instance TUNIC, The Messenger and Starcraft 2): the Launcher then lets you pick
+     between that client and the Text Client. For all other games, such as those played through BizHawk or SNI, it
+     opens the Text Client, connected to your slot, and you start the game's own client yourself. This is the
+     Launcher's rule, the same for links from archipelago.gg. The button is on your game's card on the dashboard, in
+     the list of games and on the game page (under *Connect* and in your row of the slots), whenever the game's
+     server is running.
 4. While you play, **Your tracker** on the game page shows the items you received (and from whom), the locations you
    still have to check, and your hints: where your items are, and which items of other players are in your world. It
    is read from the server's save, so it can be up to a minute behind.

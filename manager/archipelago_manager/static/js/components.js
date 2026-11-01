@@ -447,9 +447,14 @@ export function canLaunch(game) {
   return !!game.address && ["running", "starting"].includes(game.state);
 }
 
+// What the WebHost puts where a game has no password, so the link always reads name:password@host:port. Some game
+// clients (TUNIC, The Messenger) get the whole link and read it themselves; without the password part they do not
+// connect. A server that has no password ignores whatever the client sends.
+const NO_PASSWORD = "None";
+
 export function launchLink(game, slot) {
-  const password = game.password ? `:${encodeURIComponent(game.password)}` : "";
-  return `archipelago://${encodeURIComponent(slot.name)}${password}@${game.address}?game=${encodeURIComponent(slot.game)}`;
+  const password = encodeURIComponent(game.password || NO_PASSWORD);
+  return `archipelago://${encodeURIComponent(slot.name)}:${password}@${game.address}?game=${encodeURIComponent(slot.game)}`;
 }
 
 // The button for one of the player's slots; `named` says which slot when the button stands apart from its name
