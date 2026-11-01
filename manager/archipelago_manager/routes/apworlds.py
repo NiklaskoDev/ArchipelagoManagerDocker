@@ -176,13 +176,16 @@ async def _install(apworld_id: int) -> list[dict]:
 
 @router.get("/worlds")
 def list_worlds(_user: sqlite3.Row = Depends(current_user)) -> dict:
-    """Every game this server can generate for."""
+    """Every game this server can generate for. A custom game in the library says which file to download, so players
+    can play it with their own Archipelago."""
     games = apbridge.installed_games()
+    library = {r["game"]: r["id"] for r in db.query("SELECT id, game FROM apworlds WHERE status = 'installed'")}
     return {
         "ap_version": apbridge.ap_version(),
         "available": apbridge.STATE.info is not None,
         "error": apbridge.STATE.error,
-        "games": sorted(games.values(), key=lambda g: g["name"].lower()),
+        "games": [{**g, "apworld_id": library.get(g["name"]) if g["source"] == "custom" else None}
+                  for g in sorted(games.values(), key=lambda g: g["name"].lower())],
     }
 
 
@@ -190,7 +193,8 @@ def list_worlds(_user: sqlite3.Row = Depends(current_user)) -> dict:
 def list_apworlds(user: sqlite3.Row = Depends(current_user)) -> dict:
     rows = db.query("SELECT a.*, u.username AS uploader FROM apworlds a LEFT JOIN users u ON u.id = a.uploaded_by "
                     "ORDER BY a.game COLLATE NOCASE, a.uploaded_at DESC")
-    visible = [r for r in rows if r["status"] == "installed" or is_admin(user) or r["uploaded_by"] == user["id"]]
+    # players see what they submitted; every installed game is in the overview (list_worlds), with its download
+    visible = [r for r in rows if is_admin(user) or r["uploaded_by"] == user["id"]]
     return {
         "items": [_row_json(r, uploader=r["uploader"]) for r in visible],
         "can_install": is_admin(user),

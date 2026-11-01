@@ -77,6 +77,11 @@ def test_progress_is_recorded_and_finished_games_go_to_the_archive(admin, make_u
     # the spoiler log is now the players' too
     assert any(f["kind"] == "spoiler" for f in ann.get(f"/api/games/{gid}").json()["shared_files"])
 
+    # every player reached their goal: there is nothing left to play, so it stays in the archive, for everyone
+    r = admin.post(f"/api/games/{gid}/archive", json={"archived": False})
+    assert r.status_code == 409 and "stays in the archive" in r.json()["detail"]
+    assert admin.get(f"/api/games/{gid}").json()["return_blocked"] == "finished"
+
     # an admin can take a game out of the archive and put it back; players cannot
     assert ann.patch(f"/api/games/{gid}", json={"finished": False}).status_code == 403
     assert admin.patch(f"/api/games/{gid}", json={"finished": False}).json()["finished_at"] is None
@@ -88,6 +93,20 @@ def test_progress_is_recorded_and_finished_games_go_to_the_archive(admin, make_u
     assert r.status_code == 200 and r.json()["finished_at"] is None
     h = history(admin, gid)
     assert h["recorded_from"] is None and all(not s["points"] and s["goal_at"] is None for s in h["slots"])
+    admin.delete(f"/api/games/{gid}")
+
+
+def test_moving_a_game_to_the_archive_stops_it_and_an_aborted_one_comes_back(admin, make_user):
+    _name, ann = make_user("ann")
+    gid, _job = make_game(admin, names=("Arch", "Ive"), owners={"Arch": ann})
+    admin.post(f"/api/games/{gid}/start")
+    wait_state(admin, gid, "running")
+    r = admin.post(f"/api/games/{gid}/archive", json={"archived": True})
+    assert r.status_code == 200 and r.json()["outcome"] == "aborted" and r.json()["state"] == "stopped"
+    assert r.json()["desired_state"] == "stopped"  # and it stays so after a restart of the manager
+    assert r.json()["return_blocked"] is None  # aborted, on a version this server has
+    r = admin.post(f"/api/games/{gid}/archive", json={"archived": False})
+    assert r.status_code == 200 and r.json()["finished_at"] is None and r.json()["state"] == "stopped"
     admin.delete(f"/api/games/{gid}")
 
 

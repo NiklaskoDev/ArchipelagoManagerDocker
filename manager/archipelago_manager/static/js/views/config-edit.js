@@ -199,7 +199,7 @@ export default async function render({ root, params, query, cleanup, setDirtyChe
     const out = h("textarea", { class: "input editor", readOnly: true, spellcheck: false, wrap: "off", rows: 14, "aria-label": t("Rolled YAML") });
     let rolled = null;
     const again = h("button", { class: "btn", type: "button" }, icon("dice", 14), t("Roll again"));
-    const keep = h("button", { class: "btn primary", type: "button" }, icon("check", 14), t("Save as a new config"));
+    const keep = h("button", { class: "btn primary", type: "button" }, icon("check", 14), t("Use it"));
     const roll = async () => {
       again.disabled = keep.disabled = true;
       try {
@@ -211,17 +211,20 @@ export default async function render({ root, params, query, cleanup, setDirtyChe
       }
     };
     again.onclick = action(roll);
+    // into the file being edited, unsaved: the page stays where it is, and Save keeps it
     keep.onclick = action(async () => {
-      const base = nameInput.value.replace(/\.ya?ml$/i, "");
-      const result = await post("/api/configs/text", { name: `${base} (${t("rolled")}).yaml`, content: rolled.yaml });
+      editor.value = rolled.yaml;
       modal.close();
-      toast(t("Saved as {name}", { name: result.name }), "success");
-      location.hash = `#/configs/${result.id}`;
+      if (mode === "form") {
+        form = null;  // read the form anew from the rolled file (it may even be another game)
+        await showForm();
+      }
+      toast(t("The rolled options are in the editor. Save to keep them."), "success");
     });
     const modal = openModal({
       title: t("Rolled"),
       body: h("div", { class: "stack" },
-        h("p", { class: "muted small" }, t("What this file comes out as once its weights, random ranges and triggers are rolled, as the generator does it. Each generation rolls anew; save the result to play exactly this.")),
+        h("p", { class: "muted small" }, t("What this file comes out as once its weights, random ranges and triggers are rolled, as the generator does it. Each generation rolls anew; use the result and save it to play exactly this.")),
         summary, out),
       actions: [h("button", { class: "btn", type: "button", onclick: () => modal.close() }, t("Close")), again, keep],
     });

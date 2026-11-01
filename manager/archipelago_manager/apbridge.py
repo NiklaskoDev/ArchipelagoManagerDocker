@@ -91,9 +91,11 @@ async def run_helper(*args: str, timeout: float = 180, version: str | None = Non
             env=ap_env(), cwd=str(folder))
         try:
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout)
-        except TimeoutError:
+        except (TimeoutError, asyncio.CancelledError) as e:  # cancelled: an installation stopped while it checks
             proc.kill()
             await proc.wait()
+            if isinstance(e, asyncio.CancelledError):
+                raise
             raise APBridgeError(f"Archipelago helper timed out after {timeout:.0f}s") from None
     try:
         result = _parse_result(stdout.decode(errors="replace"))

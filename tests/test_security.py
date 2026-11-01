@@ -116,9 +116,28 @@ def test_spaces_around_a_username_do_not_buy_more_guesses(plain_server):
     assert statuses[:8] == [401] * 8 and set(statuses[8:]) == {429}
 
 
-def test_cookies_are_secure_when_the_web_ui_is_on_https(plain_server):
+def test_cookies_are_secure_when_the_browser_talks_https(plain_server):
+    # The web UI's address is https (a tunnel or a reverse proxy in front), and the same server is also reached on the
+    # local network over plain http. A browser drops a secure cookie that comes over http, so signing in there would
+    # never stick if it got one: only a browser on https does.
     admin = plain_server.client()
     admin.post("/api/auth/setup", json={"username": "boss", "password": "bosspass123", "code": plain_server.setup_code()})
     admin.patch("/api/settings", json={"site_url": "https://archipelago.example.com"})
-    r = plain_server.client().post("/api/auth/login", json={"username": "boss", "password": "bosspass123"})
+    login = {"username": "boss", "password": "bosspass123"}
+
+    # through the tunnel, whose proxy does not say the browser came over https: the page the form is on does
+    r = plain_server.client().post("/api/auth/login", json=login,
+                                   headers={"Origin": "https://archipelago.example.com", "Host": "archipelago.example.com"})
     assert r.status_code == 200 and "secure" in r.headers["set-cookie"].lower()
+
+    # on the local network's address over http: no secure flag, so the browser keeps the cookie and stays signed in
+    lan = plain_server.client()
+    r = lan.post("/api/auth/login", json=login, headers={"Origin": plain_server.base_url})
+    assert r.status_code == 200 and "secure" not in r.headers["set-cookie"].lower()
+    assert lan.get("/api/auth/status").json()["user"]["username"] == "boss"
+
+    # without an Origin (a link followed, not a form): secure for the web UI's own host only
+    r = plain_server.client().post("/api/auth/login", json=login, headers={"Host": "archipelago.example.com"})
+    assert "secure" in r.headers["set-cookie"].lower()
+    r = plain_server.client().post("/api/auth/login", json=login)
+    assert "secure" not in r.headers["set-cookie"].lower()

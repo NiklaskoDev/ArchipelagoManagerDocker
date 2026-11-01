@@ -36,7 +36,7 @@ export default async function render({ root, isCurrent }) {
       toast(done(r), "success");
       await load();
     });
-    sourcesHost.append(h("div", { class: "section-head" }, h("h2", {}, t("From GitHub"))),
+    sourcesHost.append(h("div", { class: "section-head" }, h("h2", {}, admin ? t("From GitHub") : t("Your repositories on GitHub"))),
       h("div", { class: "card flush table-wrap" }, h("table", { class: "table" },
         h("thead", {}, h("tr", {}, [t("Repository"), t("Game"), t("Installed"), t("Status"), t("Added by"), ""].map((text) => h("th", {}, text)))),
         h("tbody", {}, list.map((s) => h("tr", {},
@@ -72,16 +72,18 @@ export default async function render({ root, isCurrent }) {
     return badge(t("Installed"), "ok");
   }
 
+  // administrators: every custom game in the library; players: the ones they submitted (the overview above has the rest)
   function drawCustom(data) {
     clear(customHost);
+    const head = h("div", { class: "section-head" }, h("h2", {}, admin ? t("Custom games in the library") : t("Your submissions")));
     if (!data.items.length) {
-      customHost.append(empty(t("No custom games yet"),
+      customHost.append(head, empty(admin ? t("No custom games yet") : t("You have not submitted a game yet"),
         t("Games that are not part of Archipelago itself come as .apworld files. Add one to generate for it or to share it with players."),
         canSubmitApworld() ? h("button", { class: "btn primary", type: "button", onclick: () => uploadApworldModal({ onDone: load }) },
           icon("upload", 14), admin ? t("Add APWorld") : t("Submit APWorld")) : null));
       return;
     }
-    customHost.append(h("div", { class: "card flush table-wrap" }, h("table", { class: "table" },
+    customHost.append(head, h("div", { class: "card flush table-wrap" }, h("table", { class: "table" },
       h("thead", {}, h("tr", {}, [t("Game"), t("Version"), t("Status"), t("Added by"), t("Size"), ""].map((text) => h("th", {}, text)))),
       h("tbody", {}, data.items.map((a) => h("tr", {},
         h("td", {}, h("span", { class: "slot-name" }, a.game), h("div", { class: "muted small mono" }, a.module + ".apworld"),
@@ -116,11 +118,14 @@ export default async function render({ root, isCurrent }) {
     }
     const search = h("input", { class: "input", type: "search", placeholder: plural(worlds.games.length, "Search {n} game…", "Search {n} games…"), "aria-label": t("Search games") });
     const list = h("div", { class: "chips" });
+    // a custom game links its .apworld, for playing it with one's own Archipelago
     const draw = () => {
       const q = search.value.trim().toLowerCase();
-      clear(list).append(...worlds.games.filter((g) => g.name.toLowerCase().includes(q)).map((g) =>
-        h("span", { class: `chip ${g.source === "custom" ? "" : ""}`, title: g.source === "custom" ? t("Custom APWorld") : t("Built into Archipelago") },
-          g.name, g.source === "custom" ? badge(t("custom"), "accent") : null)));
+      clear(list).append(...worlds.games.filter((g) => g.name.toLowerCase().includes(q)).map((g) => (g.apworld_id
+        ? h("a", { class: "chip chip-link", href: `/api/apworlds/${g.apworld_id}/download`, title: t("Custom APWorld: download it to play it with your own Archipelago") },
+          g.name, badge(t("custom"), "accent"), icon("download", 12))
+        : h("span", { class: "chip", title: g.source === "custom" ? t("Custom APWorld") : t("Built into Archipelago") },
+          g.name, g.source === "custom" ? badge(t("custom"), "accent") : null))));
     };
     search.oninput = draw;
     draw();
@@ -136,9 +141,9 @@ export default async function render({ root, isCurrent }) {
       canSubmitApworld() ? h("button", { class: "btn primary", type: "button", onclick: () => uploadApworldModal({ onDone: load }) },
         icon("upload", 14), admin ? t("Add APWorld") : t("Submit APWorld")) : null),
     missingHost,
-    !admin ? banner("info", icon("alert", 16), t("Games and GitHub repositories you submit are reviewed by an administrator before they can be used. Players can download installed APWorlds below to play them locally.")) : null,
+    h("div", { class: "section" }, allHost),
+    !admin ? banner("info", icon("alert", 16), t("Games and GitHub repositories you submit are reviewed by an administrator before they can be used. To play a custom game, download its APWorld from the list above.")) : null,
     h("div", { class: "section" }, customHost),
-    h("div", { class: "section" }, sourcesHost),
-    h("div", { class: "section" }, allHost));
+    h("div", { class: "section" }, sourcesHost));
   await load();
 }

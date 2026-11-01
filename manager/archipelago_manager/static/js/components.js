@@ -659,6 +659,83 @@ export function tlsBanner(status) {
 }
 
 // The games being played, and those over: finished by everyone, or aborted before that (views/archive.js)
+// Several games at once (views/games.js, archive.js): a check box for each listed game the user runs (administrators:
+// all of them), and above the list a bar with what can be done to the chosen ones. The choice outlives the list being
+// drawn anew. Each action goes through the game's own request, one game after the other, so the log has every one.
+//   actions: [{ label, icon, danger, confirm: (n) => ({ title, text, confirmText }), run: (game) => promise, done: (n) => text }]
+export function gameSelection({ actions, onDone }) {
+  const chosen = new Set();
+  let listed = [];  // the games in the list that can be chosen
+  const bar = h("div", { class: "row spread bulk-bar", hidden: true });
+  const boxes = new Map();
+  let all = null;
+
+  function sync() {
+    for (const [id, box] of boxes) box.checked = chosen.has(id);
+    if (all) {
+      const n = listed.filter((g) => chosen.has(g.id)).length;
+      all.checked = n > 0 && n === listed.length;
+      all.indeterminate = n > 0 && n < listed.length;
+    }
+    bar.hidden = !chosen.size;
+    if (!chosen.size) return;
+    clear(bar).append(h("strong", {}, plural(chosen.size, "{n} game chosen", "{n} games chosen")),
+      h("div", { class: "row" }, actions.map((a) => h("button", { class: `btn sm ${a.danger ? "danger" : ""}`, type: "button",
+        onclick: action(() => run(a)) }, icon(a.icon, 14), a.label)),
+      h("button", { class: "btn sm ghost", type: "button", onclick: () => { chosen.clear(); sync(); } }, t("Clear"))));
+  }
+
+  async function run(a) {
+    const games = listed.filter((g) => chosen.has(g.id));
+    const { title, text, confirmText } = a.confirm(games.length);
+    if (!(await confirmDialog(text, { title, confirmText, danger: a.danger }))) return;
+    const failed = [];
+    for (const game of games) {
+      try {
+        await a.run(game);
+      } catch (err) {
+        failed.push(`${game.name}: ${err.message}`);
+      }
+    }
+    chosen.clear();
+    await onDone();
+    sync();
+    const done = games.length - failed.length;
+    if (done) toast(a.done(done), "success");
+    if (failed.length) toast(failed.join(" · "), "error", 12000);
+  }
+
+  return {
+    bar,
+    // the games now in the list; chosen ones that left it are let go
+    list(games) {
+      listed = games.filter((g) => g.can_manage);
+      const ids = new Set(listed.map((g) => g.id));
+      for (const id of [...chosen]) if (!ids.has(id)) chosen.delete(id);
+      boxes.clear();
+      all = null;
+      sync();
+    },
+    head() {
+      if (!listed.length) return h("th", { class: "select-col" });
+      all = h("input", { type: "checkbox", "aria-label": t("Choose all games in the list") });
+      all.onchange = () => {
+        for (const g of listed) { if (all.checked) chosen.add(g.id); else chosen.delete(g.id); }
+        sync();
+      };
+      sync();
+      return h("th", { class: "select-col" }, all);
+    },
+    cell(game) {
+      if (!game.can_manage) return h("td", { class: "select-col" });
+      const box = h("input", { type: "checkbox", checked: chosen.has(game.id), "aria-label": t("Choose {game}", { game: game.name }) });
+      box.onchange = () => { if (box.checked) chosen.add(game.id); else chosen.delete(game.id); sync(); };
+      boxes.set(game.id, box);
+      return h("td", { class: "select-col" }, box);
+    },
+  };
+}
+
 export function gamesTabs(current, archived) {
   return h("div", { class: "tabs", role: "navigation" },
     h("a", { class: "tab", href: "#/games", "aria-current": current === "games" ? "page" : undefined }, t("Current games")),

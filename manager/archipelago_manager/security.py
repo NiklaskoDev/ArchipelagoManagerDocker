@@ -10,6 +10,7 @@ import sqlite3
 import time
 import unicodedata
 from collections import defaultdict, deque
+from urllib.parse import urlsplit
 
 from fastapi import Depends, HTTPException, Request, Response
 
@@ -120,9 +121,24 @@ def revoke_user_tokens(user_id: int) -> int:
 
 
 def https_in_use(request: Request) -> bool:
-    """Whether cookies should be marked secure: this request came over https, or the web UI's address is https (behind
-    a reverse proxy whose X-Forwarded-Proto is not trusted, the request itself looks like plain http)."""
-    return request.url.scheme == "https" or app_settings.get_setting("site_url").startswith("https://")
+    """Whether cookies should be marked secure, so that the browser only ever sends them over https: whether the browser
+    talks https with this server. A browser drops a secure cookie that comes over plain http, so signing in through the
+    local network's http address must not get one, even when the web UI's public address (through a tunnel or a
+    reverse proxy) is https.
+
+    - The request came over https, or through a reverse proxy trusted to say so (FORWARDED_ALLOW_IPS).
+    - Else the page it was sent from: browsers put that (Origin) on every POST, such as the sign-in forms, with the
+      scheme the browser sees, also behind a reverse proxy whose X-Forwarded-Proto is not trusted.
+    - Else (a link followed, such as Discord's way back after signing in) the web UI's address, if the request is for
+      its host.
+    """
+    if request.url.scheme == "https":
+        return True
+    origin = request.headers.get("origin", "")
+    if origin and origin != "null":
+        return origin.lower().startswith("https://")
+    site = urlsplit(app_settings.get_setting("site_url"))
+    return site.scheme == "https" and site.netloc.lower() == request.headers.get("host", "").lower()
 
 
 def set_session_cookie(request: Request, response: Response, token: str) -> None:

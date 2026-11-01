@@ -2,7 +2,7 @@ import { h, clear, icon, toast, action, fmtAgo, fmtDuration, setText } from "../
 import { api, get, isAdmin, isOrganizer, state } from "../api.js";
 import { pageHeader, chips, banner, badge, field, checkbox, select, jobBadge, missingGamesPanel, missingRomsPanel, promptMissingGames, empty, apVersionField,
   presetBar, gameSettingsSection } from "../components.js";
-import { t, tServer } from "../i18n.js";
+import { t, tServer, plural } from "../i18n.js";
 import { every } from "../live.js";
 
 const SPOILER_CHOICES = () => [[1, t("Basic spoiler log")], [0, t("No spoiler log")], [2, t("With playthrough")], [3, t("Playthrough and paths")]];
@@ -29,11 +29,14 @@ export default async function render({ root, cleanup, isCurrent, query }) {
   const missingHost = h("div");
   const countLabel = h("span", { class: "muted" });
   const filter = h("input", { class: "input", type: "search", placeholder: t("Filter configs…"), "aria-label": t("Filter configs") });
-  const tbody = h("tbody");
+  const groupsHost = h("div");
   const boxes = new Map();
+  const groupSyncs = [];
+  const openGroups = new Set();  // the games whose group was opened by hand, kept open while the list is drawn anew
 
   function updateSelection() {
     setText(countLabel, t("{n} selected", { n: selected.size }));
+    groupSyncs.forEach((sync) => sync());
     const chosen = configs.filter((c) => selected.has(c.id));
     const missing = [...new Set(chosen.flatMap((c) => c.missing_games))];
     clear(missingHost).append(missingGamesPanel(missing.map((game) => ({
@@ -47,25 +50,69 @@ export default async function render({ root, cleanup, isCurrent, query }) {
     drawRows();
     updateSelection();
   }
+  // The configs by game, each game a group that opens: only the games there are configs for. A group with chosen configs
+  // or ones the filter found is open; a config of several games (several players, or weights over games) is in a group
+  // of its own at the end.
+  const SEVERAL = "";
+  const groupOf = (c) => (c.games.length === 1 ? c.games[0] : SEVERAL);
   function drawRows() {
     const q = filter.value.trim().toLowerCase();
-    clear(tbody);
     boxes.clear();
+    groupSyncs.length = 0;
+    const groups = new Map();
     for (const c of configs) {
       const hay = `${c.name} ${c.owner ?? ""} ${c.player_names.join(" ")} ${c.games.join(" ")}`.toLowerCase();
       if (q && !hay.includes(q)) continue;
+      if (!groups.has(groupOf(c))) groups.set(groupOf(c), []);
+      groups.get(groupOf(c)).push(c);
+    }
+    const games = [...groups.keys()].sort((a, b) => (a === SEVERAL) - (b === SEVERAL) || a.localeCompare(b));
+    clear(groupsHost).append(games.length ? games.map((game) => configGroup(game, groups.get(game), !!q))
+      : h("p", { class: "muted list-none" }, t("Nothing matches.")));
+  }
+
+  function configGroup(game, list, filtering) {
+    const picked = () => list.filter((c) => selected.has(c.id)).length;
+    const all = h("input", { type: "checkbox", "aria-label": game === SEVERAL ? t("Choose all configs of several games")
+      : t("Choose all {game} configs", { game }) });
+    const count = h("span", { class: "muted small" });
+    const sync = () => {
+      const n = picked();
+      all.checked = n === list.length;
+      all.indeterminate = n > 0 && n < list.length;
+      setText(count, n ? t("{n} of {total} chosen", { n, total: list.length }) : plural(list.length, "{n} config", "{n} configs"));
+    };
+    all.onchange = () => {
+      for (const c of list) {
+        if (all.checked) selected.add(c.id); else selected.delete(c.id);
+        boxes.get(c.id).checked = all.checked;
+      }
+      updateSelection();
+    };
+    const rows = list.map((c) => {
       const box = h("input", { type: "checkbox", checked: selected.has(c.id), "aria-label": t("Include {name}", { name: c.name }) });
-      const sync = () => { box.checked ? selected.add(c.id) : selected.delete(c.id); updateSelection(); };
-      box.addEventListener("change", sync);
+      const toggle = () => { if (box.checked) selected.add(c.id); else selected.delete(c.id); updateSelection(); };
+      box.addEventListener("change", toggle);
       boxes.set(c.id, box);
-      tbody.append(h("tr", { onclick: (e) => { if (e.target !== box && !e.target.closest("a")) { box.checked = !box.checked; sync(); } }, style: { cursor: "pointer" } },
+      return h("tr", { onclick: (e) => { if (e.target !== box && !e.target.closest("a")) { box.checked = !box.checked; toggle(); } }, style: { cursor: "pointer" } },
         h("td", { class: "select-col" }, box),
         admin ? h("td", {}, c.owner) : null,
         h("td", {}, h("span", { class: "slot-name" }, c.name)),
         h("td", {}, c.player_names.length ? c.player_names.join(", ") : h("span", { class: "muted" }, t("from file name"))),
-        h("td", {}, chips(c.games, c.missing_games))));
-    }
-    if (!tbody.childElementCount) tbody.append(h("tr", {}, h("td", { colspan: 5, class: "muted" }, t("Nothing matches."))));
+        game === SEVERAL ? h("td", {}, chips(c.games, c.missing_games)) : null);
+    });
+    const missing = game !== SEVERAL && list.some((c) => c.missing_games.includes(game));
+    const group = h("details", { class: "config-group", open: filtering || openGroups.has(game) || picked() > 0 },
+      h("summary", {}, all, game === SEVERAL ? h("span", { class: "grow" }, t("Several games")) : h("span", { class: "grow" }, chips([game], missing ? [game] : [])),
+        count),
+      h("div", { class: "table-wrap" }, h("table", { class: "table" },
+        h("thead", {}, h("tr", {}, h("th", { class: "select-col" }), admin ? h("th", {}, t("Owner")) : null, h("th", {}, t("Config")), h("th", {}, t("Player")),
+          game === SEVERAL ? h("th", {}, t("Games")) : null)),
+        h("tbody", {}, rows))));
+    group.addEventListener("toggle", () => { if (group.open) openGroups.add(game); else openGroups.delete(game); });
+    groupSyncs.push(sync);
+    sync();
+    return group;
   }
   filter.oninput = drawRows;
 
@@ -182,9 +229,7 @@ export default async function render({ root, cleanup, isCurrent, query }) {
       missingHost,
       h("div", { class: "card flush" },
         h("div", { class: "row spread", style: { padding: "14px 16px" } }, h("div", { class: "grow" }, filter), countLabel),
-        h("div", { class: "table-wrap" }, h("table", { class: "table" },
-          h("thead", {}, h("tr", {}, [h("th", { class: "select-col" }), admin ? h("th", {}, t("Owner")) : null, h("th", {}, t("Config")), h("th", {}, t("Player")), h("th", {}, t("Games"))])),
-          tbody))),
+        groupsHost),
       h("div", { class: "card stack section" },
         h("h2", {}, t("Options")),
         presets.node,

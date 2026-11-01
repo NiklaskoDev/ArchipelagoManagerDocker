@@ -59,6 +59,7 @@ ACTIONS: dict[tuple[str, str], str] = {
     ("POST", "/api/system/reload-worlds"): "system.reload_worlds",
     ("POST", "/api/system/backup"): "system.backup",
     ("POST", "/api/ap-versions"): "system.version_install",
+    ("POST", "/api/ap-versions/{version}/cancel"): "system.version_cancel",
     ("POST", "/api/tokens"): "token.add",
     ("DELETE", "/api/tokens/{token_id}"): "token.delete",
     ("DELETE", "/api/ap-versions/{version}"): "system.version_remove",

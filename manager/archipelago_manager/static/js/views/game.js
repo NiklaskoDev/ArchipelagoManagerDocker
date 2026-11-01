@@ -346,7 +346,7 @@ export default async function render({ root, params, cleanup, isCurrent, query, 
 
   function signature() {
     return JSON.stringify([game.state, game.error, game.slots, game.progress, game.password, game.address, game.tls, game.missing_games, game.my_slots,
-      game.finished_at, game.start, game.sleep_minutes, game.offered_slots]);
+      game.finished_at, game.start, game.sleep_minutes, game.offered_slots, game.return_blocked]);
   }
   function drawLive() {
     drawnSignature = signature();
@@ -394,11 +394,15 @@ export default async function render({ root, params, cleanup, isCurrent, query, 
         h("div", { class: "muted small" }, game.finished_at
           ? t("Games that are over are listed in the archive. Taking a game back out does not change its progress.")
           : t("A game moves to the archive by itself once every player has reached their goal. Move one there by hand when it will not be played to the end."))),
-      h("button", { class: "btn", type: "button", onclick: action(async () => {
-        if (aborting && !(await confirmDialog(t("Not every player has reached their goal, so it is listed as aborted. The server keeps running until it is stopped; you can take the game back out later."),
-          { title: t("Move this game to the archive?"), confirmText: t("Move to the archive") }))) return;
-        applyGame(await post(`/api/games/${id}/archive`, { archived: !game.finished_at }));
-      }) }, game.finished_at ? t("Back to the running games") : t("Move to the archive"))));
+      // only an aborted game comes back, and only on an Archipelago version this server has (routes/games.py)
+      game.return_blocked ? h("span", { class: "muted small" }, game.return_blocked === "finished"
+        ? t("Every player reached their goal, so it stays in the archive.")
+        : t("Archipelago {version} is not installed on this server, so it cannot come back.", { version: game.ap_version }))
+        : h("button", { class: "btn", type: "button", onclick: action(async () => {
+          if (aborting && !(await confirmDialog(t("Not every player has reached their goal, so it is listed as aborted. Its server is stopped; you can take the game back out later."),
+            { title: t("Move this game to the archive?"), confirmText: t("Move to the archive") }))) return;
+          applyGame(await post(`/api/games/${id}/archive`, { archived: !game.finished_at }));
+        }) }, game.finished_at ? t("Back to the running games") : t("Move to the archive"))));
   }
 
   // The text client, for the player's own slots only: it speaks in their name

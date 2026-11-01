@@ -159,7 +159,11 @@ def test_a_players_repository_waits_for_the_admin(site, github, tmp_path):
     assert "Fake World" in {g["name"] for g in admin.get("/api/worlds").json()["games"]}
     entry = next(a for a in admin.get("/api/apworlds").json()["items"] if a["game"] == "Fake World")
     assert entry["status"] == "installed" and entry["uploader"] == "pia" and entry["load_error"] is None
-    assert [s["repo"] for s in olaf.get("/api/apworld-sources").json()] == ["Someone/Fake-World"]  # now for everyone
+    # the repository stays the business of whoever added it; the game is for everyone, in the list of all games
+    assert olaf.get("/api/apworld-sources").json() == []
+    assert [s["repo"] for s in pia.get("/api/apworld-sources").json()] == ["Someone/Fake-World"]
+    listed = next(g for g in olaf.get("/api/worlds").json()["games"] if g["name"] == "Fake World")
+    assert listed["apworld_id"] == entry["id"] and olaf.get(f"/api/apworlds/{entry['id']}/download").status_code == 200
 
     # a player can take back a proposal that is still waiting, but not an approved one
     github.publish("someone/other-world", "1.0", {"other.apworld": apworld(tmp_path, "Other World", "otherworld", "1.0")})
