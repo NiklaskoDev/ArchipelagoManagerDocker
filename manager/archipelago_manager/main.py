@@ -6,6 +6,7 @@ import logging
 import mimetypes
 import os
 import stat
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -241,6 +242,21 @@ async def audit_trail(request: Request, call_next):
 
 
 app.add_middleware(BodyLimit)
+
+SLOW_REQUEST = 5.0  # seconds
+
+
+@app.middleware("http")
+async def note_slow_requests(request: Request, call_next):
+    """Writes API requests that kept a page waiting to the log, by route (some paths hold a token): a page stays empty
+    until its requests are answered, and the log then says which one held it up."""
+    started = time.monotonic()
+    response = await call_next(request)
+    took = time.monotonic() - started
+    if took >= SLOW_REQUEST and request.url.path.startswith("/api/"):
+        route = getattr(request.scope.get("route"), "path", "(no route)")
+        log.warning("Slow request: %s %s took %.1f s", request.method, route, took)
+    return response
 
 
 @app.exception_handler(apbridge.APBridgeError)

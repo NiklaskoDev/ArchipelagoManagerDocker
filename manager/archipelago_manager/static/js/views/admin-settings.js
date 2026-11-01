@@ -79,6 +79,11 @@ export default async function render({ root, cleanup }) {
     clear(updateBannerHost).append(updateBanner(update) || "");
   };
   drawUpdate(system.update);
+  // How much the data folder holds is counted file by file, which on a slow share takes a while: it follows when known
+  const usageHost = h("span", { class: "muted" });
+  const drawUsage = (used) => clear(usageHost).append(" · ", t("{used} used, {free} free", { used, free: fmtBytes(system.disk.free) }));
+  drawUsage("…");
+  get("/api/system/data-size").then((r) => drawUsage(fmtBytes(r.bytes)), () => drawUsage("?"));
   const systemCard = h("div", { class: "card stack" }, h("h2", {}, t("System")), updateBannerHost,
     h("dl", { class: "kv" },
       h("dt", {}, t("Manager")), h("dd", {}, system.manager_version),
@@ -87,8 +92,7 @@ export default async function render({ root, cleanup }) {
         : h("span", { class: "form-error" }, system.ap_error ? tServer(system.ap_error) : t("unavailable"))),
       h("dt", {}, t("Updates")), updateHost,
       h("dt", {}, t("Game ports")), h("dd", {}, `${system.port_range[0]}–${system.port_range[1]}`, h("span", { class: "muted" }, " ", t("(each must be published by Docker)"))),
-      h("dt", {}, t("Data folder")), h("dd", {}, h("span", { class: "mono" }, system.data_dir), h("span", { class: "muted" }, " · ",
-        t("{used} used, {free} free", { used: fmtBytes(system.data_bytes), free: fmtBytes(system.disk.free) }))),
+      h("dt", {}, t("Data folder")), h("dd", {}, h("span", { class: "mono" }, system.data_dir), usageHost),
       h("dt", {}, t("Custom worlds folder")), h("dd", { class: "mono" }, system.worlds_folder || "—")),
     system.quarantined?.length ? banner("warn", icon("alert", 16), h("div", {}, h("strong", {}, t("Files moved out of the way:")),
       h("div", { class: "small" }, t("These .apworld files in the worlds folder were not valid archives and would have stopped Archipelago from starting.")),

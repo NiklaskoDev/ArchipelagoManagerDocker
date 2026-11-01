@@ -746,6 +746,10 @@ approve pull requests*. You can also run the workflow by hand (*Actions → Arch
 - **A custom world shows "Not loaded".** The tooltip and the System page show the reason, usually an incompatible
   Archipelago version. A file that is not a valid zip is moved to `quarantine/` in the data folder, because
   Archipelago refuses to start with such a file in its worlds folder.
+- **A page shows "Loading…" for a long time.** The container's log names every request that took 5 seconds or more
+  (`Slow request: GET /api/games took 42.0 s`), so you can see which one held the page up. On Unraid, a data folder on
+  the array is slow to read when its disk has spun down, and `/mnt/user` is slower than a pool for the many small files
+  the manager reads: keep appdata on a cache pool.
 - **Generation fails.** The job page shows the generator's output and the relevant error. A missing or wrong base ROM
   is explained in plain words; see [Games that need a base ROM](#games-that-need-a-base-rom).
 - **Edits to `host.yaml` are lost.** That happens when running as root (`PUID=0`); use a regular user.

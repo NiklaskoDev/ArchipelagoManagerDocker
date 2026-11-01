@@ -1,7 +1,9 @@
 """Pure unit tests: no server, no Archipelago."""
 import asyncio
 import json
+import logging
 import re
+import time
 import zipfile
 from pathlib import Path
 
@@ -584,3 +586,54 @@ def test_worlds_that_did_not_load_whichever_way_archipelago_lists_them():
     assert ap_helper.failed_worlds(SimpleNamespace(failed_world_loads=["zillion"])) == {"zillion": ""}
     assert ap_helper.failed_worlds(SimpleNamespace(failed_world_loads=[])) == {}
     assert ap_helper.failed_worlds(SimpleNamespace()) == {}
+
+
+def test_the_data_folder_is_counted_once_however_many_ask_and_kept_a_while(monkeypatch):
+    from archipelago_manager.routes import admin
+    walks = []
+
+    def slow_walk(path):
+        walks.append(path)
+        time.sleep(0.2)
+        return 1234
+
+    monkeypatch.setattr(admin, "_dir_size", slow_walk)
+    monkeypatch.setattr(admin, "_data_size", {})
+    monkeypatch.setattr(admin, "_counting", None)
+
+    async def ask(times):
+        return await asyncio.gather(*(admin.data_size() for _ in range(times)))
+
+    assert asyncio.run(ask(3)) == [1234] * 3 and len(walks) == 1  # three pages at once: one walk
+    assert asyncio.run(ask(1)) == [1234] and len(walks) == 1  # soon after: what was counted
+    admin._data_size["at"] -= admin.DATA_SIZE_MAX_AGE
+    assert asyncio.run(ask(1)) == [1234] and len(walks) == 2  # later: counted again
+
+
+def test_slow_requests_are_logged_by_their_route(monkeypatch, caplog):
+    from starlette.requests import Request
+
+    from archipelago_manager import main
+    monkeypatch.setattr(main, "SLOW_REQUEST", 0.05)
+
+    class Route:
+        path = "/api/watch/{token}"
+
+    def request(path):
+        return Request({"type": "http", "method": "GET", "path": path, "root_path": "", "scheme": "http",
+                        "server": ("test", 80), "headers": [], "query_string": b"", "route": Route()})
+
+    async def slow(_request):
+        await asyncio.sleep(0.1)
+        return "response"
+
+    async def quick(_request):
+        return "response"
+
+    with caplog.at_level(logging.WARNING, logger="archipelago_manager"):
+        assert asyncio.run(main.note_slow_requests(request("/api/watch/s3cret"), slow)) == "response"
+        asyncio.run(main.note_slow_requests(request("/api/games"), quick))
+        asyncio.run(main.note_slow_requests(request("/assets/app.js"), slow))  # not one of the API's
+    logged = [r.getMessage() for r in caplog.records if r.name == "archipelago_manager"]
+    # by its route: a path can hold a token, which does not belong in the log
+    assert len(logged) == 1 and "GET /api/watch/{token} took" in logged[0] and "s3cret" not in logged[0]

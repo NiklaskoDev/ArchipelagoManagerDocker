@@ -74,7 +74,8 @@ async function route() {
   highlightNav(match ? match[2] : null);
   setTitle(match ? match[3]() : t("Page not found"));
   if (!view) return;
-  clear(view).append(loading());
+  const spinner = loading();
+  clear(view).append(spinner);
   window.scrollTo(0, 0);
   if (!match) {
     clear(view).append(h("div", { class: "empty" }, h("h3", {}, t("Page not found")),
@@ -90,10 +91,13 @@ async function route() {
   // Each page renders into its own element. A page that is still loading when the user moves on can then only fill
   // its own, already removed element, never the next page.
   const page = h("div", { class: "page" });
+  // A page draws once the server answered what it asked; until then it says it is loading instead of staying empty
+  const drawn = new MutationObserver(() => { if (page.firstChild) spinner.remove(); });
   try {
     const module = await load();
     if (token !== navToken) return;
-    clear(view).append(page);
+    clear(view).append(spinner, page);
+    drawn.observe(page, { childList: true });
     await module.default({
       root: page,
       params: m.slice(1),
@@ -109,6 +113,9 @@ async function route() {
     if (!(err instanceof ApiError)) console.error(err);  // API errors are shown on the page; this is for real bugs
     clear(view).append(banner("error", icon("alert", 18), h("div", {}, h("strong", {}, t("Something went wrong.")), " ", err.text ?? err.message ?? String(err)),
       h("button", { class: "btn sm", type: "button", onclick: route }, t("Retry"))));
+  } finally {
+    drawn.disconnect();
+    spinner.remove();
   }
   if (token === navToken) repaintView();
 }

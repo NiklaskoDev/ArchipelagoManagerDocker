@@ -77,8 +77,12 @@ def test_regular_users_cannot_use_admin_endpoints(plain_server):
     admin = setup_admin(plain_server)
     admin.post("/api/users", json={"username": "plain", "password": "plainpass1"})
     user = plain_server.client("plain", "plainpass1")
-    for method, path in [("get", "/api/users"), ("get", "/api/settings"), ("get", "/api/system"), ("get", "/api/host-yaml")]:
+    for method, path in [("get", "/api/users"), ("get", "/api/settings"), ("get", "/api/system"),
+                         ("get", "/api/system/data-size"), ("get", "/api/host-yaml")]:
         assert getattr(user, method)(path).status_code == 403, path
+    # the size of the data folder is asked for on its own: counting it is slow on a slow share
+    assert "data_bytes" not in admin.get("/api/system").json()
+    assert admin.get("/api/system/data-size").json()["bytes"] > 0
     assert user.post("/api/users", json={"username": "x1", "password": "xxxxxxxx1"}).status_code == 403
     assert user.patch("/api/settings", json={"allow_registration": True}).status_code == 403
 
