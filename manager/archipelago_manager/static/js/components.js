@@ -752,7 +752,7 @@ export function adminTabs(current) {
 // ---------------------------------------------------------------------------------------------------------------------
 // Archipelago updates (admins only: they come from /api/system)
 // ---------------------------------------------------------------------------------------------------------------------
-const README_UPDATING = "https://github.com/NiklaskoDev/ArchipelagoManagerDocker#updating";
+const README_UPDATING = "https://github.com/NiklaskoDev/ArchipelagoManagerDocker/blob/main/docs/maintenance.md#updating";
 
 export function updateBanner(update) {
   if (!update?.update_available) return null;
