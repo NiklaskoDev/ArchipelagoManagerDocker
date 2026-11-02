@@ -1504,7 +1504,15 @@
   "Your submissions": "Vos propositions",
   "You have not submitted a game yet": "Vous n'avez encore proposé aucun jeu",
   "Custom APWorld: download it to play it with your own Archipelago": "APWorld personnalisé : téléchargez-le pour y jouer avec votre propre Archipelago",
-  "Games and GitHub repositories you submit are reviewed by an administrator before they can be used. To play a custom game, download its APWorld from the list above.": "Les jeux et dépôts GitHub que vous proposez sont vérifiés par un administrateur avant de pouvoir être utilisés. Pour jouer à un jeu personnalisé, téléchargez son APWorld dans la liste ci-dessus."
+  "Games and GitHub repositories you submit are reviewed by an administrator before they can be used. To play a custom game, download its APWorld from the list above.": "Les jeux et dépôts GitHub que vous proposez sont vérifiés par un administrateur avant de pouvoir être utilisés. Pour jouer à un jeu personnalisé, téléchargez son APWorld dans la liste ci-dessus.",
+  "Play": "Jouer",
+  "Manage": "Gérer",
+  "Chat and activity": "Chat et activité",
+  "Show": "Afficher",
+  "Files and saves": "Fichiers et sauvegardes",
+  "Sharing": "Partage",
+  "Ending the game": "Fin de la partie",
+  "Find your slot among the players and press “{button}” to get your files.": "Trouvez votre slot parmi les joueurs et appuyez sur « {button} » pour obtenir vos fichiers."
  },
  "server": {
   " (line {0})": " (ligne {0})",

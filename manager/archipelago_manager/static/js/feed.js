@@ -27,8 +27,9 @@ function clock(ts) {
 
 // While the tab is in the background, onUnread(n) hears how many entries came in since that are news for the viewer
 // (for the tab's title), and onUnread(0) once the tab is back in view.
+// `bare`: without a card and heading of its own, for a page that puts it into a card with something else.
 export function activitySection({ gameId, mySlots, cleanup, isCurrent, source = `/api/games/${gameId}/activity`, spectator = false,
-  onUnread = null }) {
+  onUnread = null, bare = false }) {
   const mine = new Set(mySlots);
   const filters = spectator ? FILTERS.filter(([key]) => key !== "chat") : FILTERS;
   let entries = [], last = 0, filter = "all", loaded = false, unread = 0;
@@ -124,9 +125,9 @@ export function activitySection({ gameId, mySlots, cleanup, isCurrent, source = 
     cleanup(() => document.removeEventListener("visibilitychange", seen));
   }
 
+  const about = h("p", { class: "muted small" }, spectator ? t("What happens in the multiworld: items sent and found, hints, and who joins and finishes.")
+    : t("What happens in the multiworld: chat, items sent and found, hints, and who joins and finishes."));
+  if (bare) return h("div", { class: "stack" }, h("div", { class: "row spread" }, about, onlyMine), tabs, list);
   return h("div", { class: "section" }, h("div", { class: "card stack" },
-    h("div", { class: "card-head" }, h("h2", {}, t("Activity")), onlyMine),
-    h("p", { class: "muted small" }, spectator ? t("What happens in the multiworld: items sent and found, hints, and who joins and finishes.")
-      : t("What happens in the multiworld: chat, items sent and found, hints, and who joins and finishes.")),
-    tabs, list));
+    h("div", { class: "card-head" }, h("h2", {}, t("Activity")), onlyMine), about, tabs, list));
 }

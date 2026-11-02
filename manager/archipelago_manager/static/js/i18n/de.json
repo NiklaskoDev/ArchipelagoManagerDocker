@@ -1504,7 +1504,15 @@
   "Your submissions": "Deine Einreichungen",
   "You have not submitted a game yet": "Du hast noch kein Spiel eingereicht",
   "Custom APWorld: download it to play it with your own Archipelago": "Eigene APWorld: herunterladen, um sie mit deinem eigenen Archipelago zu spielen",
-  "Games and GitHub repositories you submit are reviewed by an administrator before they can be used. To play a custom game, download its APWorld from the list above.": "Spiele und GitHub-Repositories, die du einreichst, prüft ein Administrator, bevor sie genutzt werden können. Um ein eigenes Spiel zu spielen, lade seine APWorld aus der Liste oben herunter."
+  "Games and GitHub repositories you submit are reviewed by an administrator before they can be used. To play a custom game, download its APWorld from the list above.": "Spiele und GitHub-Repositories, die du einreichst, prüft ein Administrator, bevor sie genutzt werden können. Um ein eigenes Spiel zu spielen, lade seine APWorld aus der Liste oben herunter.",
+  "Play": "Spielen",
+  "Manage": "Verwalten",
+  "Chat and activity": "Chat und Aktivität",
+  "Show": "Anzeigen",
+  "Files and saves": "Dateien und Spielstände",
+  "Sharing": "Teilen",
+  "Ending the game": "Spiel beenden",
+  "Find your slot among the players and press “{button}” to get your files.": "Such deinen Slot bei den Spielern und drück auf „{button}“, um deine Dateien zu bekommen."
  },
  "server": {
   " (line {0})": " (Zeile {0})",

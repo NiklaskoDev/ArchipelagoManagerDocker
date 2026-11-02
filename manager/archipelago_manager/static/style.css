@@ -363,6 +363,14 @@ table.table { width: 100%; border-collapse: collapse; }
 button.tab { background: none; border: 0; border-bottom: 2px solid transparent; font: inherit; font-weight: 550; cursor: pointer; }
 button.tab:hover { color: var(--text); }
 button.tab { display: inline-flex; align-items: center; gap: 6px; }
+/* two views of one card, side by side (the game page: activity or the text client) */
+.switch { display: inline-flex; flex-shrink: 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.switch button { all: unset; padding: 5px 12px; font-size: .85rem; font-weight: 550; color: var(--muted); cursor: pointer; }
+.switch button + button { border-left: 1px solid var(--border); }
+.switch button:hover { color: var(--text); }
+.switch button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.switch button[aria-pressed="true"] { color: var(--text); background: var(--surface-2); }
+.page-tabs { margin: 20px 0 18px; }
 hr { border: 0; border-top: 1px solid var(--border); margin: 6px 0; width: 100%; }
 
 /* what can be done to the games chosen in a list (components.js gameSelection) */
