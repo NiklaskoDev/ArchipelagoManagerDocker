@@ -6,7 +6,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
-from archipelago_manager.updates import parse_version
+from archipelago_manager.archipelago.updates import parse_version
 from conftest import Server
 from helpers import FakeWebhook, wait_for
 

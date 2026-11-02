@@ -53,6 +53,10 @@ async function assertNoStrayText(page, label) {
   const bad = text.match(/\b(null|undefined|NaN)\b|\[object/g);
   if (bad) problems.push(`[${page.name}] ${label}: stray text ${[...new Set(bad)].join(", ")}`);
 }
+// The game page has three parts: Play (connect, tracker, chat), Players (slots, progress) and Manage
+async function gameTab(page, name) {
+  await page.getByRole("tab", { name, exact: true }).click();
+}
 async function nav(page, hash, label) {
   await page.goto(`${BASE}/${hash}`);
   await page.waitForSelector("#view > *");
@@ -240,15 +244,18 @@ await nav(admin, gameUrl.slice(BASE.length + 1));
 await admin.locator(".page-actions").getByRole("button", { name: "Start" }).click();
 await admin.locator(".badge", { hasText: "Running" }).first().waitFor({ timeout: 60000 });
 log("server starts from the UI");
+await gameTab(admin, "Players");
 await admin.locator("h2", { hasText: "Progress over time" }).waitFor({ timeout: 45000 });
 // nobody checked anything yet: flat lines at 0 %, which have no height and so never count as visible
 await admin.locator(".chart svg path.series").first().waitFor({ state: "attached" });
 log("the game's progress over time appears once the server runs");
+await gameTab(admin, "Manage");
 await admin.getByRole("button", { name: "Move to the archive" }).click();
 // nobody reached their goal, so it is asked first: the game goes to the archive as aborted
 await admin.locator(".modal").getByRole("button", { name: "Move to the archive" }).click();
 await admin.locator(".page-head .badge", { hasText: "Finished" }).waitFor();
 await admin.locator(".page-head .badge", { hasText: "Stopped" }).waitFor();  // a game in the archive is not played on
+await gameTab(admin, "Players");
 await admin.locator("h2", { hasText: "Results" }).waitFor({ timeout: 15000 });
 await nav(admin, "#/games");
 await expectText(admin, "No game is being played right now");
@@ -256,7 +263,9 @@ await admin.locator(".tabs a", { hasText: "Archive (1)" }).click();
 await admin.locator("tbody tr", { hasText: "Aborted" }).waitFor();
 await shot(admin, "archive");
 await nav(admin, gameUrl.slice(BASE.length + 1));
+await gameTab(admin, "Manage");
 await admin.getByRole("button", { name: "Back to the running games" }).click();
+await gameTab(admin, "Players");
 await admin.locator("h2", { hasText: "Progress over time" }).waitFor({ timeout: 15000 });
 await admin.locator(".page-actions").getByRole("button", { name: "Start" }).click();
 await admin.locator(".page-head .badge", { hasText: "Running" }).waitFor({ timeout: 60000 });
@@ -269,6 +278,7 @@ if (ownerValues.some((v) => !v.includes("boss"))) problems.push(`slots should be
 // give the second slot to gwen
 await ownerSelects.nth(0).selectOption({ label: "gwen" });
 await admin.waitForTimeout(800);
+await gameTab(admin, "Manage");
 await admin.locator("details", { hasText: "Settings" }).first().locator("summary").click();
 await admin.locator("details[open] input").first().fill("UI run (renamed)");
 await admin.locator("details[open] input[placeholder='none']").first().fill("room1");
@@ -311,6 +321,7 @@ await dialog.locator("input[type=checkbox]").uncheck();
 await dialog.getByRole("button", { name: "Upload and add" }).click();
 await admin.waitForURL(/#\/games\/\d+$/, { timeout: 60000 });
 await expectText(admin, "Pregenerated via UI");
+await gameTab(admin, "Manage");
 await admin.locator("details", { hasText: "Files" }).first().locator("summary").click();
 await expectText(admin, "README.txt");
 log("pregenerated zip uploaded; patch files extracted per slot");
@@ -328,18 +339,20 @@ await expectText(admin, "Settings saved");
 log("claiming (one slot each) enabled, game made visible to everyone and set to fall asleep");
 await admin.locator(".page-actions").getByRole("button", { name: "Start" }).click();
 await admin.locator(".page-head .badge", { hasText: "Asleep" }).waitFor({ timeout: 60000 });
+await gameTab(admin, "Play");
 await expectText(admin, "It wakes up when one of its players opens this page.");
 if (await admin.getByText("Gets a port when it wakes up").count()) problems.push("the asleep game lost its port");
 await shot(admin, "asleep");
 log("with nobody connected, the game falls asleep, and the admin's visit does not wake it");
 
+await gameTab(admin, "Manage");
 await admin.locator("details", { hasText: "Backups" }).first().locator("summary").click();
 await expectText(admin, "No backups yet");
 log("the game's backups section opens");
 
 // delete via danger zone --------------------------------------------------------------------------------------------------
 await admin.locator("details", { hasText: "Danger zone" }).first().locator("summary").click();
-const claimGameUrl = admin.url();
+const claimGameUrl = admin.url().split("?")[0];  // without the tab
 
 // ---------------------------------------------------------------------------------------------------------------------
 console.log("regular user (dark theme)");
@@ -355,14 +368,18 @@ if (await user.getByRole("link", { name: "Admin", exact: true }).count()) proble
 if (await user.getByRole("link", { name: "Generate", exact: true }).count()) problems.push("regular user can see Generate while it is disabled");
 await nav(user, claimGameUrl.slice(BASE.length + 1));
 await expectText(user, "Pregenerated via UI");
+await expectText(user, "Find your slot among the players");  // under Connect, with a way to the slots
+await gameTab(user, "Players");
 const claim = user.getByRole("button", { name: "This is mine" }).first();
 await claim.waitFor();
 await shot(user, "claimable");
 await claim.click();
 await expectText(user, "You now own");
-await user.locator("table a[href*='/files/']").first().waitFor();  // the claimed slot's patch file
-log("user claims a slot and gets their files");
 await expectText(user, "Each player can claim one slot");
+await gameTab(user, "Play");
+await user.locator(".card a[href*='/files/']").first().waitFor();  // the claimed slot's patch file, under Connect
+log("user claims a slot and gets their files");
+await gameTab(user, "Players");
 if (await user.getByRole("button", { name: "This is mine" }).count()) problems.push("a second slot is still offered for claiming");
 log("with one slot each, no further slot is offered");
 await nav(user, "#/games");
@@ -521,6 +538,8 @@ await user.getByRole("link", { name: "Open the game" }).click();
 await user.waitForURL(/#\/games\/\d+$/);
 await expectText(user, "Your slot");
 log("the player is in the generated game");
+// chat and activity share a card: the text client is the other of its two views
+await user.getByRole("button", { name: "Text client", exact: true }).click();
 await user.getByRole("button", { name: "Connect", exact: true }).click();
 await user.locator(".badge", { hasText: "Connected" }).waitFor({ timeout: 30000 });
 await user.locator(".textclient .msg", { hasText: "viewing" }).first().waitFor({ timeout: 15000 });
@@ -544,19 +563,24 @@ log("the text client opens again after a reload, with the messages so far");
 await user.getByRole("button", { name: "Disconnect" }).click();
 await user.getByRole("button", { name: "Connect", exact: true }).waitFor();
 log("the player disconnects");
+await user.getByRole("button", { name: "Activity", exact: true }).click();
 const feedBox = user.locator(".feed");
 await feedBox.locator(".msg", { hasText: "hello from the browser" }).first().waitFor({ timeout: 15000 });
 await user.locator(".section", { has: user.locator("h2", { hasText: "Activity" }) }).getByRole("tab", { name: "Chat" }).click();
 await feedBox.locator(".msg", { hasText: "hello from the browser" }).first().waitFor();
 await shot(user, "activity");
 log("the activity feed shows what happened in the game, chat filtered out on its own");
-await user.locator(".section", { has: user.locator("h2", { hasText: "Slots" }) }).getByRole("button", { name: "Set status" }).first().click();
+// what a player does with their own slot is under Connect
+await user.locator(".card", { has: user.locator("h2", { hasText: "Connect" }) }).getByRole("button", { name: "Set status" }).first().click();
 const statusModal = user.locator(".modal");
 await statusModal.getByLabel(/^Stuck/).check();
 await statusModal.locator("input.input").fill("need the Hookshot");
 await statusModal.getByRole("button", { name: "Save" }).click();
 await expectText(user, "Status saved");
-await user.locator(".slot-said", { hasText: "need the Hookshot" }).waitFor();
+await user.locator(".slot-said", { hasText: "need the Hookshot" }).first().waitFor();
+await gameTab(user, "Players");
+await user.locator(".section", { has: user.locator("h2", { hasText: "Slots" }) }).locator(".slot-said", { hasText: "need the Hookshot" }).waitFor();
+await gameTab(user, "Play");
 await user.locator(".section", { has: user.locator("h2", { hasText: "Activity" }) }).getByRole("tab", { name: "All" }).click();
 await feedBox.locator(".msg", { hasText: "is stuck" }).first().waitFor({ timeout: 15000 });
 await shot(user, "status");

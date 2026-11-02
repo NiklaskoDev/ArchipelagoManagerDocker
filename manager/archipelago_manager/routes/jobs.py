@@ -7,9 +7,11 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from .. import apbridge, audit, db, limits, versions, settings as app_settings
-from ..generation import GENERATION, JobRequestError, create_job, job_dir, prepare_players
-from ..security import current_user, is_admin, is_organizer
+from ..archipelago import apbridge, versions
+from ..core import audit, db, settings as app_settings
+from ..generation import limits
+from ..generation.jobs import GENERATION, JobRequestError, create_job, job_dir, prepare_players
+from ..core.security import current_user, is_admin, is_organizer
 
 router = APIRouter(prefix="/api")
 

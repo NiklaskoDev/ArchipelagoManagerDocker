@@ -13,12 +13,15 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPExcepti
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from .. import (activity, apbridge, audit, backups, db, gamepaths, gamestore, ggimport, history, ics, limits, notify,
-               reminders, schedule, spectate, tls, versions, visits, settings as app_settings, textclient)
-from ..config import CONFIG
-from ..rooms import ROOMS, STATUS_GOAL, RoomError, mask_secrets, sleep_minutes, slot_rules, valid_password
-from ..security import current_user, is_admin, manages, normal_username, organizer_user
-from ..textclient import TEXT_CLIENTS
+from ..games import activity, backups, gamepaths, gamestore, ggimport, history, reminders, schedule, spectate, tls, visits, textclient
+from ..archipelago import apbridge, versions
+from ..core import audit, db, ics, settings as app_settings
+from ..generation import limits
+from .. import notify
+from ..core.config import CONFIG
+from ..games.rooms import ROOMS, STATUS_GOAL, RoomError, mask_secrets, sleep_minutes, slot_rules, valid_password
+from ..core.security import current_user, is_admin, manages, normal_username, organizer_user
+from ..games.textclient import TEXT_CLIENTS
 
 router = APIRouter(prefix="/api")
 

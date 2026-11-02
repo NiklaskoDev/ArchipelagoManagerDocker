@@ -8,8 +8,10 @@ import time
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
-from .. import audit, db, notify, settings as app_settings, sources
-from ..security import admin_user, current_user, is_admin
+from ..core import audit, db, settings as app_settings
+from .. import notify
+from ..archipelago import sources
+from ..core.security import admin_user, current_user, is_admin
 from . import apworlds as library
 
 router = APIRouter(prefix="/api")

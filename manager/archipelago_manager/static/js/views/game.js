@@ -31,12 +31,10 @@ export default async function render({ root, params, cleanup, isCurrent, query, 
   const awayHost = game.my_slots.length ? awaySummary({ gameId: id, cleanup, isCurrent }) : h("div");
   const infoHost = h("div");
   const trackerHost = h("div");
-  const textClientHost = h("div");
-  const activityHost = h("div");
+  const chatHost = h("div");
   const progressHost = h("div");
   const archiveHost = h("div");
   const slotsHost = h("div");
-  const adminHost = h("div", { class: "stack section" });
   let drawnSignature = "";
 
   // -------------------------------------------------------------------------------------------------------------------
@@ -222,8 +220,7 @@ export default async function render({ root, params, cleanup, isCurrent, query, 
           : h("span", { class: "muted" }, game.state === "sleeping" ? t("Gets a port when it wakes up") : t("No port assigned"))),
         game.password ? [h("dt", {}, t("Password")), h("dd", {}, copyField(game.password))] : null,
         game.my_slots.length ? [h("dt", {}, plural(game.my_slots.length, "Your slot", "Your slots")),
-          h("dd", { class: "stack tight" }, game.my_slots.map((s) => h("div", { class: "row" },
-            copyField(s.name), h("span", { class: "muted" }, s.game), canLaunch(game) ? launchButton(game, s) : null)))] : null,
+          h("dd", { class: "stack" }, game.slots.filter((s) => s.mine).map(mySlot), allMyFiles())] : null,
         h("dt", {}, "Archipelago"), h("dd", {}, game.ap_version || "—",
           game.ap_version_own ? h("span", { class: "muted small" }, " ", t("(use a client of this version)")) : null),
         h("dt", {}, t("Progress")), h("dd", {}, progressBar(game.progress.checked, game.progress.total))),
@@ -233,7 +230,38 @@ export default async function render({ root, params, cleanup, isCurrent, query, 
         game.tls && game.address ? [" ", withNodes(t("The connection is encrypted; a client that does not find that out by itself takes {address}."),
           { address: h("span", { class: "mono" }, `wss://${game.address}`) })] : null,
         game.my_slots.length && canLaunch(game) ? [" ", t("Or press “{button}”: with Archipelago installed, its Launcher opens the client for your game already connected (the Text Client, if your game's client does not take links).",
-          { button: t("Open in Archipelago") })] : null)));
+          { button: t("Open in Archipelago") })] : null),
+      !manage && game.claimable && !game.my_slots.length ? h("div", { class: "row" },
+        h("span", { class: "muted small grow" }, t("Find your slot among the players and press “{button}” to get your files.", { button: t("This is mine") })),
+        h("button", { class: "btn sm", type: "button", onclick: () => showTab("players") }, icon("users", 14), t("Players"))) : null));
+  }
+
+  // One of the viewer's slots: what they connect with, its files, how they are doing, and handing it on
+  function mySlot(s) {
+    const said = s.player_status && s.status !== "goal" ? SLOT_STATUSES[s.player_status] : null;
+    return h("div", { class: "stack tight" },
+      h("div", { class: "row" }, copyField(s.name), h("span", { class: "muted" }, s.game), canLaunch(game) ? launchButton(game, s) : null),
+      s.type === 1 ? h("div", { class: "row" },
+        s.files.map(fileButton),
+        said ? h("span", { class: "slot-said", title: fmtDate(s.status_at) }, h("span", { class: `badge ${said[0]}` }, said[1]()),
+          s.status_note ? h("span", { class: "small" }, ` ${s.status_note}`) : null) : null,
+        s.status !== "goal" ? h("button", { class: "btn sm ghost", type: "button", onclick: () => statusDialog(s) },
+          s.player_status ? t("Change status") : t("Set status")) : null,
+        s.handover ? null : h("button", { class: "btn sm ghost", type: "button", title: t("Let someone else play on from where you are"),
+          onclick: () => handoverDialog(s) }, t("Hand over")),
+        h("button", { class: "btn sm ghost", type: "button", onclick: action(async () => applyGame(await post(`/api/games/${id}/slots/${s.slot}/unclaim`))) },
+          t("Release"))) : null,
+      handoverLine(s));
+  }
+
+  function allMyFiles() {
+    const count = game.slots.filter((s) => s.mine).flatMap((s) => s.files).length;
+    return count > 1 ? h("div", {}, h("a", { class: "btn sm", href: `/api/games/${id}/my-files.zip` }, icon("download", 14), t("Download all my files"))) : null;
+  }
+
+  function fileButton(f) {
+    return h("a", { class: "btn sm", href: `/api/games/${id}/files/${f.id}`, title: f.filename },
+      icon("download", 14), shortName(f.filename), h("span", { class: "muted" }, fmtBytes(f.size)));
   }
 
   // -------------------------------------------------------------------------------------------------------------------
@@ -247,11 +275,9 @@ export default async function render({ root, params, cleanup, isCurrent, query, 
     const said = slot.player_status && slot.status !== "goal" ? SLOT_STATUSES[slot.player_status] : null;
     return h("div", { class: "stack tight" },
       h("span", { class: "status-line" }, h("span", { class: `dot ${kind}` }), label),
+      slot.goal_at ? h("span", { class: "muted small" }, fmtDate(slot.goal_at)) : null,
       said ? h("div", { class: "slot-said", title: fmtDate(slot.status_at) }, h("span", { class: `badge ${said[0]}` }, said[1]()),
-        slot.status_note ? h("span", { class: "small" }, ` ${slot.status_note}`) : null) : null,
-      slot.mine && slot.status !== "goal" ? h("button", { class: "btn sm ghost", type: "button", style: { alignSelf: "flex-start" },
-        onclick: () => statusDialog(slot) },
-        slot.player_status ? t("Change status") : t("Set status")) : null);
+        slot.status_note ? h("span", { class: "small" }, ` ${slot.status_note}`) : null) : null);
   }
 
   // The player says how they are doing: everyone in the game sees it, and Discord hears when someone is stuck
@@ -298,13 +324,7 @@ export default async function render({ root, params, cleanup, isCurrent, query, 
       };
       return h("div", { class: "stack tight" }, sel, handoverLine(slot));
     }
-    if (slot.mine) {
-      return h("div", { class: "stack tight" }, h("span", { class: "row" }, h("strong", {}, t("You")),
-        slot.handover ? null : h("button", { class: "btn sm ghost", type: "button", title: t("Let someone else play on from where you are"),
-          onclick: () => handoverDialog(slot) }, t("Hand over")),
-        h("button", { class: "btn sm ghost", type: "button", onclick: action(async () => applyGame(await post(`/api/games/${id}/slots/${slot.slot}/unclaim`))) }, t("Release"))),
-        handoverLine(slot));
-    }
+    if (slot.mine) return h("strong", {}, t("You"));  // what they do with it is under Connect
     if (slot.owner) return slot.handover ? h("div", { class: "stack tight" }, h("span", {}, slot.owner), handoverLine(slot)) : slot.owner;
     if (slot.claimable) {
       return h("button", { class: "btn sm primary", type: "button", onclick: action(async () => {
@@ -319,24 +339,21 @@ export default async function render({ root, params, cleanup, isCurrent, query, 
 
   function drawSlots() {
     const rows = game.slots;
-    const myFiles = rows.filter((s) => s.mine).flatMap((s) => s.files).length;
+    // the players get their own files under Connect; whoever runs the game hands out everyone's
+    const heads = ["#", t("Player"), t("Game"), t("Owner"), t("Progress"), t("Status"), manage ? t("Files") : null].filter(Boolean);
     clear(slotsHost).append(h("div", { class: "section" },
-      h("div", { class: "section-head" }, h("h2", {}, t("Slots")),
-        myFiles > 1 ? h("a", { class: "btn sm", href: `/api/games/${id}/my-files.zip` }, icon("download", 14), t("Download all my files")) : null),
+      h("div", { class: "section-head" }, h("h2", {}, t("Slots"))),
       h("div", { class: "card flush table-wrap" }, h("table", { class: "table" },
-        h("thead", {}, h("tr", {}, ["#", t("Player"), t("Game"), t("Owner"), t("Progress"), t("Status"), t("Files")].map((text) => h("th", {}, text)))),
+        h("thead", {}, h("tr", {}, heads.map((text) => h("th", {}, text)))),
         h("tbody", {}, rows.map((s) => h("tr", {},
           h("td", { class: "muted" }, s.slot),
-          h("td", {}, h("span", { class: "slot-name" }, s.name), s.mine ? [" ", badge(t("you"), "accent")] : null,
-            s.mine && s.type === 1 && canLaunch(game) ? h("div", { style: { marginTop: "6px" } }, launchButton(game, s)) : null),
+          h("td", {}, h("span", { class: "slot-name" }, s.name), s.mine ? [" ", badge(t("you"), "accent")] : null),
           h("td", {}, s.game),
           h("td", {}, ownerCell(s)),
           h("td", {}, s.type === 1 ? progressBar(s.checked, s.locations, { compact: true }) : h("span", { class: "muted" }, "—")),
           h("td", {}, statusCell(s)),
-          h("td", {}, s.files.length
-            ? h("div", { class: "stack tight" }, s.files.map((f) => h("a", { class: "btn sm", href: `/api/games/${id}/files/${f.id}`, title: f.filename },
-                icon("download", 14), shortName(f.filename), h("span", { class: "muted" }, fmtBytes(f.size)))))
-            : h("span", { class: "muted" }, s.type === 1 ? (manage || s.mine ? t("no file") : "") : ""))))))),
+          manage ? h("td", {}, s.files.length ? h("div", { class: "stack tight" }, s.files.map(fileButton))
+            : h("span", { class: "muted" }, s.type === 1 ? t("no file") : "")) : null))))),
       !manage && game.claimable && !game.my_slots.length
         ? h("p", { class: "muted small", style: { marginTop: "8px" } }, t("Find your slot above and press “{button}” to get your files.", { button: t("This is mine") }),
           game.single_claim ? [" ", t("Each player can claim one slot.")] : null) : null,
@@ -354,8 +371,7 @@ export default async function render({ root, params, cleanup, isCurrent, query, 
     drawInfo();
     drawSlots();
     syncTracker();
-    syncTextClient();
-    syncActivity();
+    syncChat();
     if (game.can_archive) drawArchive();
     loadHistory().catch(() => {});  // progress, a goal or the archive changed
   }
@@ -379,7 +395,7 @@ export default async function render({ root, params, cleanup, isCurrent, query, 
     progressHost.append(h("div", { class: "section" }, h("div", { class: "card stack" },
       h("div", { class: "card-head" }, h("h2", {}, data.finished_at ? t("Results") : t("Progress over time")),
         h("span", { class: "muted small" }, playedText(data))),
-      progressSection(data, { mine, cleanup: (fn) => historyStops.push(fn) }),
+      progressSection(data, { mine, cleanup: (fn) => historyStops.push(fn), table: Boolean(data.finished_at) }),
       h("p", { class: "muted small", style: { margin: 0 } }, t("Read from the server's save about once a minute while the server runs.")))));
   }
   every(30000, loadHistory, cleanup);
@@ -405,35 +421,44 @@ export default async function render({ root, params, cleanup, isCurrent, query, 
         }) }, game.finished_at ? t("Back to the running games") : t("Move to the archive"))));
   }
 
-  // The text client, for the player's own slots only: it speaks in their name
-  let textClientKey = null, textClientCleanup = () => {};
-  cleanup(() => textClientCleanup());
-  // the activity feed, rebuilt only when the viewer's own slots change (what "about me" means)
-  let activityKey = null;
-  const activityStops = [];
-  cleanup(() => activityStops.splice(0).forEach((fn) => fn()));
-  function syncActivity() {
+  // Chat and activity in one card: what happens in the whole multiworld, for everyone, and for a player of the game the
+  // text client, which chats and sends commands in their name. Rebuilt only when the viewer's own slots change.
+  let chatKey = null;
+  const chatStops = [];
+  cleanup(() => chatStops.splice(0).forEach((fn) => fn()));
+  const chatViewKey = `apm-chat-view-${id}`;
+  function syncChat() {
     const names = game.my_slots.map((s) => s.name);
-    const key = names.join("\n");
-    if (key === activityKey) return;
-    activityKey = key;
-    activityStops.splice(0).forEach((fn) => fn());
+    const playing = game.slots.filter((s) => s.type === 1 && s.mine);
+    const key = JSON.stringify([names, playing.map((s) => s.slot)]);
+    if (key === chatKey) return;
+    chatKey = key;
+    chatStops.splice(0).forEach((fn) => fn());
     setUnread(0);
-    clear(activityHost).append(activitySection({ gameId: id, mySlots: names, cleanup: (fn) => activityStops.push(fn), isCurrent,
-      onUnread: setUnread }));
-  }
-
-  function syncTextClient() {
-    const slots = game.slots.filter((s) => s.type === 1 && s.mine);
-    const key = slots.map((s) => s.slot).join(",");
-    if (key === textClientKey) return;
-    textClientKey = key;
-    textClientCleanup();
-    clear(textClientHost);
-    if (!slots.length) return;
-    const stops = [];
-    textClientCleanup = () => stops.splice(0).forEach((fn) => fn());
-    textClientHost.append(textClientSection({ gameId: id, slots, cleanup: (fn) => stops.push(fn), isCurrent }));
+    const stop = (fn) => chatStops.push(fn);
+    const activity = activitySection({ gameId: id, mySlots: names, cleanup: stop, isCurrent, onUnread: setUnread, bare: true });
+    const head = h("div", { class: "card-head" }, h("h2", {}, playing.length ? t("Chat and activity") : t("Activity")));
+    const card = h("div", { class: "card stack" }, head, activity);
+    clear(chatHost).append(h("div", { class: "section" }, card));
+    if (!playing.length) return;
+    const client = textClientSection({ gameId: id, slots: playing, cleanup: stop, isCurrent, bare: true });
+    const views = { activity: [activity, t("Activity")], client: [client, t("Text client")] };
+    const buttons = Object.entries(views).map(([key, [, label]]) => {
+      const button = h("button", { type: "button" }, label);
+      button.onclick = () => show(key);
+      return [key, button];
+    });
+    // which of the two this browser showed last for the game
+    function show(view) {
+      for (const [key, [node]] of Object.entries(views)) node.hidden = key !== view;
+      for (const [key, button] of buttons) button.setAttribute("aria-pressed", String(key === view));
+      try { localStorage.setItem(chatViewKey, view); } catch { /* private mode: for this visit only */ }
+    }
+    let last = null;
+    try { last = localStorage.getItem(chatViewKey); } catch { /* private mode */ }
+    head.append(h("div", { class: "switch", role: "group", "aria-label": t("Show") }, buttons.map(([, b]) => b)));
+    card.append(client);
+    show(last === "client" ? "client" : "activity");
   }
 
   // -------------------------------------------------------------------------------------------------------------------
@@ -960,15 +985,41 @@ export default async function render({ root, params, cleanup, isCurrent, query, 
   }
 
   // -------------------------------------------------------------------------------------------------------------------
-  root.append(headerHost, awayHost, infoHost, trackerHost, textClientHost, activityHost, progressHost, slotsHost, adminHost);
-  drawLive();
-  // a player who generated the game (and so may archive it) without running it sees the archive on its own
-  if (!manage && game.can_archive) adminHost.append(archiveHost);
+  // -------------------------------------------------------------------------------------------------------------------
+  // the page in three parts: playing the game, its players, and running it
+  // -------------------------------------------------------------------------------------------------------------------
+  const runs = manage || game.can_archive;
+  const group = (title, ...sections) => h("div", { class: "section stack" }, h("h2", {}, title), ...sections);
+  const panes = {
+    play: h("div", {}, awayHost, infoHost, trackerHost, chatHost),
+    players: h("div", {}, progressHost, slotsHost),
+    manage: runs ? h("div", {}) : null,
+  };
+  const consoleCard = manage ? consoleSection() : null;
   if (manage) {
-    adminHost.append(settingsSection(), archiveHost, spectateSection(), filesSection(), consoleSection(), backupsSection(), importSection(),
-      dangerSection());
-    if (query.get("tab") === "console") adminHost.querySelector("details:nth-of-type(4)")?.setAttribute("open", "");
+    panes.manage.append(
+      group(t("Server"), settingsSection(), consoleCard),
+      group(t("Files and saves"), filesSection(), backupsSection(), importSection()),
+      group(t("Sharing"), spectateSection()),
+      group(t("Ending the game"), archiveHost, dangerSection()));
+  } else if (runs) {  // a player who generated the game (and so may archive it) without running it
+    panes.manage.append(group(t("Ending the game"), archiveHost));
   }
+  const tabs = [["play", t("Play")], ["players", t("Players")], runs ? ["manage", t("Manage")] : null].filter(Boolean);
+  const tabBar = h("div", { class: "tabs page-tabs", role: "tablist" });
+  function showTab(next) {
+    clear(tabBar).append(tabs.map(([key, label]) => h("button", { class: "tab", type: "button", role: "tab",
+      "aria-selected": String(key === next), "aria-current": key === next ? "page" : undefined, onclick: () => showTab(key) }, label)));
+    for (const [key, pane] of Object.entries(panes)) if (pane) pane.hidden = key !== next;
+    // in the address, so a reload or a link opens the same part (without a step in the browser's history)
+    const [path] = location.hash.split("?");
+    history.replaceState(null, "", next === "play" ? path : `${path}?tab=${next}`);
+  }
+  const asked = query.get("tab");
+  if (asked === "console" && consoleCard) consoleCard.open = true;
+  root.append(headerHost, tabBar, ...Object.values(panes).filter(Boolean));
+  drawLive();
+  showTab(asked === "console" ? "manage" : panes[asked] ? asked : "play");
   every(4000, refresh, cleanup);
   if (wakes()) wake().catch((err) => toast(err.message, "error"));
 }

@@ -8,7 +8,7 @@ from urllib.parse import unquote
 
 import pytest
 
-from archipelago_manager.sources import SourceError, _stem, parse_repo
+from archipelago_manager.archipelago.sources import SourceError, _stem, parse_repo
 from conftest import Server
 from helpers import FakeWebhook, build_apworld
 

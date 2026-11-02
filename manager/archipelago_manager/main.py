@@ -16,16 +16,20 @@ from fastapi.staticfiles import StaticFiles
 from starlette.datastructures import Headers
 from starlette.staticfiles import NotModifiedResponse
 
-from . import __version__, apbridge, audit, db, notify, reminders, schedule, signups, sources, updates, versions
-from .config import CONFIG
-from .generation import GENERATION
-from .rooms import ROOMS
-from .textclient import TEXT_CLIENTS
+from . import __version__, notify
+from .archipelago import apbridge, sources, updates, versions
+from .core import audit, db
+from .games import reminders, schedule
+from .generation import signups
+from .core.config import CONFIG
+from .generation.jobs import GENERATION
+from .games.rooms import ROOMS
+from .games.textclient import TEXT_CLIENTS
 from .routes import admin, apworlds, auth, configs, games, jobs, roms
 from .routes import presets as preset_routes, tokens, versions as version_routes
 from .routes import signups as signup_routes
 from .routes import sources as source_routes
-from .security import CSRF_HEADER, CSRF_VALUE, SAFE_METHODS, bearer_token, token_for_request, user_for_request
+from .core.security import CSRF_HEADER, CSRF_VALUE, SAFE_METHODS, bearer_token, token_for_request, user_for_request
 
 log = logging.getLogger("archipelago_manager")
 

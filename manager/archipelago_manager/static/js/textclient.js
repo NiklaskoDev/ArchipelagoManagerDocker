@@ -37,7 +37,8 @@ function partNode(p) {
 
 const timeOf = (ts) => new Date(ts * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
-export function textClientSection({ gameId, slots, cleanup, isCurrent }) {
+// `bare`: without a card and heading of its own, for a page that puts it into a card with something else
+export function textClientSection({ gameId, slots, cleanup, isCurrent, bare = false }) {
   let current = slots[0].slot, after = 0, timer = null, busy = false, open = false, names = null, mode = "";
   const messages = [];
   const history = [];
@@ -197,6 +198,7 @@ export function textClientSection({ gameId, slots, cleanup, isCurrent }) {
 
   if (remembered(storageKey())) start();
   else stop({ forget: false });
+  if (bare) return h("div", { class: "stack" }, h("div", { class: "row spread" }, picker || h("span"), status), body);
   return h("div", { class: "section" }, h("div", { class: "card stack" },
     h("div", { class: "card-head" }, h("h2", {}, t("Text client")), h("div", { class: "row" }, picker, status)), body));
 }

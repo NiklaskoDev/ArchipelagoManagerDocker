@@ -18,9 +18,11 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 
-from .. import apbridge, audit, db, notify, settings as app_settings
-from ..config import CONFIG
-from ..security import admin_user, current_user, is_admin
+from ..archipelago import apbridge
+from ..core import audit, db, settings as app_settings
+from .. import notify
+from ..core.config import CONFIG
+from ..core.security import admin_user, current_user, is_admin
 
 router = APIRouter(prefix="/api")
 log = logging.getLogger(__name__)

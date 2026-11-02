@@ -9,8 +9,12 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import AliasChoices, BaseModel, Field
 
-from .. import apbridge, audit, db, ics, mystery, notify, signups, yamlinfo
-from ..security import current_user, is_admin, manages, organizer_user
+from ..archipelago import apbridge
+from ..core import audit, db, ics
+from ..configs import mystery, yamlinfo
+from .. import notify
+from ..generation import signups
+from ..core.security import current_user, is_admin, manages, organizer_user
 
 router = APIRouter(prefix="/api")
 

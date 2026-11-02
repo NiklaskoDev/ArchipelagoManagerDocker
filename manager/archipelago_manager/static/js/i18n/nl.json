@@ -1504,7 +1504,15 @@
   "Your submissions": "Je inzendingen",
   "You have not submitted a game yet": "Je hebt nog geen spel ingezonden",
   "Custom APWorld: download it to play it with your own Archipelago": "Eigen APWorld: download hem om hem met je eigen Archipelago te spelen",
-  "Games and GitHub repositories you submit are reviewed by an administrator before they can be used. To play a custom game, download its APWorld from the list above.": "Spellen en GitHub-repositories die je inzendt, worden door een beheerder gecontroleerd voordat ze gebruikt kunnen worden. Om een eigen spel te spelen, download je de APWorld ervan uit de lijst hierboven."
+  "Games and GitHub repositories you submit are reviewed by an administrator before they can be used. To play a custom game, download its APWorld from the list above.": "Spellen en GitHub-repositories die je inzendt, worden door een beheerder gecontroleerd voordat ze gebruikt kunnen worden. Om een eigen spel te spelen, download je de APWorld ervan uit de lijst hierboven.",
+  "Play": "Spelen",
+  "Manage": "Beheren",
+  "Chat and activity": "Chat en activiteit",
+  "Show": "Tonen",
+  "Files and saves": "Bestanden en opslag",
+  "Sharing": "Delen",
+  "Ending the game": "Het spel beëindigen",
+  "Find your slot among the players and press “{button}” to get your files.": "Zoek je slot bij de spelers en druk op \"{button}\" om je bestanden te krijgen."
  },
  "server": {
   " (line {0})": " (regel {0})",
