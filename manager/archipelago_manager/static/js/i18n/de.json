@@ -1914,7 +1914,8 @@
   "Archipelago {0} is not being installed": "Archipelago {0} wird gerade nicht installiert",
   "The installation was stopped": "Die Installation wurde abgebrochen",
   "This .apworld has no archipelago.json manifest, and which game it is for cannot be read from its code. Ask its author for a version with a manifest.": "Diese .apworld hat kein Manifest archipelago.json, und für welches Spiel sie ist, lässt sich nicht aus ihrem Code lesen. Bitte ihren Autor um eine Version mit Manifest.",
-  "This world has no archipelago.json manifest, which Archipelago 0.7.0 and newer need, but this server runs {0}": "Diese Welt hat kein Manifest archipelago.json, das Archipelago 0.7.0 und neuer brauchen, auf diesem Server läuft aber {0}"
+  "This world has no archipelago.json manifest, which Archipelago 0.7.0 and newer need, but this server runs {0}": "Diese Welt hat kein Manifest archipelago.json, das Archipelago 0.7.0 und neuer brauchen, auf diesem Server läuft aber {0}",
+  "The manifest gives {0} as {1}, but Archipelago only reads three numbers such as 1.0.0; with this file it would load no custom game at all": "Das Manifest gibt {0} als {1} an, Archipelago liest aber nur drei Zahlen wie 1.0.0; mit dieser Datei würde es gar kein eigenes Spiel laden"
  },
  "server_extra": [
   " (line {0})",
@@ -1990,6 +1991,7 @@
   "Document #{0}: the player name contains characters that change the direction of the text, so it shows differently from how it is spelled",
   "Two players in this file are named '{0}'. Player names must be unique.",
   "This .apworld has no archipelago.json manifest, and which game it is for cannot be read from its code. Ask its author for a version with a manifest.",
-  "This world has no archipelago.json manifest, which Archipelago 0.7.0 and newer need, but this server runs {0}"
+  "This world has no archipelago.json manifest, which Archipelago 0.7.0 and newer need, but this server runs {0}",
+  "The manifest gives {0} as {1}, but Archipelago only reads three numbers such as 1.0.0; with this file it would load no custom game at all"
  ]
 }

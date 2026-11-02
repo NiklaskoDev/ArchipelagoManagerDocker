@@ -10,6 +10,9 @@ export default async function render({ root, isCurrent }) {
   const sourcesHost = h("div");
   const allHost = h("div");
   let worlds = null;
+  // repositories whose install or update still runs: the table is drawn again when another one ends, and must not
+  // offer these a second time (the server would only wait for the first)
+  const installing = new Set();
 
   async function load() {
     const [apworlds, missing, w, sources] = await Promise.all([get("/api/apworlds"), get("/api/missing-games"), get("/api/worlds"),
@@ -32,10 +35,18 @@ export default async function render({ root, isCurrent }) {
     clear(sourcesHost);
     if (!list.length) return;
     const run = (verb, s, done) => action(async () => {
-      const r = await post(`/api/apworld-sources/${s.id}/${verb}`);
+      const installs = verb !== "check";
+      if (installs) installing.add(s.id);
+      let r;
+      try {
+        r = await post(`/api/apworld-sources/${s.id}/${verb}`);
+      } finally {
+        if (installs) installing.delete(s.id);
+        await load().catch(() => {});  // also when it failed: a table drawn meanwhile shows it still installing
+      }
       toast(done(r), "success");
-      await load();
     });
+    const busy = () => h("button", { class: "btn sm", type: "button", disabled: true }, h("span", { class: "spinner" }), t("Installing…"));
     sourcesHost.append(h("div", { class: "section-head" }, h("h2", {}, admin ? t("From GitHub") : t("Your repositories on GitHub"))),
       h("div", { class: "card flush table-wrap" }, h("table", { class: "table" },
         h("thead", {}, h("tr", {}, [t("Repository"), t("Game"), t("Installed"), t("Status"), t("Added by"), ""].map((text) => h("th", {}, text)))),
@@ -50,9 +61,10 @@ export default async function render({ root, isCurrent }) {
           h("td", {}, sourceStatus(s), s.checked_at ? h("div", { class: "muted small" }, t("checked {ago}", { ago: fmtAgo(s.checked_at) })) : null),
           h("td", {}, s.adder || "—", h("div", { class: "muted small" }, fmtAgo(s.added_at))),
           h("td", { class: "actions" }, h("div", { class: "row", style: { justifyContent: "flex-end" } },
-            admin && s.status === "pending" ? h("button", { class: "btn sm primary", type: "button",
+            admin && installing.has(s.id) ? busy() : null,
+            admin && s.status === "pending" && !installing.has(s.id) ? h("button", { class: "btn sm primary", type: "button",
               onclick: run("approve", s, (r) => t("{game} installed from {repo}", { game: r.game, repo: r.repo })) }, icon("check", 14), t("Approve")) : null,
-            admin && s.update_available ? h("button", { class: "btn sm primary", type: "button",
+            admin && s.update_available && !installing.has(s.id) ? h("button", { class: "btn sm primary", type: "button",
               onclick: run("update", s, (r) => t("{game} updated to {version}", { game: r.game, version: r.installed_tag })) }, icon("download", 14), t("Update")) : null,
             admin && s.status === "approved" ? h("button", { class: "btn sm ghost icon-only", type: "button", title: t("Check for a new release"),
               "aria-label": t("Check for a new release"), onclick: run("check", s, (r) => r.update_available ? t("{version} is available", { version: r.latest_tag }) : t("No new release")) }, icon("restart", 14)) : null,

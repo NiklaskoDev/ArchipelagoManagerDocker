@@ -467,7 +467,10 @@ def test_custom_worlds_go_into_the_versions_they_work_with():
     assert not apbridge.works_with({"minimum_ap_version": "0.6.0"}, (0, 5, 1))
     assert not apbridge.works_with({"maximum_ap_version": "0.5.1"}, (0, 6, 2))
     assert apbridge.works_with({"minimum_ap_version": "0.5.0", "maximum_ap_version": "0.6.9"}, (0, 6, 2))
-    assert apbridge.works_with({"minimum_ap_version": "nonsense"}, (0, 6, 2))
+    # a version Archipelago cannot read (it wants three numbers) keeps a world out of every version
+    assert not apbridge.works_with({"minimum_ap_version": "nonsense"}, (0, 6, 2))
+    assert not apbridge.works_with({"game": "X", "world_version": "1.0"}, (0, 6, 8))
+    assert apbridge.unreadable_version({"world_version": "1.0.0", "maximum_ap_version": "0.6"}) == "maximum_ap_version"
 
 
 
@@ -480,7 +483,11 @@ def test_a_world_without_a_manifest_is_kept_out_of_archipelago_0_7(tmp_path, mon
     (library / "1.apworld").write_bytes(b"no manifest")
     (library / "2.apworld").write_bytes(b"with manifest")
     (folder / "adofai.apworld").write_bytes(b"no manifest")  # copied there while the image had 0.6.8
-    rows = [{"id": 1, "module": "adofai", "manifest": "{}"}, {"id": 2, "module": "modern", "manifest": '{"game": "M"}'}]
+    rows = [{"id": 1, "module": "adofai", "manifest": "{}"}, {"id": 2, "module": "modern", "manifest": '{"game": "M"}'},
+            # installed before such files were refused: a version Archipelago cannot read stops it loading any world
+            {"id": 3, "module": "twoparts", "manifest": '{"game": "T", "world_version": "1.0"}'}]
+    (library / "3.apworld").write_bytes(b"unreadable version")
+    (folder / "twoparts.apworld").write_bytes(b"unreadable version")
     monkeypatch.setattr(apbridge.db, "query", lambda sql, params=(): rows if "FROM apworlds" in sql else [])
     monkeypatch.setattr(apbridge, "apworld_library_path", lambda apworld_id: library / f"{apworld_id}.apworld")
     monkeypatch.setattr(apbridge.STATE, "info", None)
@@ -595,12 +602,12 @@ def test_the_data_folder_is_counted_once_however_many_ask_and_kept_a_while(monke
     from archipelago_manager.routes import admin
     walks = []
 
-    def slow_walk(path):
-        walks.append(path)
+    def slow_walk():
+        walks.append(1)
         time.sleep(0.2)
         return 1234
 
-    monkeypatch.setattr(admin, "_dir_size", slow_walk)
+    monkeypatch.setattr(admin, "_data_folder_size", slow_walk)
     monkeypatch.setattr(admin, "_data_size", {})
     monkeypatch.setattr(admin, "_counting", None)
 
@@ -612,6 +619,32 @@ def test_the_data_folder_is_counted_once_however_many_ask_and_kept_a_while(monke
     admin._data_size["at"] -= admin.DATA_SIZE_MAX_AGE
     assert asyncio.run(ask(1)) == [1234] and len(walks) == 2  # later: counted again
 
+
+
+def test_installed_versions_are_added_up_again_only_where_they_changed(tmp_path, monkeypatch):
+    from archipelago_manager.routes import admin
+    monkeypatch.setattr(admin, "_known_folders", {})
+    venv, game = tmp_path / "ap-versions" / "0.6.7" / "venv", tmp_path / "games" / "1"
+    venv.mkdir(parents=True)
+    game.mkdir(parents=True)
+    (venv / "lib.py").write_bytes(b"x" * 100)
+    (game / "save.apsave").write_bytes(b"s" * 10)
+
+    def count():
+        return admin._dir_size(tmp_path, remember_under=tmp_path / "ap-versions")
+
+    assert count() == 110
+    (game / "save.apsave").write_bytes(b"s" * 50)  # a save is written in place: counted again every time
+    assert count() == 150
+    (venv / "lib.py").write_bytes(b"x" * 300)  # an installed version's own files are not looked at again ...
+    assert count() == 150
+    time.sleep(0.05)  # (folder times tick every few milliseconds)
+    (venv / "server.log").write_bytes(b"l" * 7)  # ... until its folder changes, such as a new log
+    assert count() == 50 + 300 + 7
+    for path in (venv / "lib.py", venv / "server.log"):  # a removed version is gone from the count
+        path.unlink()
+    venv.rmdir()
+    assert count() == 50 and not any("0.6.7" in folder and "venv" in folder for folder in admin._known_folders)
 
 def test_slow_requests_are_logged_by_their_route(caplog):
     from starlette.requests import Request
@@ -662,3 +695,22 @@ def test_missing_files_and_games_follow_what_archipelago_reported(tmp_path, monk
     # a new list from Archipelago counts at once
     monkeypatch.setattr(apbridge.STATE, "info", {"games": info["games"][1:]})
     assert apbridge.missing_games(asked) == ["Unknown", "Zed"]
+
+
+def test_templates_made_while_the_games_changed_are_made_again(monkeypatch):
+    """A custom game installed while the templates are made (at startup, say): the first ones lack it, so they are
+    not kept, and the templates are made again for the games there are now."""
+    old, new = {"games": [], "version": "old"}, {"games": [], "version": "new"}
+    made = []
+
+    async def make(info):
+        made.append(info["version"])
+        if len(made) == 1:
+            apbridge.STATE.info = new  # installed meanwhile
+        return {"templates": {}, "forms": {}, "for": info["version"]}, Path("/nowhere")
+
+    monkeypatch.setattr(apbridge, "_make_templates", make)
+    for name, value in (("info", old), ("templates", None), ("templates_for", None), ("templates_lock", None)):
+        monkeypatch.setattr(apbridge.STATE, name, value)
+    assert asyncio.run(apbridge.ensure_templates())["for"] == "new" and made == ["old", "new"]
+    assert asyncio.run(apbridge.ensure_templates())["for"] == "new" and made == ["old", "new"]  # kept from now on

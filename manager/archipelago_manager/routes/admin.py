@@ -16,14 +16,14 @@ from starlette.background import BackgroundTask
 from pydantic import BaseModel, Field
 
 from .. import __version__, notify
-from ..archipelago import apbridge, updates
+from ..archipelago import apbridge, updates, versions
 from ..core import audit, db, settings as app_settings
 from ..games import backups, tls
 from ..accounts import discord_auth
 from ..core.config import CONFIG
 from ..games.rooms import ROOMS
 from ..core.security import admin_user
-from .apworlds import refresh_load_status
+from .apworlds import CHANGES, refresh_load_status
 
 router = APIRouter(prefix="/api")
 
@@ -97,15 +97,51 @@ async def test_notification(body: NotificationTest, _admin: sqlite3.Row = Depend
     return {"ok": True, "notify_status": notify.status()}
 
 
-def _dir_size(path: Path) -> int:
-    total = 0
-    for root, _dirs, files in os.walk(path):
-        for name in files:
-            try:
-                total += os.path.getsize(os.path.join(root, name))
-            except OSError:
-                pass
+# A folder's modification time changes when a file or folder is added to it, removed or renamed. The installed
+# Archipelago versions (ap-versions/: a checkout and a Python environment each, thousands of files) stay as they were
+# after installing, apart from new files such as logs. So for a folder there that did not change, what it holds is taken
+# from the last count: one look at the folder instead of listing it and looking at each file. Everywhere else files
+# change in place (a game's save), so those are always counted.
+# folder -> (its modification time, the size of the files right in it, the folders right in it)
+_known_folders: dict[str, tuple[int, int, list[str]]] = {}
+
+
+def _dir_size(path: Path, *, remember_under: Path | None = None) -> int:
+    global _known_folders
+    total, seen, stack = 0, {}, [str(path)]
+    remember = str(remember_under) + os.sep if remember_under else None
+    while stack:
+        folder = stack.pop()
+        cache = remember is not None and (folder + os.sep).startswith(remember)
+        try:
+            mtime = os.stat(folder).st_mtime_ns if cache else None
+            known = _known_folders.get(folder) if cache else None
+            if known and known[0] == mtime:
+                files, folders = known[1], known[2]
+            else:
+                files, folders = 0, []
+                with os.scandir(folder) as entries:
+                    for entry in entries:
+                        if entry.is_dir(follow_symlinks=False):
+                            folders.append(entry.path)
+                        else:
+                            try:
+                                files += entry.stat(follow_symlinks=False).st_size
+                            except OSError:
+                                pass
+        except OSError:  # gone while it was counted
+            continue
+        if cache:
+            seen[folder] = (mtime, files, folders)
+        stack.extend(folders)
+        total += files
+    if remember is not None:
+        _known_folders = seen  # versions that were removed are forgotten
     return total
+
+
+def _data_folder_size() -> int:
+    return _dir_size(CONFIG.data_dir, remember_under=versions.root())
 
 
 # Adding up the data folder means looking at every file in it, thousands for each installed Archipelago version. On a
@@ -122,7 +158,7 @@ async def data_size() -> int:
     if _data_size and time.time() - _data_size["at"] < DATA_SIZE_MAX_AGE:
         return int(_data_size["bytes"])
     if _counting is None or _counting.done():
-        _counting = asyncio.ensure_future(asyncio.to_thread(_dir_size, CONFIG.data_dir))
+        _counting = asyncio.ensure_future(asyncio.to_thread(_data_folder_size))
     size = await asyncio.shield(_counting)  # a page closed while it counts does not stop the count for the others
     _data_size.update(bytes=size, at=time.time())
     return size
@@ -131,7 +167,9 @@ async def data_size() -> int:
 @router.get("/system")
 async def system_info(_admin: sqlite3.Row = Depends(admin_user)) -> dict:
     usage = shutil.disk_usage(CONFIG.data_dir)
-    running = sum(1 for r in db.query("SELECT id FROM games") if ROOMS.is_active(r["id"]))
+    # games that are over are in the archive, not among those that could be running
+    playable = [r["id"] for r in db.query("SELECT id FROM games WHERE finished_at IS NULL")]
+    running = sum(1 for game_id in playable if ROOMS.is_active(game_id))
     where = apbridge.STATE.where or {}
     return {
         "manager_version": __version__,
@@ -148,7 +186,7 @@ async def system_info(_admin: sqlite3.Row = Depends(admin_user)) -> dict:
         "data_dir": str(CONFIG.data_dir),
         "disk": {"total": usage.total, "free": usage.free},
         "port_range": [CONFIG.port_start, CONFIG.port_end],
-        "games": db.query_one("SELECT COUNT(*) AS n FROM games")["n"],
+        "games": len(playable),
         "running_games": running,
         "users": db.query_one("SELECT COUNT(*) AS n FROM users")["n"],
     }
@@ -169,8 +207,9 @@ async def check_updates(_admin: sqlite3.Row = Depends(admin_user)) -> dict:
 
 @router.post("/system/reload-worlds")
 async def reload_worlds(_admin: sqlite3.Row = Depends(admin_user)) -> dict:
-    await apbridge.sync_apworlds()
-    await refresh_load_status()
+    async with CHANGES:
+        await apbridge.sync_apworlds()
+        await refresh_load_status()
     if apbridge.STATE.info is None:
         raise HTTPException(503, apbridge.STATE.error or "Archipelago is unavailable")
     return {"world_count": len(apbridge.installed_games(include_hidden=True)),

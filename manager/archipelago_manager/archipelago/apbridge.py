@@ -11,6 +11,8 @@ import hashlib
 import json
 import logging
 import os
+import re
+import secrets
 import shutil
 from pathlib import Path
 from typing import Any
@@ -119,6 +121,7 @@ class _State:
     quarantined: list[str] = []  # files moved out of the worlds folder because they would break Archipelago
     templates: dict[str, str] | None = None
     templates_dir: Path | None = None
+    templates_for: dict[str, Any] | None = None  # the list of games (info) the templates were made for
 
 
 STATE = _State()
@@ -296,15 +299,17 @@ async def sync_apworlds() -> None:
     for row in db.query("SELECT id, module, manifest FROM apworlds WHERE status = 'installed'"):
         source = apworld_library_path(row["id"])
         target = folder / f"{row['module']}.apworld"
-        if not (db.jloads(row["manifest"], {}) or {}) and not works_with({}, version_tuple()):
-            target.unlink(missing_ok=True)  # no manifest, and the image's version is 0.7 or newer: it would break them all
+        manifest = db.jloads(row["manifest"], {}) or {}
+        # no manifest, and the image's version is 0.7 or newer; or versions it cannot read: it would break them all
+        if (not manifest and not works_with({}, version_tuple())) or unreadable_version(manifest):
+            target.unlink(missing_ok=True)
             continue
         if not source.is_file():
             log.warning("APWorld %s is missing from the library", source)
             continue
         if not target.is_file() or target.stat().st_size != source.stat().st_size \
                 or _sha256(target) != _sha256(source):
-            shutil.copyfile(source, target)
+            place_file(source, target)
     for row in db.query("SELECT version FROM ap_versions WHERE status = 'installed'"):
         if (ap_dir(row["version"]) / "Utils.py").is_file():
             sync_version_apworlds(row["version"])
@@ -320,6 +325,20 @@ def parse_version(text: Any) -> tuple[int, ...] | None:
         return None
 
 
+# The manifest's versions as Archipelago reads them (Utils.tuplize_version): exactly three whole numbers. One it cannot
+# read stops it from loading any custom world, not just that one.
+VERSION_FIELDS = ("world_version", "minimum_ap_version", "maximum_ap_version")
+_READABLE_VERSION = re.compile(r"\d+\.\d+\.\d+")
+
+
+def unreadable_version(manifest: dict) -> str | None:
+    """The first of a manifest's versions that Archipelago could not read, if there is one."""
+    for key in VERSION_FIELDS:
+        if key in manifest and not (isinstance(manifest[key], str) and _READABLE_VERSION.fullmatch(manifest[key])):
+            return key
+    return None
+
+
 NEEDS_MANIFEST = (0, 7, 0)  # from this version on, one .apworld without a manifest stops Archipelago loading any world
 
 
@@ -330,6 +349,8 @@ def works_with(manifest: dict, version: tuple[int, ...] | None) -> bool:
         return True
     if not manifest:
         return version < NEEDS_MANIFEST
+    if unreadable_version(manifest):
+        return False
     low = parse_version(manifest.get("minimum_ap_version") or "")
     high = parse_version(manifest.get("maximum_ap_version") or "")
     return not (low and version < low) and not (high and version > high)
@@ -353,7 +374,7 @@ def sync_version_apworlds(version: str) -> None:
     for name, source in wanted.items():
         target = folder / name
         if not target.is_file() or target.stat().st_size != source.stat().st_size or _sha256(target) != _sha256(source):
-            shutil.copyfile(source, target)
+            place_file(source, target)
             changed = True
     if changed:
         EXTRA.pop(version, None)
@@ -368,6 +389,15 @@ def link_roms(version: str) -> None:
         if rom["exists"] and source.is_file() and not target.exists():
             with contextlib.suppress(OSError):
                 target.symlink_to(source)
+
+
+def place_file(source: Path, target: Path) -> None:
+    """Copies a world into a folder Archipelago loads worlds from, whole or not at all: a server, a generation or the
+    helper that reads the folder meanwhile finds the old file or the new one, never half of it (a file that is not a
+    whole zip makes Archipelago load no custom world at all). The copy's name does not end in .apworld meanwhile."""
+    part = target.with_name(f".{target.name}.{secrets.token_hex(4)}.part")  # two copies at once each have their own
+    shutil.copyfile(source, part)
+    os.replace(part, target)
 
 
 def _sha256(path: Path) -> str:
@@ -403,40 +433,49 @@ async def ensure_templates() -> dict[str, dict[str, str]]:
     """Returns {"templates": {game: template file}, "forms": {game: options form file}}, generating both when the set
     of worlds changed."""
     async with _templates_lock():
-        if STATE.templates is not None:
-            return STATE.templates
-        info = STATE.info or await refresh_info()
-        if not info:
-            raise APBridgeError(STATE.error or "Archipelago is unavailable")
-        # A custom world installed again gets a new library entry, so its options count as new even when its version
-        # and its numbers of items and locations stay the same.
-        custom = [(r["id"], r["module"]) for r in db.query("SELECT id, module FROM apworlds WHERE status = 'installed' "
-                                                            "ORDER BY id")]
-        signature = hashlib.sha256(json.dumps(
-            [(g["name"], g["version"], g["items"], g["locations"]) for g in info["games"]]
-            + [info["version"], TEMPLATES_FORMAT, custom]
-        ).encode()).hexdigest()[:16]
-        target = CONFIG.templates_dir / signature
-        index = target / "index.json"
-        if not index.is_file():
-            tmp = CONFIG.templates_dir / f"{signature}.tmp"
-            shutil.rmtree(tmp, ignore_errors=True)
-            result = await run_helper("templates", str(tmp), timeout=300)
-            if result.get("templates_error"):
-                log.warning("Some yaml templates are missing: %s", result["templates_error"])
-            for game, error in result.get("form_errors", {}).items():
-                log.warning("No options form for %s: %s", game, error)
-            mapping = {"templates": {t["game"]: t["file"] for t in result["templates"] if t["game"]},
-                       "forms": result.get("forms", {})}
-            (tmp / "index.json").write_text(json.dumps(mapping))
-            shutil.rmtree(target, ignore_errors=True)
-            tmp.rename(target)
-            for old in CONFIG.templates_dir.iterdir():
-                if old.is_dir() and old.name != signature:
-                    shutil.rmtree(old, ignore_errors=True)
-        STATE.templates_dir = target
-        STATE.templates = json.loads(index.read_text())
-        return STATE.templates
+        while True:
+            if STATE.templates is not None and STATE.templates_for is STATE.info:
+                return STATE.templates
+            info = STATE.info or await refresh_info()
+            if not info:
+                raise APBridgeError(STATE.error or "Archipelago is unavailable")
+            mapping, target = await _make_templates(info)
+            # The games may have changed while these were made (a custom game installed meanwhile): then make them for
+            # the games there are now, instead of keeping ones that lack the new game
+            if STATE.info is info:
+                STATE.templates, STATE.templates_dir, STATE.templates_for = mapping, target, info
+                return mapping
+
+
+async def _make_templates(info: dict[str, Any]) -> tuple[dict[str, dict[str, str]], Path]:
+    """The templates and forms for these games: the ones made before for the same games, or new ones."""
+    # A custom world installed again gets a new library entry, so its options count as new even when its version
+    # and its numbers of items and locations stay the same.
+    custom = [(r["id"], r["module"]) for r in db.query("SELECT id, module FROM apworlds WHERE status = 'installed' "
+                                                        "ORDER BY id")]
+    signature = hashlib.sha256(json.dumps(
+        [(g["name"], g["version"], g["items"], g["locations"]) for g in info["games"]]
+        + [info["version"], TEMPLATES_FORMAT, custom]
+    ).encode()).hexdigest()[:16]
+    target = CONFIG.templates_dir / signature
+    index = target / "index.json"
+    if not index.is_file():
+        tmp = CONFIG.templates_dir / f"{signature}.tmp"
+        shutil.rmtree(tmp, ignore_errors=True)
+        result = await run_helper("templates", str(tmp), timeout=300)
+        if result.get("templates_error"):
+            log.warning("Some yaml templates are missing: %s", result["templates_error"])
+        for game, error in result.get("form_errors", {}).items():
+            log.warning("No options form for %s: %s", game, error)
+        mapping = {"templates": {t["game"]: t["file"] for t in result["templates"] if t["game"]},
+                   "forms": result.get("forms", {})}
+        (tmp / "index.json").write_text(json.dumps(mapping))
+        shutil.rmtree(target, ignore_errors=True)
+        tmp.rename(target)
+        for old in CONFIG.templates_dir.iterdir():
+            if old.is_dir() and old.name != signature:
+                shutil.rmtree(old, ignore_errors=True)
+    return json.loads(index.read_text()), target
 
 
 async def template_text(game: str) -> str | None:

@@ -143,12 +143,22 @@ def _download(url: str, target: Path) -> None:
 # ----------------------------------------------------------------------------------------------------------------------
 # installing and watching for releases
 # ----------------------------------------------------------------------------------------------------------------------
-async def install(source_id: int, *, expected: str | None = None) -> dict:
-    """Downloads the newest release of an approved source and installs it. Returns the library entry.
+# One install at a time for each source: the second press on Update while the first still runs waits for it
+_installing: dict[int, asyncio.Lock] = {}
+
+
+async def install(source_id: int, *, expected: str | None = None) -> dict | None:
+    """Downloads the newest release of an approved source and installs it. Returns the library entry, or None when that
+    release is installed already (by the install this one waited for).
 
     With `expected` (a fingerprint), only that exact file is installed: what an administrator looked at before
     approving, not something the repository put in its place since.
     """
+    async with _installing.setdefault(source_id, asyncio.Lock()):
+        return await _install(source_id, expected)
+
+
+async def _install(source_id: int, expected: str | None) -> dict | None:
     source = get(source_id)
     if not source or source["status"] != "approved":
         raise SourceError("Only approved sources are installed", 409)
@@ -160,6 +170,9 @@ async def install(source_id: int, *, expected: str | None = None) -> dict:
                                     source_id))
         raise SourceError(f"The release changed since it was shown here; the newest is now {release['tag']}. "
                           "Look at it again before installing it.", 409)
+    if (source["installed_tag"] == release["tag"] and source["asset"] == asset["name"] and source["apworld_id"]
+            and db.query_one("SELECT 1 FROM apworlds WHERE id = ? AND status = 'installed'", (source["apworld_id"],))):
+        return None
     tmp = CONFIG.tmp_dir / f"source-{source_id}-{time.time_ns()}.apworld"
     try:
         await asyncio.to_thread(_download, asset["url"], tmp)

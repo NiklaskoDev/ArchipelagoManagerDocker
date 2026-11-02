@@ -45,8 +45,9 @@ async def init_archipelago() -> None:
     """Prepares the Archipelago side in the background so the web UI is available immediately."""
     try:
         await apbridge.get_where()
-        await apbridge.sync_apworlds()
-        await apworlds.adopt_orphans()
+        async with apworlds.CHANGES:  # an install that comes in while the server starts waits for this
+            await apbridge.sync_apworlds()
+            await apworlds.adopt_orphans()
     except apbridge.APBridgeError as e:
         apbridge.STATE.error = str(e)
         log.error("Archipelago is not usable: %s", e)
@@ -234,13 +235,15 @@ def _secure(request: Request, response: Response) -> None:
 
 
 SLOW_REQUEST = 5.0  # seconds
+# Requests no page waits for: the settings page shows itself at once and fills in the data folder's size when it is known
+NOT_WAITED_FOR = {"/api/system/data-size"}
 
 
 def note_if_slow(request: Request, took: float) -> None:
     """Writes API requests that kept a page waiting to the log, by route (some paths hold a token): a page stays empty
     until its requests are answered, and the log then says which one held it up."""
-    if took >= SLOW_REQUEST and request.url.path.startswith("/api/"):
-        route = getattr(request.scope.get("route"), "path", "(no route)")
+    route = getattr(request.scope.get("route"), "path", "(no route)")
+    if took >= SLOW_REQUEST and request.url.path.startswith("/api/") and route not in NOT_WAITED_FOR:
         log.warning("Slow request: %s %s took %.1f s", request.method, route, took)
 
 
