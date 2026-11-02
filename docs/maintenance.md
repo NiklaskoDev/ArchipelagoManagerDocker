@@ -63,7 +63,7 @@ approve pull requests*. You can also run the workflow by hand (*Actions → Arch
 - **A custom world shows "Not loaded".** The tooltip and the System page show the reason, usually an incompatible
   Archipelago version. A file that is not a valid zip is moved to `quarantine/` in the data folder, because
   Archipelago refuses to start with such a file in its worlds folder.
-- **A page shows "Loading…" for a long time.** The container's log names every request that took 5 seconds or more
+- **A page shows "Loading…" for a long time.** The container's log names every request a page waited 5 seconds or more for
   (`Slow request: GET /api/games took 42.0 s`), so you can see which one held the page up. On Unraid, a data folder on
   the array is slow to read when its disk has spun down, and `/mnt/user` is slower than a pool for the many small files
   the manager reads: keep appdata on a cache pool.
