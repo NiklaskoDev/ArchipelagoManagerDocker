@@ -167,7 +167,9 @@ async def data_size() -> int:
 @router.get("/system")
 async def system_info(_admin: sqlite3.Row = Depends(admin_user)) -> dict:
     usage = shutil.disk_usage(CONFIG.data_dir)
-    running = sum(1 for r in db.query("SELECT id FROM games") if ROOMS.is_active(r["id"]))
+    # games that are over are in the archive, not among those that could be running
+    playable = [r["id"] for r in db.query("SELECT id FROM games WHERE finished_at IS NULL")]
+    running = sum(1 for game_id in playable if ROOMS.is_active(game_id))
     where = apbridge.STATE.where or {}
     return {
         "manager_version": __version__,
@@ -184,7 +186,7 @@ async def system_info(_admin: sqlite3.Row = Depends(admin_user)) -> dict:
         "data_dir": str(CONFIG.data_dir),
         "disk": {"total": usage.total, "free": usage.free},
         "port_range": [CONFIG.port_start, CONFIG.port_end],
-        "games": db.query_one("SELECT COUNT(*) AS n FROM games")["n"],
+        "games": len(playable),
         "running_games": running,
         "users": db.query_one("SELECT COUNT(*) AS n FROM users")["n"],
     }

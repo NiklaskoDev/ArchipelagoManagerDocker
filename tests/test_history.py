@@ -98,15 +98,21 @@ def test_progress_is_recorded_and_finished_games_go_to_the_archive(admin, make_u
 
 def test_moving_a_game_to_the_archive_stops_it_and_an_aborted_one_comes_back(admin, make_user):
     _name, ann = make_user("ann")
+    before = admin.get("/api/system").json()
     gid, _job = make_game(admin, names=("Arch", "Ive"), owners={"Arch": ann})
     admin.post(f"/api/games/{gid}/start")
     wait_state(admin, gid, "running")
+    system = admin.get("/api/system").json()  # the dashboard's "games running": running / not in the archive
+    assert (system["running_games"], system["games"]) == (before["running_games"] + 1, before["games"] + 1)
     r = admin.post(f"/api/games/{gid}/archive", json={"archived": True})
     assert r.status_code == 200 and r.json()["outcome"] == "aborted" and r.json()["state"] == "stopped"
     assert r.json()["desired_state"] == "stopped"  # and it stays so after a restart of the manager
     assert r.json()["return_blocked"] is None  # aborted, on a version this server has
+    system = admin.get("/api/system").json()  # a game in the archive counts neither way
+    assert (system["running_games"], system["games"]) == (before["running_games"], before["games"])
     r = admin.post(f"/api/games/{gid}/archive", json={"archived": False})
     assert r.status_code == 200 and r.json()["finished_at"] is None and r.json()["state"] == "stopped"
+    assert admin.get("/api/system").json()["games"] == before["games"] + 1
     admin.delete(f"/api/games/{gid}")
 
 
