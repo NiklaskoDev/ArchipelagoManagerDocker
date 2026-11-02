@@ -12,8 +12,8 @@ import time
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from .. import audit, db
-from ..security import current_user, is_admin, new_api_token
+from ..core import audit, db
+from ..core.security import current_user, is_admin, new_api_token
 
 router = APIRouter(prefix="/api")
 

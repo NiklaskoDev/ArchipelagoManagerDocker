@@ -15,10 +15,14 @@ from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
 from pydantic import BaseModel, Field
 
-from .. import __version__, apbridge, audit, backups, db, discord_auth, notify, settings as app_settings, tls, updates
-from ..config import CONFIG
-from ..rooms import ROOMS
-from ..security import admin_user
+from .. import __version__, notify
+from ..archipelago import apbridge, updates
+from ..core import audit, db, settings as app_settings
+from ..games import backups, tls
+from ..accounts import discord_auth
+from ..core.config import CONFIG
+from ..games.rooms import ROOMS
+from ..core.security import admin_user
 from .apworlds import refresh_load_status
 
 router = APIRouter(prefix="/api")

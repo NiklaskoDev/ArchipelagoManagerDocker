@@ -135,7 +135,7 @@ def fields(text: str) -> set[str]:
 
 @pytest.mark.parametrize("language", ["de", "fr", "nl"])
 def test_the_translated_texts_fit_the_code(language):
-    MESSAGES = importlib.import_module(f"archipelago_manager.notify_{language}").MESSAGES
+    MESSAGES = importlib.import_module(f"archipelago_manager.notify.{language}").MESSAGES
     wrong = [f"{key!r} -> {value!r}" for key, value in MESSAGES.items() if fields(key) != fields(value)]
     assert not wrong, "Other placeholders than the English text:\n" + "\n".join(wrong)
     used = tr_texts()

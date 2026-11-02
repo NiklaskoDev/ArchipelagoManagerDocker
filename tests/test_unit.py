@@ -9,14 +9,16 @@ from pathlib import Path
 
 import pytest
 
-from archipelago_manager import apbridge, configstore, ics, settings, yamlform, yamlinfo
-from archipelago_manager.config import CONFIG
-from archipelago_manager.generation import _player_file_errors, _summarize_failure
-from archipelago_manager.rooms import slot_rules
+from archipelago_manager.archipelago import apbridge
+from archipelago_manager.configs import configstore, yamlform, yamlinfo
+from archipelago_manager.core import ics, settings
+from archipelago_manager.core.config import CONFIG
+from archipelago_manager.generation.jobs import _player_file_errors, _summarize_failure
+from archipelago_manager.games.rooms import slot_rules
 from archipelago_manager.routes.apworlds import InvalidAPWorld, inspect_apworld
-from archipelago_manager.gamestore import classify
-from archipelago_manager.security import client_address, hash_password, verify_password, LoginThrottle
-from archipelago_manager.textclient import Session, concerns_me, render
+from archipelago_manager.games.gamestore import classify
+from archipelago_manager.core.security import client_address, hash_password, verify_password, LoginThrottle
+from archipelago_manager.games.textclient import Session, concerns_me, render
 
 
 class TestYamlInfo:
@@ -414,7 +416,7 @@ def test_race_times_read_like_a_stopwatch():
 
 
 def test_the_activity_feed_keeps_what_players_see(tmp_path, monkeypatch):
-    from archipelago_manager import activity
+    from archipelago_manager.games import activity
     parse = activity.parse
     assert parse("Notice (all): Old (Team #1) playing ChecksFinder has joined. Client(0.6.8), ['AP'].") == \
         {"kind": "join", "player": "Old", "game": "ChecksFinder"}
@@ -534,7 +536,8 @@ def test_calendar_files_keep_to_the_standard():
 
 def test_the_chosen_light_theme_has_the_light_colors_of_the_system():
     # style.css has them twice: for a system that asks for light, and for whoever chose light in the user menu
-    css = (Path(ics.__file__).parent / "static" / "style.css").read_text(encoding="utf-8")
+    import archipelago_manager
+    css = (Path(archipelago_manager.__file__).parent / "static" / "style.css").read_text(encoding="utf-8")
     system = re.search(r'@media \(prefers-color-scheme: light\) \{\s*:root:not\(\[data-theme="dark"\]\) \{(.*?)\}', css, re.S)
     chosen = re.search(r':root\[data-theme="light"\] \{(.*?)\}', css, re.S)
     colors = lambda block: re.findall(r"(--[\w-]+):\s*([^;]+);", block.group(1))  # noqa: E731

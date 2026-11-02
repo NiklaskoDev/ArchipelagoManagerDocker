@@ -7,8 +7,9 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
-from .. import audit, db, versions
-from ..security import admin_user, current_user, is_admin
+from ..core import audit, db
+from ..archipelago import versions
+from ..core.security import admin_user, current_user, is_admin
 
 router = APIRouter(prefix="/api")
 

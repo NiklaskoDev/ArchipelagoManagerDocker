@@ -16,13 +16,13 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
-from .. import __version__, audit, db, discord_auth, invites, limits, notify, settings as app_settings
-from ..config import CONFIG
-from ..security import (ROLES, SESSION_COOKIE, LoginThrottle, admin_user, check_password_policy, check_username,
-                        client_address, create_session, current_user, destroy_session, destroy_user_sessions,
-                        hash_password, https_in_use, is_organizer, login_throttle, normal_username, organizer_user,
-                        revoke_user_tokens, set_session_cookie, user_for_request, verify_password)
-from ..security import ip_throttle
+from .. import __version__, notify
+from ..core import audit, db, settings as app_settings
+from ..accounts import discord_auth, invites
+from ..generation import limits
+from ..core.config import CONFIG
+from ..core.security import ROLES, SESSION_COOKIE, LoginThrottle, admin_user, check_password_policy, check_username, client_address, create_session, current_user, destroy_session, destroy_user_sessions, hash_password, https_in_use, is_organizer, login_throttle, normal_username, organizer_user, revoke_user_tokens, set_session_cookie, user_for_request, verify_password
+from ..core.security import ip_throttle
 
 router = APIRouter(prefix="/api")
 log = logging.getLogger(__name__)

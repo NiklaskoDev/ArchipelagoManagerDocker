@@ -5,7 +5,7 @@ import zlib
 
 import pytest
 
-from archipelago_manager.backups import _read_complete
+from archipelago_manager.games.backups import _read_complete
 from helpers import APClient, make_game, save_now, wait_for, wait_state
 
 

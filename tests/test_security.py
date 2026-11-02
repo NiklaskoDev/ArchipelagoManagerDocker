@@ -5,8 +5,8 @@ import zipfile
 import httpx
 import pytest
 
-from archipelago_manager.generation import JobRequestError, clean_meta
-from archipelago_manager.rooms import mask_secrets
+from archipelago_manager.generation.jobs import JobRequestError, clean_meta
+from archipelago_manager.games.rooms import mask_secrets
 from archipelago_manager.routes.apworlds import InvalidAPWorld, inspect_apworld
 
 

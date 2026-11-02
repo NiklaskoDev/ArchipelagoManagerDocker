@@ -1,0 +1,538 @@
+"""SQLite access: a connection per thread for single statements, and one of its own for each transaction (see
+_shared() and connection() below)."""
+from __future__ import annotations
+
+import json
+import logging
+import sqlite3
+import threading
+import time
+from contextlib import contextmanager
+from typing import Any
+from collections.abc import Iterable, Iterator
+
+from .config import CONFIG
+
+log = logging.getLogger(__name__)
+
+SCHEMA_VERSION = 22
+
+# Added in schema version 3
+_SIGNUPS = """
+-- A sign-up round: players enter configs until the deadline, then one multiworld is generated from all of them.
+CREATE TABLE signups (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    name             TEXT NOT NULL,
+    description      TEXT,
+    created_by       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    created_at       REAL NOT NULL,
+    deadline         REAL,
+    status           TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'closed', 'generating', 'done')),
+    configs_per_user INTEGER NOT NULL DEFAULT 1,
+    allowed_games    TEXT NOT NULL DEFAULT '[]',
+    auto_generate    INTEGER NOT NULL DEFAULT 1,
+    options          TEXT NOT NULL DEFAULT '{}',
+    closed_at        REAL,
+    reminded         INTEGER NOT NULL DEFAULT 0,
+    job_id           INTEGER,
+    game_id          INTEGER,
+    error            TEXT
+);
+
+-- An entry is a copy of the player's config taken when they entered, so what gets generated is what they submitted.
+-- config_id remembers which library config it came from, to offer an update when that one changes.
+CREATE TABLE signup_entries (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    signup_id    INTEGER NOT NULL REFERENCES signups(id) ON DELETE CASCADE,
+    user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    config_id    INTEGER REFERENCES configs(id) ON DELETE SET NULL,
+    name         TEXT NOT NULL,
+    player_names TEXT NOT NULL DEFAULT '[]',
+    games        TEXT NOT NULL DEFAULT '[]',
+    sha256       TEXT NOT NULL,
+    created_at   REAL NOT NULL,
+    updated_at   REAL NOT NULL
+);
+CREATE INDEX signup_entries_signup ON signup_entries(signup_id);
+"""
+
+# Added in schema version 4
+_SOURCES = """
+-- GitHub repositories whose releases provide a custom game. 'pending' ones were proposed by a player and are not used
+-- until an administrator approves them.
+CREATE TABLE apworld_sources (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    repo          TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    asset         TEXT,
+    status        TEXT NOT NULL CHECK (status IN ('pending', 'approved')),
+    note          TEXT,
+    added_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    added_at      REAL NOT NULL,
+    approved_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    approved_at   REAL,
+    game          TEXT,
+    installed_tag TEXT,
+    apworld_id    INTEGER,
+    latest_tag    TEXT,
+    latest_url    TEXT,
+    checked_at    REAL,
+    announced_tag TEXT,
+    error         TEXT
+);
+"""
+
+# Added in schema version 7
+_PROGRESS = """
+-- How far each player got over time: a point whenever the number of checked locations of a slot changed.
+CREATE TABLE game_progress (
+    game_id INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+    slot    INTEGER NOT NULL,
+    at      REAL NOT NULL,
+    checked INTEGER NOT NULL
+);
+CREATE INDEX game_progress_game ON game_progress(game_id, slot, at);
+"""
+
+# Added in schema version 11
+_AUDIT = """
+-- Who changed what (audit.py). The names of who and what are kept as they were, so the log outlives them.
+CREATE TABLE audit_log (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    at          REAL NOT NULL,
+    user_id     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    username    TEXT NOT NULL,
+    action      TEXT NOT NULL,
+    target_kind TEXT,
+    target_id   INTEGER,
+    target_name TEXT,
+    details     TEXT
+);
+CREATE INDEX audit_log_user ON audit_log(user_id);
+"""
+
+# Added in schema version 13
+_VISITS = """
+-- When a player last looked at a game page, and where the summary of what happened while they were away starts
+-- (visits.py). Without a start there is nothing to sum up.
+CREATE TABLE game_visits (
+    game_id      INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+    user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    seen_at      REAL NOT NULL,
+    summary_from REAL,
+    PRIMARY KEY (game_id, user_id)
+);
+"""
+
+# Added in schema version 15
+_AP_VERSIONS = """
+-- Archipelago versions installed besides the one in the image (versions.py), each in its own folder of the data folder.
+-- A game runs on one of them when games.ap_version names it, on the image's otherwise.
+CREATE TABLE ap_versions (
+    version       TEXT PRIMARY KEY,
+    status        TEXT NOT NULL CHECK (status IN ('installing', 'installed', 'failed')),
+    created_at    REAL NOT NULL,
+    installed_at  REAL,
+    size          INTEGER,
+    error         TEXT
+);
+"""
+
+# Added in schema version 16
+_API_TOKENS = """
+-- Personal API tokens (security.py): a script or bot acts as the user who made the token, with read or full access.
+-- Only a hash of the token is kept; hint is its end, so its owner can tell their tokens apart.
+CREATE TABLE api_tokens (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name         TEXT NOT NULL,
+    token_hash   TEXT NOT NULL UNIQUE,
+    hint         TEXT NOT NULL,
+    access       TEXT NOT NULL CHECK (access IN ('read', 'write')),
+    created_at   REAL NOT NULL,
+    expires_at   REAL,
+    last_used_at REAL,
+    last_used_ip TEXT
+);
+CREATE INDEX api_tokens_user ON api_tokens(user_id);
+"""
+
+# Added in schema version 17
+_USERS = """
+-- organizers (security.is_organizer) run sign-up rounds and the games they add or generate, without administering
+-- the server
+CREATE TABLE users (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    username      TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    password_hash TEXT NOT NULL,
+    role          TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('admin', 'organizer', 'user')),
+    disabled      INTEGER NOT NULL DEFAULT 0,
+    created_at    REAL NOT NULL,
+    last_login    REAL,
+    discord_id    TEXT,
+    discord_name  TEXT,
+    discord_pings TEXT NOT NULL DEFAULT '[]'
+);
+"""
+_USERS_INDEX = "CREATE UNIQUE INDEX users_discord ON users(discord_id) WHERE discord_id IS NOT NULL;"
+# A game's link for spectators (spectate.py) and whether it shows the activity; how many days without playing a player
+# is reminded after (reminders.py: NULL is the server's default, 0 never). Per slot, since when its player has it and
+# when they were last reminded.
+_SPECTATE_REMINDERS = (
+    "ALTER TABLE games ADD COLUMN spectate_token TEXT; "
+    "ALTER TABLE games ADD COLUMN spectate_activity INTEGER NOT NULL DEFAULT 0; "
+    "ALTER TABLE games ADD COLUMN remind_days INTEGER; "
+    "CREATE UNIQUE INDEX games_spectate ON games(spectate_token) WHERE spectate_token IS NOT NULL; "
+    "ALTER TABLE game_slots ADD COLUMN player_since REAL; "
+    "ALTER TABLE game_slots ADD COLUMN reminded_at REAL; "
+    "ALTER TABLE game_slots ADD COLUMN reminders INTEGER NOT NULL DEFAULT 0;")
+# Added in schema version 18: a mystery round (mystery.py), whose players all get what one file of weights rolls
+_MYSTERY = "ALTER TABLE signups ADD COLUMN mystery INTEGER NOT NULL DEFAULT 0;"
+
+# Added in schema version 19
+_PRESETS = """
+-- Templates of generation options (presets.py): a user's own, or shared with everyone who generates. Shared ones stay
+-- when their maker is deleted; the others go with them (routes/auth.py).
+CREATE TABLE generation_presets (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    name       TEXT NOT NULL,
+    options    TEXT NOT NULL,
+    shared     INTEGER NOT NULL DEFAULT 0,
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL
+);
+CREATE INDEX generation_presets_user ON generation_presets(user_id);
+"""
+
+# Added in schema version 20: a round limits the slots of each player, not their files, since one file can hold
+# several players. The slots of an entry are NULL for entries made before, until they are counted at start
+# (signups.count_slots).
+_SLOTS = ("ALTER TABLE signups RENAME COLUMN configs_per_user TO slots_per_user; "
+          "ALTER TABLE signup_entries ADD COLUMN slots INTEGER;")
+
+# Added in schema version 21: the picture of the linked Discord account (its hash on Discord's image server; '' for
+# Discord's default picture). NULL until the account next signs in with Discord, for accounts linked before.
+_DISCORD_AVATAR = "ALTER TABLE users ADD COLUMN discord_avatar TEXT;"
+
+# Added in schema version 22
+_INVITES = """
+-- Invite links (invites.py): whoever has one makes an account with its role, while it has uses left and has not
+-- expired. Reset links: one user sets a new password, once. Only hashes of the links' tokens are kept.
+CREATE TABLE invites (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    token_hash TEXT NOT NULL UNIQUE,
+    role       TEXT NOT NULL CHECK (role IN ('organizer', 'user')),
+    note       TEXT,
+    max_uses   INTEGER NOT NULL,
+    uses       INTEGER NOT NULL DEFAULT 0,
+    created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    created_at REAL NOT NULL,
+    expires_at REAL NOT NULL
+);
+CREATE TABLE password_resets (
+    token_hash TEXT PRIMARY KEY,
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    created_at REAL NOT NULL,
+    expires_at REAL NOT NULL
+);
+-- the invite an account was made with (ids are not given out again, so one of a revoked invite points nowhere)
+ALTER TABLE users ADD COLUMN invite_id INTEGER;
+"""
+
+SCHEMA = _USERS + _USERS_INDEX + """
+CREATE TABLE sessions (
+    token_hash TEXT PRIMARY KEY,
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at REAL NOT NULL,
+    expires_at REAL NOT NULL,
+    user_agent TEXT
+);
+
+CREATE TABLE settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
+-- Player yaml files. The content lives on disk (configs/<user_id>/<id>.yaml), everything queryable is cached here.
+CREATE TABLE configs (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name           TEXT NOT NULL,
+    player_names   TEXT NOT NULL DEFAULT '[]',
+    games          TEXT NOT NULL DEFAULT '[]',
+    description    TEXT,
+    sha256         TEXT NOT NULL,
+    size           INTEGER NOT NULL,
+    source_game_id INTEGER,
+    created_at     REAL NOT NULL,
+    updated_at     REAL NOT NULL,
+    shared_at      REAL
+);
+CREATE INDEX configs_user ON configs(user_id);
+
+-- Custom worlds. Only one 'installed' row per game; 'pending' rows wait for an admin to approve them.
+CREATE TABLE apworlds (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    game          TEXT NOT NULL,
+    module        TEXT NOT NULL,
+    original_name TEXT NOT NULL,
+    version       TEXT,
+    status        TEXT NOT NULL CHECK (status IN ('installed', 'pending')),
+    size          INTEGER NOT NULL,
+    manifest      TEXT NOT NULL DEFAULT '{}',
+    uploaded_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    uploaded_at   REAL NOT NULL,
+    load_error    TEXT
+);
+
+-- A hosted (or hostable) multiworld: one multidata file, one server process.
+CREATE TABLE games (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    name              TEXT NOT NULL,
+    seed_name         TEXT,
+    source            TEXT NOT NULL DEFAULT 'upload',
+    created_at        REAL NOT NULL,
+    created_by        INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    job_id            INTEGER,
+    generator_version TEXT,
+    min_server_version TEXT,
+    race_mode         INTEGER NOT NULL DEFAULT 0,
+    games             TEXT NOT NULL DEFAULT '[]',
+    port              INTEGER,
+    password          TEXT,
+    server_password   TEXT,
+    options           TEXT NOT NULL DEFAULT '{}',
+    desired_state     TEXT NOT NULL DEFAULT 'stopped' CHECK (desired_state IN ('running', 'stopped')),
+    visibility        TEXT NOT NULL DEFAULT 'participants' CHECK (visibility IN ('participants', 'all')),
+    claimable         INTEGER NOT NULL DEFAULT 0,
+    single_claim      INTEGER NOT NULL DEFAULT 0,
+    notes             TEXT,
+    play_started_at   REAL,
+    finished_at       REAL,
+    share_spoiler_when_done INTEGER NOT NULL DEFAULT 0,
+    discord_webhook_url TEXT,
+    start_at          REAL,
+    start_open_minutes INTEGER NOT NULL DEFAULT 10,
+    start_countdown   INTEGER NOT NULL DEFAULT 1,
+    start_stage       TEXT,
+    stopped_at        REAL,
+    asleep            INTEGER NOT NULL DEFAULT 0,
+    ap_version        TEXT
+);
+CREATE UNIQUE INDEX games_port ON games(port) WHERE port IS NOT NULL;
+
+CREATE TABLE game_slots (
+    game_id   INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+    slot      INTEGER NOT NULL,
+    name      TEXT NOT NULL,
+    game      TEXT NOT NULL,
+    type      INTEGER NOT NULL DEFAULT 1,
+    locations INTEGER NOT NULL DEFAULT 0,
+    user_id   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    goal_at   REAL,
+    goal_logged_at REAL,
+    player_status  TEXT,
+    status_note    TEXT,
+    status_at      REAL,
+    handover_at    REAL,
+    handover_to    INTEGER,
+    handover_note  TEXT,
+    PRIMARY KEY (game_id, slot)
+);
+
+CREATE TABLE game_files (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_id      INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+    slot         INTEGER,
+    filename     TEXT NOT NULL,
+    size         INTEGER NOT NULL,
+    kind         TEXT NOT NULL CHECK (kind IN ('patch', 'spoiler', 'yaml', 'other')),
+    public       INTEGER NOT NULL DEFAULT 0,
+    UNIQUE (game_id, filename)
+);
+
+CREATE TABLE jobs (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT,
+    created_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    status      TEXT NOT NULL DEFAULT 'queued'
+                CHECK (status IN ('queued', 'running', 'succeeded', 'failed', 'cancelled')),
+    options     TEXT NOT NULL DEFAULT '{}',
+    host_after  INTEGER NOT NULL DEFAULT 0,
+    created_at  REAL NOT NULL,
+    started_at  REAL,
+    finished_at REAL,
+    game_id     INTEGER,
+    error       TEXT
+);
+
+CREATE TABLE job_players (
+    job_id       INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+    config_id    INTEGER,
+    user_id      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    filename     TEXT NOT NULL,
+    player_names TEXT NOT NULL DEFAULT '[]',
+    games        TEXT NOT NULL DEFAULT '[]',
+    sha256       TEXT,
+    error        TEXT
+);
+CREATE INDEX job_players_job ON job_players(job_id);
+""" + _SIGNUPS + _SOURCES + "ALTER TABLE apworld_sources ADD COLUMN latest_asset TEXT; " + \
+    "ALTER TABLE signups ADD COLUMN test_job_id INTEGER;" + _PROGRESS + _AUDIT + _VISITS + _AP_VERSIONS + _API_TOKENS + _SPECTATE_REMINDERS + _MYSTERY + _PRESETS + _SLOTS + _DISCORD_AVATAR + _INVITES
+
+
+# Upgrades for databases created by older versions: MIGRATIONS[n] turns schema n - 1 into schema n. New databases get
+# the current SCHEMA directly.
+MIGRATIONS: dict[int, str] = {
+    2: "ALTER TABLE games ADD COLUMN single_claim INTEGER NOT NULL DEFAULT 0;",
+    3: _SIGNUPS,
+    4: _SOURCES,
+    # Discord accounts linked to users (an empty password_hash means the account signs in with Discord only)
+    5: "ALTER TABLE users ADD COLUMN discord_id TEXT; ALTER TABLE users ADD COLUMN discord_name TEXT; "
+       "CREATE UNIQUE INDEX users_discord ON users(discord_id) WHERE discord_id IS NOT NULL; "
+       # which exact file of the newest release an administrator was shown (see sources.fingerprint)
+       "ALTER TABLE apworld_sources ADD COLUMN latest_asset TEXT;",
+    # the hash of each player file and what the generator said was wrong with it; a sign-up round's test generation
+    6: "ALTER TABLE job_players ADD COLUMN sha256 TEXT; ALTER TABLE job_players ADD COLUMN error TEXT; "
+       "ALTER TABLE signups ADD COLUMN test_job_id INTEGER;",
+    # progress over time: when play began, when each player reached their goal, when the game was finished
+    7: _PROGRESS + "ALTER TABLE game_slots ADD COLUMN goal_at REAL; ALTER TABLE games ADD COLUMN play_started_at REAL; "
+       "ALTER TABLE games ADD COLUMN finished_at REAL; "
+       "ALTER TABLE games ADD COLUMN share_spoiler_when_done INTEGER NOT NULL DEFAULT 0;",
+    # what a user with a linked Discord account wants to be mentioned for (notify.PING_KINDS)
+    8: "ALTER TABLE users ADD COLUMN discord_pings TEXT NOT NULL DEFAULT '[]';",
+    # a game's own Discord channel; configs their owner shares with the other players (since when)
+    9: "ALTER TABLE games ADD COLUMN discord_webhook_url TEXT; ALTER TABLE configs ADD COLUMN shared_at REAL;",
+    # a planned start (schedule.py): when, how early the server opens, whether a countdown runs, how far it got;
+    # the moment the server announced a goal, to the second
+    10: "ALTER TABLE games ADD COLUMN start_at REAL; "
+        "ALTER TABLE games ADD COLUMN start_open_minutes INTEGER NOT NULL DEFAULT 10; "
+        "ALTER TABLE games ADD COLUMN start_countdown INTEGER NOT NULL DEFAULT 1; "
+        "ALTER TABLE games ADD COLUMN start_stage TEXT; "
+        "ALTER TABLE game_slots ADD COLUMN goal_logged_at REAL;",
+    11: _AUDIT,
+    # when the server last stopped, and whether it fell asleep (rooms.py): a player's visit wakes it up again
+    12: "ALTER TABLE games ADD COLUMN stopped_at REAL; ALTER TABLE games ADD COLUMN asleep INTEGER NOT NULL DEFAULT 0;",
+    # the summary for players coming back to a game; what a player says about their slot (stuck, on a break, ...)
+    13: _VISITS + "ALTER TABLE game_slots ADD COLUMN player_status TEXT; ALTER TABLE game_slots ADD COLUMN status_note TEXT; "
+        "ALTER TABLE game_slots ADD COLUMN status_at REAL;",
+    # a player handing their slot over (routes/games.py): since when, to whom (NULL: whoever takes it), and a note
+    14: "ALTER TABLE game_slots ADD COLUMN handover_at REAL; ALTER TABLE game_slots ADD COLUMN handover_to INTEGER; "
+        "ALTER TABLE game_slots ADD COLUMN handover_note TEXT;",
+    # further Archipelago versions, and the one a game runs on (NULL: the image's)
+    15: _AP_VERSIONS + "ALTER TABLE games ADD COLUMN ap_version TEXT;",
+    16: _API_TOKENS,
+    # A CHECK constraint cannot be changed in place: the users table is built anew with the organizer role (with
+    # foreign keys off, see init_db, so dropping the old one deletes nothing that refers to it)
+    17: _USERS.replace("CREATE TABLE users", "CREATE TABLE users_new")
+        + "INSERT INTO users_new SELECT id, username, password_hash, role, disabled, created_at, last_login, discord_id, "
+          "discord_name, discord_pings FROM users; "
+          # so that the ids of deleted users are not given out again
+          "UPDATE sqlite_sequence SET seq = (SELECT seq FROM sqlite_sequence WHERE name = 'users') "
+          "WHERE name = 'users_new' AND EXISTS (SELECT 1 FROM sqlite_sequence WHERE name = 'users'); "
+          "DROP TABLE users; ALTER TABLE users_new RENAME TO users; "
+        + _USERS_INDEX + _SPECTATE_REMINDERS,
+    18: _MYSTERY,
+    19: _PRESETS,
+    20: _SLOTS,
+    21: _DISCORD_AVATAR,
+    22: _INVITES,
+}
+
+
+def _connect() -> sqlite3.Connection:
+    conn = sqlite3.connect(CONFIG.db_path, timeout=30, isolation_level=None)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA busy_timeout = 30000")
+    return conn
+
+
+def init_db() -> None:
+    CONFIG.ensure_dirs()
+    conn = _connect()
+    try:
+        conn.execute("PRAGMA journal_mode = WAL")
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+        if version == 0:
+            conn.executescript("BEGIN;" + SCHEMA + f"PRAGMA user_version = {SCHEMA_VERSION}; COMMIT;")
+        elif version < SCHEMA_VERSION:
+            # Some steps build a table anew; with foreign keys on, dropping the old one would delete what refers to
+            # it. The setting cannot change inside a transaction, so it is off for all steps, and checked after.
+            conn.execute("PRAGMA foreign_keys = OFF")
+            for step in range(version + 1, SCHEMA_VERSION + 1):
+                conn.executescript("BEGIN;" + MIGRATIONS[step] + f"PRAGMA user_version = {step}; COMMIT;")
+            broken = conn.execute("PRAGMA foreign_key_check").fetchall()
+            if broken:
+                log.warning("After the upgrade, %d rows refer to rows that do not exist, such as %s",
+                            len(broken), [tuple(row) for row in broken[:5]])
+        elif version > SCHEMA_VERSION:
+            raise RuntimeError(f"Database schema v{version} is newer than this version of the manager "
+                               f"(v{SCHEMA_VERSION}). Refusing to downgrade.")
+    finally:
+        conn.close()
+
+
+@contextmanager
+def connection() -> Iterator[sqlite3.Connection]:
+    """A connection wrapped in a single transaction: commits on success, rolls back on error."""
+    conn = _connect()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        yield conn
+        conn.execute("COMMIT")
+    except BaseException:
+        if conn.in_transaction:
+            conn.execute("ROLLBACK")
+        raise
+    finally:
+        conn.close()
+
+
+# Single statements run on a connection each thread keeps open. Opening one costs far more than most queries (some 60
+# times as much on a fast disk), and in WAL mode closing the last one also removes the -wal and -shm files, which the
+# next statement makes again: on a slow share every one of those is a trip to the disk. Transactions (connection()
+# above) still get a connection of their own, so what they see and do is not mixed with other statements.
+_local = threading.local()
+
+
+def _shared() -> sqlite3.Connection:
+    conn: sqlite3.Connection | None = getattr(_local, "conn", None)
+    if conn is None or _local.path != CONFIG.db_path:
+        if conn is not None:
+            conn.close()
+        conn = _connect()
+        _local.conn, _local.path = conn, CONFIG.db_path
+    return conn
+
+
+def query(sql: str, params: Iterable[Any] = ()) -> list[sqlite3.Row]:
+    return _shared().execute(sql, tuple(params)).fetchall()
+
+
+def query_one(sql: str, params: Iterable[Any] = ()) -> sqlite3.Row | None:
+    rows = query(sql, params)
+    return rows[0] if rows else None
+
+
+def execute(sql: str, params: Iterable[Any] = ()) -> int:
+    """Runs one statement (its own transaction) and returns lastrowid."""
+    return _shared().execute(sql, tuple(params)).lastrowid or 0
+
+
+def now() -> float:
+    return time.time()
+
+
+def jloads(value: str | None, default: Any = None) -> Any:
+    if not value:
+        return default
+    try:
+        return json.loads(value)
+    except ValueError:
+        return default
+
+
+def jdumps(value: Any) -> str:
+    return json.dumps(value, separators=(",", ":"))

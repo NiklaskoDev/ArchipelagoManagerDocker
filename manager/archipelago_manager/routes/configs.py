@@ -12,9 +12,11 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Res
 from fastapi.responses import FileResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 
-from .. import apbridge, configcheck, configstore, db, mystery, yamlform, yamlinfo
-from ..configstore import config_path
-from ..security import current_user, is_admin
+from ..archipelago import apbridge
+from ..configs import configcheck, configstore, mystery, yamlform, yamlinfo
+from ..core import db
+from ..configs.configstore import config_path
+from ..core.security import current_user, is_admin
 
 router = APIRouter(prefix="/api")
 
