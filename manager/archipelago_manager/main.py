@@ -45,8 +45,9 @@ async def init_archipelago() -> None:
     """Prepares the Archipelago side in the background so the web UI is available immediately."""
     try:
         await apbridge.get_where()
-        await apbridge.sync_apworlds()
-        await apworlds.adopt_orphans()
+        async with apworlds.CHANGES:  # an install that comes in while the server starts waits for this
+            await apbridge.sync_apworlds()
+            await apworlds.adopt_orphans()
     except apbridge.APBridgeError as e:
         apbridge.STATE.error = str(e)
         log.error("Archipelago is not usable: %s", e)

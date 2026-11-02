@@ -286,3 +286,78 @@ def test_players_cannot_queue_up_endless_repositories(site, github, tmp_path):
     for source in olaf.get("/api/apworld-sources").json():
         if source["repo"].startswith("queue/"):
             olaf.delete(f"/api/apworld-sources/{source['id']}")
+
+
+def big_apworld(tmp_path, game, module, version, padding=4 * 1024 * 1024):
+    """A world with a few megabytes of data besides its code, as many real ones have (sprites, text, maps)."""
+    import os
+    import zipfile
+    path = build_apworld(tmp_path / f"{module}-{version}.apworld", game=game, module=module, version=version)
+    with zipfile.ZipFile(path, "a", zipfile.ZIP_STORED) as zf:
+        zf.writestr(f"{module}/data/padding.bin", os.urandom(padding))
+    return path.read_bytes()
+
+
+@pytest.mark.ap
+def test_updating_several_custom_games_at_once(site, github, tmp_path):
+    """Pressing *Update* on one custom game while another still updates: every update gets done, and every game loads."""
+    admin = site["admin"]
+    names = [f"Parallel World {i}" for i in range(3)]
+    sources = []
+    for i, game in enumerate(names):
+        github.publish(f"someone/parallel-{i}", "v1.0.0", {f"parallel{i}.apworld": big_apworld(tmp_path, game, f"parallel{i}", "1.0.0")})
+        sources.append(admin.post("/api/apworld-sources", json={"repo": f"someone/parallel-{i}"}).json())
+    for i, game in enumerate(names):
+        github.publish(f"someone/parallel-{i}", "v2.0.0", {f"parallel{i}.apworld": big_apworld(tmp_path, game, f"parallel{i}", "2.0.0")})
+        assert admin.post(f"/api/apworld-sources/{sources[i]['id']}/check").json()["update_available"]
+    results = {}
+
+    def update(source):
+        client = site["server"].client("boss", "bosspass123")
+        r = client.post(f"/api/apworld-sources/{source['id']}/update")
+        results[source["id"]] = (r.status_code, r.json())
+
+    threads = [threading.Thread(target=update, args=(s,)) for s in sources]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    problems = {sid: body for sid, (status, body) in results.items() if status != 200 or body.get("installed_tag") != "v2.0.0"}
+    assert not problems, problems
+    worlds = {a["game"]: a for a in admin.get("/api/apworlds").json()["items"] if a["game"] in names}
+    assert {g: (w["version"], w["load_error"]) for g, w in worlds.items()} == {g: ("2.0.0", None) for g in names}
+    available = {g["name"] for g in admin.get("/api/worlds").json()["games"]}
+    assert set(names) <= available
+    for item in worlds.values():
+        admin.delete(f"/api/apworlds/{item['id']}")
+
+
+@pytest.mark.ap
+def test_updating_the_same_custom_game_twice_at_once(site, github, tmp_path):
+    """A second press on *Update* while the first still runs (the page redraws its buttons when another update ends)."""
+    admin = site["admin"]
+    github.publish("someone/twice", "v1.0.0", {"twice.apworld": big_apworld(tmp_path, "Twice World", "twiceworld", "1.0.0")})
+    source = admin.post("/api/apworld-sources", json={"repo": "someone/twice"}).json()
+    github.publish("someone/twice", "v2.0.0", {"twice.apworld": big_apworld(tmp_path, "Twice World", "twiceworld", "2.0.0")})
+    assert admin.post(f"/api/apworld-sources/{source['id']}/check").json()["update_available"]
+    downloads = len(github.downloads)
+    results = []
+
+    def update():
+        client = site["server"].client("boss", "bosspass123")
+        r = client.post(f"/api/apworld-sources/{source['id']}/update")
+        results.append((r.status_code, r.json() if r.headers.get("content-type", "").startswith("application/json") else {"detail": r.text}))
+
+    threads = [threading.Thread(target=update) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert len(results) == 2 and all(status == 200 for status, _body in results), results
+    assert github.downloads[downloads:] == ["twice.apworld"]  # the second waited for the first, which installed it
+    installed = [a for a in admin.get("/api/apworlds").json()["items"] if a["game"] == "Twice World"]
+    assert [(a["version"], a["status"], a["load_error"]) for a in installed] == [("2.0.0", "installed", None)]
+    final = next(s for s in admin.get("/api/apworld-sources").json() if s["id"] == source["id"])
+    assert final["installed_tag"] == "v2.0.0" and final["error"] is None
+    assert admin.get(f"/api/apworlds/{installed[0]['id']}/download").status_code == 200  # the source's file is there
+    admin.delete(f"/api/apworlds/{installed[0]['id']}")

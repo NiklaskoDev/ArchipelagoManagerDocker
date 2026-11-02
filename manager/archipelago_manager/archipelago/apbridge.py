@@ -11,6 +11,7 @@ import hashlib
 import json
 import logging
 import os
+import secrets
 import shutil
 from pathlib import Path
 from typing import Any
@@ -304,7 +305,7 @@ async def sync_apworlds() -> None:
             continue
         if not target.is_file() or target.stat().st_size != source.stat().st_size \
                 or _sha256(target) != _sha256(source):
-            shutil.copyfile(source, target)
+            place_file(source, target)
     for row in db.query("SELECT version FROM ap_versions WHERE status = 'installed'"):
         if (ap_dir(row["version"]) / "Utils.py").is_file():
             sync_version_apworlds(row["version"])
@@ -353,7 +354,7 @@ def sync_version_apworlds(version: str) -> None:
     for name, source in wanted.items():
         target = folder / name
         if not target.is_file() or target.stat().st_size != source.stat().st_size or _sha256(target) != _sha256(source):
-            shutil.copyfile(source, target)
+            place_file(source, target)
             changed = True
     if changed:
         EXTRA.pop(version, None)
@@ -368,6 +369,15 @@ def link_roms(version: str) -> None:
         if rom["exists"] and source.is_file() and not target.exists():
             with contextlib.suppress(OSError):
                 target.symlink_to(source)
+
+
+def place_file(source: Path, target: Path) -> None:
+    """Copies a world into a folder Archipelago loads worlds from, whole or not at all: a server, a generation or the
+    helper that reads the folder meanwhile finds the old file or the new one, never half of it (a file that is not a
+    whole zip makes Archipelago load no custom world at all). The copy's name does not end in .apworld meanwhile."""
+    part = target.with_name(f".{target.name}.{secrets.token_hex(4)}.part")  # two copies at once each have their own
+    shutil.copyfile(source, part)
+    os.replace(part, target)
 
 
 def _sha256(path: Path) -> str:

@@ -39,6 +39,12 @@ class InvalidAPWorld(ValueError):
     pass
 
 
+# One change to the installed custom worlds at a time: installing (which replaces an older version of the game),
+# removing, and syncing them into Archipelago's folders followed by reloading the list. Two at once would replace each
+# other's new entry, or reload while the other still copies its files.
+CHANGES = asyncio.Lock()
+
+
 def _class_games(source: bytes) -> set[str]:
     """The games the World classes in this Python source say they are for (`game = "..."`). Only parsed, never run."""
     try:
@@ -215,17 +221,18 @@ async def refresh_load_status() -> None:
 
 async def _install(apworld_id: int) -> list[dict]:
     """Marks a library entry as installed (replacing older versions of the same game) and syncs to Archipelago."""
-    row = db.query_one("SELECT * FROM apworlds WHERE id = ?", (apworld_id,))
-    replaced = db.query("SELECT * FROM apworlds WHERE status = 'installed' AND id != ? AND (game = ? OR module = ?)",
-                        (apworld_id, row["game"], row["module"]))
-    for old in replaced:
-        db.execute("DELETE FROM apworlds WHERE id = ?", (old["id"],))
-        apbridge.apworld_library_path(old["id"]).unlink(missing_ok=True)
-        if old["module"] != row["module"]:
-            await apbridge.remove_apworld_file(old["module"])
-    db.execute("UPDATE apworlds SET status = 'installed' WHERE id = ?", (apworld_id,))
-    await apbridge.sync_apworlds()
-    await refresh_load_status()
+    async with CHANGES:
+        row = db.query_one("SELECT * FROM apworlds WHERE id = ?", (apworld_id,))
+        replaced = db.query("SELECT * FROM apworlds WHERE status = 'installed' AND id != ? AND (game = ? OR module = ?)",
+                            (apworld_id, row["game"], row["module"]))
+        for old in replaced:
+            db.execute("DELETE FROM apworlds WHERE id = ?", (old["id"],))
+            apbridge.apworld_library_path(old["id"]).unlink(missing_ok=True)
+            if old["module"] != row["module"]:
+                await apbridge.remove_apworld_file(old["module"])
+        db.execute("UPDATE apworlds SET status = 'installed' WHERE id = ?", (apworld_id,))
+        await apbridge.sync_apworlds()
+        await refresh_load_status()
     return [{"id": r["id"], "version": r["version"]} for r in replaced]
 
 
@@ -348,11 +355,12 @@ async def delete_apworld(apworld_id: int, user: sqlite3.Row = Depends(current_us
     own_pending = row["status"] == "pending" and row["uploaded_by"] == user["id"]
     if not is_admin(user) and not own_pending:
         raise HTTPException(403, "Only administrators can remove installed games")
-    db.execute("DELETE FROM apworlds WHERE id = ?", (apworld_id,))
-    apbridge.apworld_library_path(apworld_id).unlink(missing_ok=True)
-    if row["status"] == "installed":
-        await apbridge.remove_apworld_file(row["module"])
-        await refresh_load_status()
+    async with CHANGES:
+        db.execute("DELETE FROM apworlds WHERE id = ?", (apworld_id,))
+        apbridge.apworld_library_path(apworld_id).unlink(missing_ok=True)
+        if row["status"] == "installed":
+            await apbridge.remove_apworld_file(row["module"])
+            await refresh_load_status()
     return {"ok": True}
 
 

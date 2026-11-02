@@ -23,7 +23,7 @@ from ..accounts import discord_auth
 from ..core.config import CONFIG
 from ..games.rooms import ROOMS
 from ..core.security import admin_user
-from .apworlds import refresh_load_status
+from .apworlds import CHANGES, refresh_load_status
 
 router = APIRouter(prefix="/api")
 
@@ -207,8 +207,9 @@ async def check_updates(_admin: sqlite3.Row = Depends(admin_user)) -> dict:
 
 @router.post("/system/reload-worlds")
 async def reload_worlds(_admin: sqlite3.Row = Depends(admin_user)) -> dict:
-    await apbridge.sync_apworlds()
-    await refresh_load_status()
+    async with CHANGES:
+        await apbridge.sync_apworlds()
+        await refresh_load_status()
     if apbridge.STATE.info is None:
         raise HTTPException(503, apbridge.STATE.error or "Archipelago is unavailable")
     return {"world_count": len(apbridge.installed_games(include_hidden=True)),
