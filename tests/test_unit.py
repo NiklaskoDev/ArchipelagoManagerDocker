@@ -695,3 +695,22 @@ def test_missing_files_and_games_follow_what_archipelago_reported(tmp_path, monk
     # a new list from Archipelago counts at once
     monkeypatch.setattr(apbridge.STATE, "info", {"games": info["games"][1:]})
     assert apbridge.missing_games(asked) == ["Unknown", "Zed"]
+
+
+def test_templates_made_while_the_games_changed_are_made_again(monkeypatch):
+    """A custom game installed while the templates are made (at startup, say): the first ones lack it, so they are
+    not kept, and the templates are made again for the games there are now."""
+    old, new = {"games": [], "version": "old"}, {"games": [], "version": "new"}
+    made = []
+
+    async def make(info):
+        made.append(info["version"])
+        if len(made) == 1:
+            apbridge.STATE.info = new  # installed meanwhile
+        return {"templates": {}, "forms": {}, "for": info["version"]}, Path("/nowhere")
+
+    monkeypatch.setattr(apbridge, "_make_templates", make)
+    for name, value in (("info", old), ("templates", None), ("templates_for", None), ("templates_lock", None)):
+        monkeypatch.setattr(apbridge.STATE, name, value)
+    assert asyncio.run(apbridge.ensure_templates())["for"] == "new" and made == ["old", "new"]
+    assert asyncio.run(apbridge.ensure_templates())["for"] == "new" and made == ["old", "new"]  # kept from now on
