@@ -39,6 +39,10 @@ class InvalidAPWorld(ValueError):
     pass
 
 
+class BreaksArchipelago(InvalidAPWorld):
+    """A file that would stop Archipelago from loading any custom world, not just itself."""
+
+
 # One change to the installed custom worlds at a time: installing (which replaces an older version of the game),
 # removing, and syncing them into Archipelago's folders followed by reloading the list. Two at once would replace each
 # other's new entry, or reload while the other still copies its files.
@@ -139,6 +143,9 @@ def inspect_apworld(path: Path) -> dict:
         raise InvalidAPWorld("The file is not a valid zip archive") from None
     if not isinstance(game, str) or not game.strip():
         raise InvalidAPWorld("The manifest does not name a 'game'")
+    if key := apbridge.unreadable_version(manifest):
+        raise BreaksArchipelago(f"The manifest gives {key} as {json.dumps(manifest[key])}, but Archipelago only reads three "
+                                f"numbers such as 1.0.0; with this file it would load no custom game at all")
     if not module.isidentifier() or module.startswith("_"):
         raise InvalidAPWorld(f"'{module}' is not a usable world folder name")
     if (CONFIG.ap_dir / "worlds" / module).exists():
@@ -169,20 +176,25 @@ async def adopt_orphans() -> int:
     known = {r["module"] for r in db.query("SELECT module FROM apworlds WHERE status = 'installed'")}
     adopted = 0
     for path in sorted(folder.glob("*.apworld")):
-        if not zipfile.is_zipfile(path):
-            # Archipelago aborts loading *every* world when one .apworld is not a zip, so move it out of the way
+        # Archipelago aborts loading *every* world when one .apworld is not a zip, or has versions it cannot read, so
+        # such a file is moved out of the way
+        breaks = None if zipfile.is_zipfile(path) else "it is not a valid .apworld"
+        if not breaks and path.stem not in known:
+            try:
+                meta = inspect_apworld(path)
+            except BreaksArchipelago as e:
+                breaks = str(e)
+            except InvalidAPWorld as e:
+                log.warning("Leaving %s alone: %s", path.name, e)
+                continue
+        if breaks:
             target = CONFIG.data_dir / "quarantine" / f"{path.name}.{int(db.now())}"
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.move(path, target)
             apbridge.STATE.quarantined.append(f"{path.name} (moved to {target})")
-            log.warning("%s is not a valid .apworld and would stop Archipelago from loading; moved it to %s", path.name, target)
+            log.warning("%s would stop Archipelago from loading (%s); moved it to %s", path.name, breaks, target)
             continue
         if path.stem in known:
-            continue
-        try:
-            meta = inspect_apworld(path)
-        except InvalidAPWorld as e:
-            log.warning("Leaving %s alone: %s", path.name, e)
             continue
         if meta["module"] != path.stem:  # Archipelago imports the file as worlds.<file name>, so this cannot work
             log.warning("Leaving %s alone: the world inside is called %s", path.name, meta["module"])

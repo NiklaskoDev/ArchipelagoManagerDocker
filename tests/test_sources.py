@@ -166,7 +166,7 @@ def test_a_players_repository_waits_for_the_admin(site, github, tmp_path):
     assert listed["apworld_id"] == entry["id"] and olaf.get(f"/api/apworlds/{entry['id']}/download").status_code == 200
 
     # a player can take back a proposal that is still waiting, but not an approved one
-    github.publish("someone/other-world", "1.0", {"other.apworld": apworld(tmp_path, "Other World", "otherworld", "1.0")})
+    github.publish("someone/other-world", "1.0", {"other.apworld": apworld(tmp_path, "Other World", "otherworld", "1.0.0")})
     other = pia.post("/api/apworld-sources", json={"repo": "someone/other-world"}).json()
     assert pia.delete(f"/api/apworld-sources/{other['id']}").status_code == 200
     assert pia.delete(f"/api/apworld-sources/{source['id']}").status_code == 403
@@ -213,8 +213,8 @@ def test_unusable_repositories_and_releases_are_refused(site, github, tmp_path):
     assert pia.post("/api/apworld-sources", json={"repo": "gitlab.com/someone/x"}).status_code == 400
 
     # several worlds in one release: say which
-    github.publish("someone/bundle", "v1", {"one.apworld": apworld(tmp_path, "Bundle One", "bundleone", "1.0"),
-                                            "two.apworld": apworld(tmp_path, "Bundle Two", "bundletwo", "1.0")})
+    github.publish("someone/bundle", "v1", {"one.apworld": apworld(tmp_path, "Bundle One", "bundleone", "1.0.0"),
+                                            "two.apworld": apworld(tmp_path, "Bundle Two", "bundletwo", "1.0.0")})
     r = admin.post("/api/apworld-sources", json={"repo": "someone/bundle"})
     assert r.status_code == 409 and "several .apworld files" in r.json()["detail"]
     r = admin.post("/api/apworld-sources", json={"repo": "someone/bundle", "asset": "two.apworld"})
@@ -232,7 +232,7 @@ def test_unusable_repositories_and_releases_are_refused(site, github, tmp_path):
     assert again["status"] == "pending" and "not a valid zip" in again["error"]
 
     # GitHub's answer decides where the file is downloaded from, so only GitHub addresses are followed
-    github.publish("someone/elsewhere", "v1", {"x.apworld": apworld(tmp_path, "Elsewhere", "elsewhere", "1.0")},
+    github.publish("someone/elsewhere", "v1", {"x.apworld": apworld(tmp_path, "Elsewhere", "elsewhere", "1.0.0")},
                    url_override="http://downloads.example.test/x.apworld")
     r = admin.post("/api/apworld-sources", json={"repo": "someone/elsewhere"})
     assert r.status_code == 502 and "outside of GitHub" in r.json()["detail"]
@@ -249,7 +249,7 @@ def test_unusable_repositories_and_releases_are_refused(site, github, tmp_path):
 @pytest.mark.ap
 def test_approving_installs_exactly_the_release_the_admin_saw(site, github, tmp_path):
     admin, pia = site["admin"], site["pia"]
-    github.publish("someone/swapped-world", "v1", {"swapped.apworld": apworld(tmp_path, "Swapped World", "swappedworld", "1.0")})
+    github.publish("someone/swapped-world", "v1", {"swapped.apworld": apworld(tmp_path, "Swapped World", "swappedworld", "1.0.0")})
     source = pia.post("/api/apworld-sources", json={"repo": "someone/swapped-world"}).json()
     # after the admin had a look, the player puts another file into the same release
     github.publish("someone/swapped-world", "v1", {"swapped.apworld": apworld(tmp_path, "Swapped World", "swappedworld", "6.6.6")})
@@ -268,7 +268,7 @@ def test_approving_installs_exactly_the_release_the_admin_saw(site, github, tmp_
 @pytest.mark.ap
 def test_a_download_that_does_not_match_its_digest_is_not_installed(site, github, tmp_path):
     admin = site["admin"]
-    github.publish("someone/tampered-world", "v1", {"tampered.apworld": apworld(tmp_path, "Tampered", "tamperedworld", "1.0")},
+    github.publish("someone/tampered-world", "v1", {"tampered.apworld": apworld(tmp_path, "Tampered", "tamperedworld", "1.0.0")},
                    digest="sha256:" + "0" * 64)
     r = admin.post("/api/apworld-sources", json={"repo": "someone/tampered-world"})
     assert r.status_code == 502 and "not the one GitHub lists" in r.json()["detail"]
@@ -278,7 +278,7 @@ def test_a_download_that_does_not_match_its_digest_is_not_installed(site, github
 @pytest.mark.ap
 def test_players_cannot_queue_up_endless_repositories(site, github, tmp_path):
     olaf = site["olaf"]
-    data = apworld(tmp_path, "Queued", "queuedworld", "1.0")
+    data = apworld(tmp_path, "Queued", "queuedworld", "1.0.0")
     for i in range(6):
         github.publish(f"queue/world-{i}", "v1", {"queued.apworld": data})
     statuses = [olaf.post("/api/apworld-sources", json={"repo": f"queue/world-{i}"}).status_code for i in range(6)]

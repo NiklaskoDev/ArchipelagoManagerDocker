@@ -222,15 +222,29 @@ def test_files_that_would_break_archipelago_are_quarantined(ap_server, clean_cus
     """One corrupt .apworld makes Archipelago refuse to load any world. The manager moves it aside instead."""
     folder = ap_server.ap_dir / "custom_worlds"
     (folder / "garbage.apworld").write_bytes(b"not a zip")
+    # so does a version in its manifest that Archipelago cannot read (it wants three numbers)
+    build_apworld(folder / "twoparts.apworld", game="Two Parts", module="twoparts", version="1.0")
     ap_server.stop()
     ap_server.start()
     fresh = ap_server.client("admin", "adminpass1")
     assert "ChecksFinder" in game_names(fresh)  # Archipelago still works
-    assert not (folder / "garbage.apworld").exists()
+    assert not (folder / "garbage.apworld").exists() and not (folder / "twoparts.apworld").exists()
     moved = list((ap_server.data_dir / "quarantine").glob("garbage.apworld.*"))
     assert len(moved) == 1 and moved[0].read_bytes() == b"not a zip"  # moved, never deleted
+    assert len(list((ap_server.data_dir / "quarantine").glob("twoparts.apworld.*"))) == 1
     system = fresh.get("/api/system").json()
-    assert any("garbage.apworld" in q for q in system["quarantined"])
+    assert any("garbage.apworld" in q for q in system["quarantined"]) and any("twoparts.apworld" in q for q in system["quarantined"])
+    assert not any(i["game"] == "Two Parts" for i in fresh.get("/api/apworlds").json()["items"])
+
+
+def test_versions_archipelago_cannot_read_are_refused(admin, tmp_path, clean_custom):
+    """Archipelago reads a manifest's versions as three numbers; one it cannot read stops it loading any custom game."""
+    for name, kwargs, field in (("shortversion", {"version": "1.0"}, "world_version"),
+                                ("shortminimum", {"minimum": "0.6"}, "minimum_ap_version")):
+        r = post_apworld(admin, build_apworld(tmp_path / f"{name}.apworld", game=name.title(), module=name, **kwargs))
+        assert r.status_code == 400 and field in r.json()["detail"] and "three numbers" in r.json()["detail"], r.text
+    assert admin.get("/api/apworlds").json()["items"] == []
+    assert "ChecksFinder" in game_names(admin)
 
 
 def test_a_world_with_the_wrong_name_is_left_in_place_and_reported(ap_server, clean_custom):

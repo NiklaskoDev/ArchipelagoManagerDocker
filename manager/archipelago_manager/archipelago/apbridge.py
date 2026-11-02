@@ -11,6 +11,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import secrets
 import shutil
 from pathlib import Path
@@ -297,8 +298,10 @@ async def sync_apworlds() -> None:
     for row in db.query("SELECT id, module, manifest FROM apworlds WHERE status = 'installed'"):
         source = apworld_library_path(row["id"])
         target = folder / f"{row['module']}.apworld"
-        if not (db.jloads(row["manifest"], {}) or {}) and not works_with({}, version_tuple()):
-            target.unlink(missing_ok=True)  # no manifest, and the image's version is 0.7 or newer: it would break them all
+        manifest = db.jloads(row["manifest"], {}) or {}
+        # no manifest, and the image's version is 0.7 or newer; or versions it cannot read: it would break them all
+        if (not manifest and not works_with({}, version_tuple())) or unreadable_version(manifest):
+            target.unlink(missing_ok=True)
             continue
         if not source.is_file():
             log.warning("APWorld %s is missing from the library", source)
@@ -321,6 +324,20 @@ def parse_version(text: Any) -> tuple[int, ...] | None:
         return None
 
 
+# The manifest's versions as Archipelago reads them (Utils.tuplize_version): exactly three whole numbers. One it cannot
+# read stops it from loading any custom world, not just that one.
+VERSION_FIELDS = ("world_version", "minimum_ap_version", "maximum_ap_version")
+_READABLE_VERSION = re.compile(r"\d+\.\d+\.\d+")
+
+
+def unreadable_version(manifest: dict) -> str | None:
+    """The first of a manifest's versions that Archipelago could not read, if there is one."""
+    for key in VERSION_FIELDS:
+        if key in manifest and not (isinstance(manifest[key], str) and _READABLE_VERSION.fullmatch(manifest[key])):
+            return key
+    return None
+
+
 NEEDS_MANIFEST = (0, 7, 0)  # from this version on, one .apworld without a manifest stops Archipelago loading any world
 
 
@@ -331,6 +348,8 @@ def works_with(manifest: dict, version: tuple[int, ...] | None) -> bool:
         return True
     if not manifest:
         return version < NEEDS_MANIFEST
+    if unreadable_version(manifest):
+        return False
     low = parse_version(manifest.get("minimum_ap_version") or "")
     high = parse_version(manifest.get("maximum_ap_version") or "")
     return not (low and version < low) and not (high and version > high)

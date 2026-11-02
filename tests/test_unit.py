@@ -467,7 +467,10 @@ def test_custom_worlds_go_into_the_versions_they_work_with():
     assert not apbridge.works_with({"minimum_ap_version": "0.6.0"}, (0, 5, 1))
     assert not apbridge.works_with({"maximum_ap_version": "0.5.1"}, (0, 6, 2))
     assert apbridge.works_with({"minimum_ap_version": "0.5.0", "maximum_ap_version": "0.6.9"}, (0, 6, 2))
-    assert apbridge.works_with({"minimum_ap_version": "nonsense"}, (0, 6, 2))
+    # a version Archipelago cannot read (it wants three numbers) keeps a world out of every version
+    assert not apbridge.works_with({"minimum_ap_version": "nonsense"}, (0, 6, 2))
+    assert not apbridge.works_with({"game": "X", "world_version": "1.0"}, (0, 6, 8))
+    assert apbridge.unreadable_version({"world_version": "1.0.0", "maximum_ap_version": "0.6"}) == "maximum_ap_version"
 
 
 
@@ -480,7 +483,11 @@ def test_a_world_without_a_manifest_is_kept_out_of_archipelago_0_7(tmp_path, mon
     (library / "1.apworld").write_bytes(b"no manifest")
     (library / "2.apworld").write_bytes(b"with manifest")
     (folder / "adofai.apworld").write_bytes(b"no manifest")  # copied there while the image had 0.6.8
-    rows = [{"id": 1, "module": "adofai", "manifest": "{}"}, {"id": 2, "module": "modern", "manifest": '{"game": "M"}'}]
+    rows = [{"id": 1, "module": "adofai", "manifest": "{}"}, {"id": 2, "module": "modern", "manifest": '{"game": "M"}'},
+            # installed before such files were refused: a version Archipelago cannot read stops it loading any world
+            {"id": 3, "module": "twoparts", "manifest": '{"game": "T", "world_version": "1.0"}'}]
+    (library / "3.apworld").write_bytes(b"unreadable version")
+    (folder / "twoparts.apworld").write_bytes(b"unreadable version")
     monkeypatch.setattr(apbridge.db, "query", lambda sql, params=(): rows if "FROM apworlds" in sql else [])
     monkeypatch.setattr(apbridge, "apworld_library_path", lambda apworld_id: library / f"{apworld_id}.apworld")
     monkeypatch.setattr(apbridge.STATE, "info", None)
