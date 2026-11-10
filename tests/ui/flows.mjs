@@ -342,12 +342,19 @@ await admin.locator(".page-head .badge", { hasText: "Asleep" }).waitFor({ timeou
 await gameTab(admin, "Play");
 await expectText(admin, "It wakes up when one of its players opens this page.");
 if (await admin.getByText("Gets a port when it wakes up").count()) problems.push("the asleep game lost its port");
+// it can be stopped for good without starting it first (not done here: the player wakes it up below)
+const asleepActions = await admin.locator(".page-actions").getByRole("button").allInnerTexts();
+if (!asleepActions.some((s) => s.includes("Start")) || !asleepActions.some((s) => s.includes("Stop"))) {
+  problems.push(`an asleep game should offer Start and Stop, not ${asleepActions}`);
+}
 await shot(admin, "asleep");
 log("with nobody connected, the game falls asleep, and the admin's visit does not wake it");
 
 await gameTab(admin, "Manage");
-await admin.locator("details", { hasText: "Backups" }).first().locator("summary").click();
-await expectText(admin, "No backups yet");
+const backupsSection = admin.locator("details", { hasText: "Backups" }).first();
+await backupsSection.locator("summary").click();
+// "No backups yet", unless the half-hourly copy was already taken of the save the server wrote as it fell asleep
+await backupsSection.getByRole("button", { name: "Back up now" }).waitFor();
 log("the game's backups section opens");
 
 // delete via danger zone --------------------------------------------------------------------------------------------------

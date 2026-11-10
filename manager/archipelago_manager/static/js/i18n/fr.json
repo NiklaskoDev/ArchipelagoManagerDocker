@@ -1512,7 +1512,8 @@
   "Files and saves": "Fichiers et sauvegardes",
   "Sharing": "Partage",
   "Ending the game": "Fin de la partie",
-  "Find your slot among the players and press “{button}” to get your files.": "Trouvez votre slot parmi les joueurs et appuyez sur « {button} » pour obtenir vos fichiers."
+  "Find your slot among the players and press “{button}” to get your files.": "Trouvez votre slot parmi les joueurs et appuyez sur « {button} » pour obtenir vos fichiers.",
+  "It stays stopped, and no longer wakes up when a player opens its page": "Elle reste arrêtée et ne se réveille plus quand un joueur ouvre sa page"
  },
  "server": {
   " (line {0})": " (ligne {0})",
