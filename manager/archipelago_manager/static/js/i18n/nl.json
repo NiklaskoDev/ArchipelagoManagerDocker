@@ -1512,7 +1512,8 @@
   "Files and saves": "Bestanden en opslag",
   "Sharing": "Delen",
   "Ending the game": "Het spel beëindigen",
-  "Find your slot among the players and press “{button}” to get your files.": "Zoek je slot bij de spelers en druk op \"{button}\" om je bestanden te krijgen."
+  "Find your slot among the players and press “{button}” to get your files.": "Zoek je slot bij de spelers en druk op \"{button}\" om je bestanden te krijgen.",
+  "It stays stopped, and no longer wakes up when a player opens its page": "Het blijft gestopt en wordt niet meer wakker als een speler de pagina opent"
  },
  "server": {
   " (line {0})": " (regel {0})",

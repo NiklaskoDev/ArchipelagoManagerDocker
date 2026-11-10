@@ -416,13 +416,17 @@ export function isActive(game) {
 // Start / stop / restart for whoever may control the game. `onUpdate` receives the refreshed game.
 export function controlButtons(game, onUpdate) {
   if (!game.can_control) return null;
-  const run = (label, iconName, verb, cls = "") => h("button", {
-    class: `btn sm ${cls}`, type: "button",
+  const run = (label, iconName, verb, cls = "", title = undefined) => h("button", {
+    class: `btn sm ${cls}`, type: "button", title,
     onclick: action(async () => onUpdate(await post(`/api/games/${game.id}/${verb}`))),
   }, icon(iconName, 14), label);
-  return isActive(game)
-    ? [run(t("Restart"), "restart", "restart"), run(t("Stop"), "stop", "stop")]
-    : [run(t("Start"), "play", "start", "primary")];
+  if (isActive(game)) return [run(t("Restart"), "restart", "restart"), run(t("Stop"), "stop", "stop")];
+  // an asleep game wakes up when one of its players opens its page: Stop ends that, without starting it first
+  if (game.state === "sleeping") {
+    return [run(t("Start"), "play", "start", "primary"),
+      run(t("Stop"), "stop", "stop", "", t("It stays stopped, and no longer wakes up when a player opens its page"))];
+  }
+  return [run(t("Start"), "play", "start", "primary")];
 }
 
 // Which Archipelago version generates or hosts a game (GET /api/ap-versions): null when there is only the server's own
