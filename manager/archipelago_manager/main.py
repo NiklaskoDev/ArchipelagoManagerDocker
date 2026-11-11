@@ -25,7 +25,7 @@ from .core.config import CONFIG
 from .generation.jobs import GENERATION
 from .games.rooms import ROOMS
 from .games.textclient import TEXT_CLIENTS
-from .routes import admin, apworlds, auth, configs, games, jobs, roms
+from .routes import admin, apworlds, auth, configs, friends, games, jobs, roms
 from .routes import presets as preset_routes, tokens, versions as version_routes
 from .routes import signups as signup_routes
 from .routes import sources as source_routes
@@ -286,7 +286,7 @@ def health() -> dict:
 
 
 for module in (auth, configs, apworlds, source_routes, games, jobs, signup_routes, admin, roms, version_routes, tokens,
-               preset_routes):
+               preset_routes, friends):
     app.include_router(module.router)
 
 def accepts_gzip(accept_encoding: str) -> bool:

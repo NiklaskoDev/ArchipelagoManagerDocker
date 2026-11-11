@@ -19,8 +19,11 @@ players log in to keep their YAML configs, see their games and download their pa
 - **Stores configs per user.** Everyone has a private library of player YAMLs: upload one, or create it in a form with
   every option of the game (custom games included), like the player options page on archipelago.gg. The YAML can be
   edited directly too, or started from the documented template. *Check* asks Archipelago whether the generator would
-  take a config, and lists every problem it finds, before anyone generates. Players can share a config, and the others
-  copy it into their own library with their own player name.
+  take a config, and lists every problem it finds, before anyone generates. Players can share a config with everyone,
+  with their friends or with the friends they choose, and the others copy it into their own library with their own
+  player name.
+- **Friends.** Players add each other by name and answer requests on their dashboard. Friends share configs with each
+  other alone, and a player who generates can pick their friends' configs, which puts those friends in the game.
 - **Generates games.** Pick configs, choose spoiler level, seed, race mode, plando and an optional `meta.yaml`, and
   generate with the real `Generate.py`. Options you use again (a race setup, an async one) are saved as templates. The result is imported as a game, with slots linked to the configs' owners, and
   can be hosted straight away. Jobs queue, show a live log and can be cancelled. *Generate again* repeats a game or a

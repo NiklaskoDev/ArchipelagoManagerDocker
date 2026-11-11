@@ -19,7 +19,7 @@ from typing import Any
 import yaml
 
 from ..archipelago import apbridge, versions
-from ..configs import configstore, yamlinfo
+from ..configs import configstore, sharing, yamlinfo
 from ..core import db
 from ..games import gamestore
 from . import limits
@@ -56,7 +56,9 @@ def job_dir(job_id: int) -> Path:
 
 def prepare_players(config_ids: list[int], user: sqlite3.Row, *, is_admin: bool,
                     version: str | None = None) -> list[PreparedPlayer]:
-    """Loads and validates the chosen configs. Raises JobRequestError with a message fit for the user."""
+    """Loads and validates the chosen configs: the user's own, those their friends share with them (which puts the
+    friends in the game: a player is linked to the owner of their config), or any for an administrator. Raises
+    JobRequestError with a message fit for the user."""
     if not config_ids:
         raise JobRequestError("Select at least one player config")
     if len(set(config_ids)) != len(config_ids):
@@ -67,9 +69,17 @@ def prepare_players(config_ids: list[int], user: sqlite3.Row, *, is_admin: bool,
     players: list[PreparedPlayer] = []
     used_filenames: set[str] = set()
     for config_id in config_ids:
-        row = db.query_one("SELECT * FROM configs WHERE id = ?", (config_id,))
-        if not row or (row["user_id"] != user["id"] and not is_admin):
+        row = db.query_one("SELECT c.*, u.username AS owner, u.disabled AS owner_disabled FROM configs c "
+                           "JOIN users u ON u.id = c.user_id WHERE c.id = ?", (config_id,))
+        if not row:
             raise JobRequestError(f"Config {config_id} does not exist", 404)
+        if row["user_id"] != user["id"] and not is_admin:
+            visible = sharing.shared_with(row, user["id"], owner_disabled=bool(row["owner_disabled"]))
+            if not visible:
+                raise JobRequestError(f"Config {config_id} does not exist", 404)
+            if not sharing.from_friend(row, user["id"]):
+                raise JobRequestError(f"'{row['name']}' is shared by {row['owner']}, who is not your friend. Copy it "
+                                      "into your configs to generate with it.", 403)
         try:
             data = configstore.config_path(row["user_id"], row["id"]).read_bytes()
         except FileNotFoundError:

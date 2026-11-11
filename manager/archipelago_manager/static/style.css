@@ -208,6 +208,8 @@ textarea.input { font-family: var(--mono); font-size: .88rem; line-height: 1.45;
 textarea.editor { min-height: 62vh; white-space: pre; overflow: auto; }
 .check { display: flex; gap: 10px; align-items: flex-start; cursor: pointer; }
 .check input { margin-top: 4px; accent-color: var(--accent); width: 16px; height: 16px; }
+/* the friends a config is shared with, under the choice they belong to (views/configs.js) */
+.share-friends { padding-left: 26px; max-height: 240px; overflow-y: auto; }
 .form-grid { display: grid; gap: 14px 18px; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
 .form-error { color: var(--bad); min-height: 1.2em; font-size: .9rem; }
 .copyfield { display: inline-flex; align-items: center; gap: 4px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 3px 4px 3px 10px; max-width: 100%; }
