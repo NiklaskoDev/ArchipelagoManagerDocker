@@ -112,8 +112,9 @@ free (a game everyone finished stays in the archive). A game you
 generate with *start the server when done* while another of yours runs is generated but not started. Organizers and
 administrators have none of these limits, and they can start a game of yours while another one runs.
 
-**Friends:** under **Friends**, add someone by their user name (as it shows next to their slots). They see your
-request on their dashboard and on their **Friends** page, and once they accept you are friends; asking someone who has
+**Friends:** *Friends* in the user menu (top right) opens the page where you add someone by their user name (as it
+shows next to their slots). They see your request on their dashboard and on their **Friends** page, and the user button
+counts the requests waiting for them; once they accept you are friends; asking someone who has
 asked you already accepts their request. *Take back* withdraws a request of yours, *Decline* turns one down, *Remove*
 ends a friendship. **People you played with** suggests those who had slots in your games. Friends can share configs
 with each other alone, and generate games with each other in (see *Generating your own games* above).

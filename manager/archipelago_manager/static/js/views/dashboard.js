@@ -16,6 +16,7 @@ export default async function render({ root, cleanup, isCurrent }) {
   // friend requests waiting for an answer (views/friends.js has the rest)
   const requestsHost = h("div");
   const drawRequests = ({ incoming }) => {
+    document.dispatchEvent(new CustomEvent("apm-friend-requests", { detail: incoming.length }));  // the user button (app.js)
     clear(requestsHost);
     if (!incoming.length) return;
     const answer = (p, accept) => action(async () => {

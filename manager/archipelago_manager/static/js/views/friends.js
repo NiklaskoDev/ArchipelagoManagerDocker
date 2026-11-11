@@ -16,6 +16,7 @@ export default async function render({ root, cleanup, isCurrent }) {
   async function load(force = false) {
     const data = await get("/api/friends");
     if (!isCurrent()) return;
+    document.dispatchEvent(new CustomEvent("apm-friend-requests", { detail: data.incoming.length }));  // the user button (app.js)
     const sig = JSON.stringify(data);
     if (!force && sig === signature) return;
     signature = sig;
