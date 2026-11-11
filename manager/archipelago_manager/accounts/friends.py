@@ -41,6 +41,12 @@ def friend_ids(user_id: int) -> set[int]:
     return {r["id"] for r in rows}
 
 
+def requests_waiting(user_id: int) -> int:
+    """How many friend requests wait for the user's answer (shown on the user button, app.js)."""
+    return db.query_one("SELECT COUNT(*) AS n FROM friends f JOIN users u ON u.id = f.user_id "
+                        "WHERE f.friend_id = ? AND f.accepted_at IS NULL AND u.disabled = 0", (user_id,))["n"]
+
+
 def overview(user_id: int) -> dict:
     """The user's friends, the requests that wait for them and for others, and people they played with who are not
     their friends yet. People whose accounts are disabled are left out."""

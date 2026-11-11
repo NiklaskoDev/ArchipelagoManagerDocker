@@ -1566,7 +1566,9 @@
   "Want to play with friends? Once they share a config with you, it is listed here, and picking it puts them in the game.": "Met vrienden spelen? Zodra ze een config met je delen, staat die hier, en als je hem kiest, zitten ze in het spel.",
   "friends since {date}": "vrienden sinds {date}",
   "shares {n} config with you": "deelt {n} config met jou",
-  "shares {n} configs with you": "deelt {n} configs met jou"
+  "shares {n} configs with you": "deelt {n} configs met jou",
+  "{n} friend request": "{n} vriendschapsverzoek",
+  "{n} friend requests": "{n} vriendschapsverzoeken"
  },
  "server": {
   " (line {0})": " (regel {0})",

@@ -52,6 +52,9 @@ def test_players_ask_answer_and_part(plain_server):
     assert names(ann.get("/api/friends").json()["outgoing"]) == ["bob"]
     waiting = bob.get("/api/friends").json()
     assert names(waiting["incoming"]) == ["ann"] and waiting["friends"] == [] and waiting["incoming"][0]["asked_at"]
+    # counted on bob's user button, not on ann's
+    assert bob.get("/api/auth/status").json()["friend_requests"] == 1
+    assert ann.get("/api/auth/status").json()["friend_requests"] == 0
     for client, username, status, says in (
         (ann, "bob", 409, "asked bob already"),
         (ann, "ann", 400, "yourself"),
@@ -63,6 +66,7 @@ def test_players_ask_answer_and_part(plain_server):
     assert ann.post(f"/api/friends/{bob_id}/accept").status_code == 404
 
     assert bob.post(f"/api/friends/{ann_id}/accept").status_code == 200
+    assert bob.get("/api/auth/status").json()["friend_requests"] == 0
     for client, other in ((ann, "bob"), (bob, "ann")):
         listing = client.get("/api/friends").json()
         assert names(listing["friends"]) == [other] and listing["incoming"] == listing["outgoing"] == []

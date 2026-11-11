@@ -13,7 +13,7 @@ const ROUTES = [
   [/^\/configs$/, () => import("./views/configs.js"), "configs", () => (isAdmin() ? t("Player configs") : t("My configs"))],
   [/^\/configs\/new$/, () => import("./views/config-edit.js"), "configs", () => t("New config")],
   [/^\/configs\/(\d+)$/, () => import("./views/config-edit.js"), "configs", () => t("My configs")],
-  [/^\/friends$/, () => import("./views/friends.js"), "friends", () => t("Friends")],
+  [/^\/friends$/, () => import("./views/friends.js"), null, () => t("Friends")],
   [/^\/generate$/, () => import("./views/generate.js"), "generate", () => t("Generate")],
   [/^\/jobs\/(\d+)$/, () => import("./views/job.js"), "generate", () => t("Generation")],
   [/^\/signups$/, () => import("./views/signups.js"), "signups", () => t("Sign-ups")],
@@ -170,7 +170,6 @@ function renderShell() {
     navLink("#/", "home", t("Dashboard"), "home"),
     navLink("#/games", "games", t("Games"), "server"),
     navLink("#/configs", "configs", t("My configs"), "file"),
-    navLink("#/friends", "friends", t("Friends"), "users"),
     navLink("#/signups", "signups", t("Sign-ups"), "calendar"),
     canGenerate() ? navLink("#/generate", "generate", t("Generate"), "zap") : null,
     navLink("#/worlds", "worlds", t("Custom games"), "package"),
@@ -179,7 +178,8 @@ function renderShell() {
   view = h("main", { id: "view", class: "view", tabindex: "-1" });
   const userButton = h("button", { class: "btn ghost user-btn", type: "button", "aria-haspopup": "menu" },
     userPicture(), h("span", {}, state.user.username), isAdmin() ? h("span", { class: "badge accent" }, t("admin"))
-      : state.user.role === "organizer" ? h("span", { class: "badge accent" }, t("organizer")) : null);
+      : state.user.role === "organizer" ? h("span", { class: "badge accent" }, t("organizer")) : null, requestsBadge);
+  showFriendRequests(state.status.friend_requests || 0);
   const menu = h("div", { class: "menu", hidden: true, role: "menu" });
   userMenu = menu;
   menuKeys(menu);
@@ -247,11 +247,25 @@ function userPicture() {
   return picture;
 }
 
+// Friends live in the user menu, which keeps the nav short. Friend requests waiting for an answer are counted on the
+// user button: from the status at sign-in, then whenever a page that lists them looks (views/friends.js, dashboard.js).
+let friendRequests = 0;
+const requestsBadge = h("span", { class: "badge warn", hidden: true });
+function showFriendRequests(count) {
+  friendRequests = count;
+  requestsBadge.hidden = !count;
+  requestsBadge.textContent = String(count);
+  requestsBadge.title = count ? plural(count, "{n} friend request", "{n} friend requests") : "";
+}
+document.addEventListener("apm-friend-requests", (e) => showFriendRequests(e.detail));
+
 function drawUserMenu(menu) {
   const user = state.user;
   const item = (iconName, label, onclick) => h("button", { class: "menu-item", type: "button", role: "menuitem",
     onclick: (e) => { e.stopPropagation(); menu.hidden = true; onclick(); } }, icon(iconName, 14), label);
   clear(menu).append(
+    item("users", [t("Friends"), friendRequests ? h("span", { class: "menu-value" }, h("span", { class: "badge warn" }, String(friendRequests))) : null],
+      () => { location.hash = "#/friends"; }),
     item("key", user.has_password ? t("Change password") : t("Set a password"), passwordDialog),
     user.discord_name
       ? [h("div", { class: "menu-note" }, t("Discord: {name}", { name: user.discord_name })), item("link", t("Unlink Discord"), unlinkDiscord)]

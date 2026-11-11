@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 
 from .. import __version__, notify
 from ..core import audit, db, settings as app_settings
-from ..accounts import discord_auth, invites
+from ..accounts import discord_auth, friends, invites
 from ..generation import limits
 from ..core.config import CONFIG
 from ..core.security import ROLES, SESSION_COOKIE, LoginThrottle, admin_user, check_password_policy, check_username, client_address, create_session, current_user, destroy_session, destroy_user_sessions, hash_password, https_in_use, is_organizer, login_throttle, normal_username, organizer_user, revoke_user_tokens, set_session_cookie, user_for_request, verify_password
@@ -92,6 +92,8 @@ def status(request: Request) -> dict:
         "ping_kinds": notify.ping_kinds_offered(cfg) if user else [],
         # what a player may have of the games they generate (limits.py); None for organizers and administrators
         "limits": limits.summary(user) if user else None,
+        # friend requests waiting for the user's answer, counted on the user button
+        "friend_requests": friends.requests_waiting(user["id"]) if user else 0,
     }
 
 
