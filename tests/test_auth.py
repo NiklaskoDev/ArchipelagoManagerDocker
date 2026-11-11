@@ -269,6 +269,9 @@ def test_a_database_from_the_first_version_is_upgraded(tmp_path):
     conn.execute("DROP TABLE invites")
     conn.execute("DROP TABLE password_resets")
     conn.execute("ALTER TABLE users DROP COLUMN invite_id")
+    conn.execute("DROP TABLE config_shares")
+    conn.execute("DROP TABLE friends")
+    conn.execute("ALTER TABLE configs DROP COLUMN share_with")
     conn.execute("PRAGMA user_version = 1")
     conn.commit()
     conn.close()
@@ -279,7 +282,7 @@ def test_a_database_from_the_first_version_is_upgraded(tmp_path):
         games = admin.get("/api/games").json()
         assert [(g["name"], g["single_claim"], g["finished_at"]) for g in games] == [("Old game", False, None)]
         conn = sqlite3.connect(db_path)
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 22
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 23
         conn.close()
         # tables added since then exist and work
         r = admin.post("/api/signups", json={"name": "After the upgrade"})
@@ -297,6 +300,7 @@ def test_a_database_from_the_first_version_is_upgraded(tmp_path):
         assert admin.get("/api/configs/shared").json() == []
         assert admin.get("/api/presets").json()["presets"] == []
         assert admin.get("/api/users/invites").json() == []
+        assert admin.get("/api/friends").json()["friends"] == []
         # the users table was built anew for the organizer role, with everything that refers to it
         boss = admin.get("/api/auth/status").json()["user"]
         assert boss["username"] == "boss" and boss["role"] == "admin"
@@ -328,6 +332,9 @@ def test_entries_from_before_slots_were_counted_are_counted(tmp_path):
     conn.execute("DROP TABLE invites")  # and these in v22
     conn.execute("DROP TABLE password_resets")
     conn.execute("ALTER TABLE users DROP COLUMN invite_id")
+    conn.execute("DROP TABLE config_shares")  # and these in v23
+    conn.execute("DROP TABLE friends")
+    conn.execute("ALTER TABLE configs DROP COLUMN share_with")
     conn.execute("PRAGMA user_version = 19")
     conn.commit()
     conn.close()

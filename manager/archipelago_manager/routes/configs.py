@@ -13,7 +13,8 @@ from fastapi.responses import FileResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 
 from ..archipelago import apbridge
-from ..configs import configcheck, configstore, mystery, yamlform, yamlinfo
+from ..configs import configcheck, configstore, mystery, sharing, yamlform, yamlinfo
+from ..accounts import friends
 from ..core import db
 from ..configs.configstore import config_path
 from ..core.security import current_user, is_admin
@@ -21,8 +22,10 @@ from ..core.security import current_user, is_admin
 router = APIRouter(prefix="/api")
 
 
-def config_json(row: sqlite3.Row, *, owner: str | None = None) -> dict:
+def config_json(row: sqlite3.Row, *, owner: str | None = None, chosen: list[dict] | None = None) -> dict:
+    """`chosen`: the friends the config is shared with by name, for its owner to see (sharing.chosen_friends)."""
     games = db.jloads(row["games"], [])
+    shared = row["shared_at"] is not None
     result = {
         "id": row["id"],
         "user_id": row["user_id"],
@@ -34,13 +37,17 @@ def config_json(row: sqlite3.Row, *, owner: str | None = None) -> dict:
         "source_game_id": row["source_game_id"],
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
-        "shared": row["shared_at"] is not None,
+        "shared": shared,
         "shared_at": row["shared_at"],
+        # who sees it: "everyone", "friends" (all of its owner's) or "chosen" (the friends in shared_with)
+        "share_with": row["share_with"] if shared else None,
         "missing_games": apbridge.missing_games(games),
         "missing_roms": apbridge.missing_files(games),
     }
     if owner is not None:
         result["owner"] = owner
+    if chosen is not None:
+        result["shared_with"] = chosen if shared and row["share_with"] == "chosen" else []
     return result
 
 
@@ -73,11 +80,12 @@ def get_config(config_id: int, user: sqlite3.Row) -> sqlite3.Row:
 
 
 def readable_config(config_id: int, user: sqlite3.Row) -> sqlite3.Row:
-    """A config the user may read and copy: their own, any for an administrator, or one another player shares."""
+    """A config the user may read and copy: their own, any for an administrator, or one another player shares with
+    them (sharing.py)."""
     row = db.query_one("SELECT c.*, u.username AS owner, u.disabled AS owner_disabled FROM configs c "
                        "JOIN users u ON u.id = c.user_id WHERE c.id = ?", (config_id,))
     if not row or not (row["user_id"] == user["id"] or is_admin(user)
-                       or (row["shared_at"] is not None and not row["owner_disabled"])):
+                       or sharing.shared_with(row, user["id"], owner_disabled=bool(row["owner_disabled"]))):
         raise HTTPException(404, "No such config")
     return row
 
@@ -90,37 +98,58 @@ def read_config_bytes(row: sqlite3.Row) -> bytes:
 
 
 @router.get("/configs")
-def list_configs(all: bool = False, user: sqlite3.Row = Depends(current_user)) -> list[dict]:
+def list_configs(all: bool = False, with_friends: bool = Query(False, alias="friends"),
+                 user: sqlite3.Row = Depends(current_user)) -> list[dict]:
+    """The user's configs; with `all`, everyone's (administrators); with `friends`, also those the user's friends share
+    with them, which they can generate with (generation/jobs.py)."""
     base = ("SELECT c.*, u.username AS owner FROM configs c JOIN users u ON u.id = c.user_id ")
     if all and is_admin(user):
         rows = db.query(base + "ORDER BY u.username COLLATE NOCASE, c.name COLLATE NOCASE")
+    elif with_friends:
+        condition, params = sharing.friends_sql(user["id"])
+        rows = db.query(base + f"WHERE c.user_id = ? OR {condition} "
+                        "ORDER BY c.user_id != ?, u.username COLLATE NOCASE, c.name COLLATE NOCASE",
+                        (user["id"], *params, user["id"]))
     else:
         rows = db.query(base + "WHERE c.user_id = ? ORDER BY c.name COLLATE NOCASE", (user["id"],))
-    return [config_json(r, owner=r["owner"]) for r in rows]
+    chosen = sharing.chosen_friends([r["id"] for r in rows if r["user_id"] == user["id"] and r["shared_at"] is not None
+                                     and r["share_with"] == "chosen"])
+    return [config_json(r, owner=r["owner"], chosen=chosen.get(r["id"], []) if r["user_id"] == user["id"] else None)
+            for r in rows]
 
 
 # ----------------------------------------------------------------------------------------------------------------------
-# sharing: players offer their configs to the others, who copy them into their own library
+# sharing: players offer their configs to the others (or to their friends), who copy them into their own library
 # ----------------------------------------------------------------------------------------------------------------------
-def _shared_json(row: sqlite3.Row, user: sqlite3.Row) -> dict:
-    return {**config_json(row, owner=row["owner"]), "mine": row["user_id"] == user["id"]}
+def _shared_json(row: sqlite3.Row, user: sqlite3.Row, friend_ids: set[int], chosen: dict[int, list[dict]]) -> dict:
+    mine = row["user_id"] == user["id"]
+    # from_friend: the user can generate with it, which puts the friend in the game
+    return {**config_json(row, owner=row["owner"], chosen=chosen.get(row["id"], []) if mine else None),
+            "mine": mine, "from_friend": row["user_id"] in friend_ids}
 
 
 @router.get("/configs/shared")
 def list_shared_configs(user: sqlite3.Row = Depends(current_user)) -> list[dict]:
+    condition, params = sharing.visible_sql(user["id"])
     rows = db.query("SELECT c.*, u.username AS owner FROM configs c JOIN users u ON u.id = c.user_id "
-                    "WHERE c.shared_at IS NOT NULL AND u.disabled = 0 ORDER BY c.shared_at DESC")
-    return [_shared_json(r, user) for r in rows]
+                    f"WHERE {condition} ORDER BY c.shared_at DESC", params)
+    friend_ids = friends.friend_ids(user["id"])
+    chosen = sharing.chosen_friends([r["id"] for r in rows if r["user_id"] == user["id"]])
+    return [_shared_json(r, user, friend_ids, chosen) for r in rows]
 
 
 @router.get("/configs/shared/{config_id}")
 def shared_config_detail(config_id: int, user: sqlite3.Row = Depends(current_user)) -> dict:
     row = readable_config(config_id, user)
-    return {**_shared_json(row, user), "content": read_config_bytes(row).decode("utf-8-sig")}
+    chosen = sharing.chosen_friends([row["id"]]) if row["user_id"] == user["id"] else {}
+    return {**_shared_json(row, user, friends.friend_ids(user["id"]), chosen),
+            "content": read_config_bytes(row).decode("utf-8-sig")}
 
 
 class ShareChange(BaseModel):
     shared: bool
+    share_with: str = "everyone"  # sharing.AUDIENCES
+    friends: list[int] = Field(default=[], max_length=friends.MAX_FRIENDS)  # with "chosen"
 
 
 @router.put("/configs/{config_id}/shared")
@@ -128,9 +157,12 @@ def share_config(config_id: int, body: ShareChange, user: sqlite3.Row = Depends(
     row = get_config(config_id, user)
     if body.shared and row["user_id"] != user["id"]:
         raise HTTPException(403, "Only its owner can share a config")  # an administrator can stop sharing it
-    if body.shared != (row["shared_at"] is not None):
-        db.execute("UPDATE configs SET shared_at = ? WHERE id = ?", (db.now() if body.shared else None, config_id))
-    return config_json(db.query_one("SELECT * FROM configs WHERE id = ?", (config_id,)))
+    try:
+        sharing.set_sharing(config_id, row["user_id"], body.shared, body.share_with, body.friends)
+    except sharing.ShareError as e:
+        raise HTTPException(e.status, e.message) from None
+    fresh = db.query_one("SELECT * FROM configs WHERE id = ?", (config_id,))
+    return config_json(fresh, chosen=sharing.chosen_friends([config_id]).get(config_id, []))
 
 
 class ConfigCopy(BaseModel):

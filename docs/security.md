@@ -37,8 +37,12 @@
   account ID (`@everyone`, roles, and mentions in a player name stay plain text).
   Treat the webhook address like a password: anyone who has it can post to the channel. Only admins see and set the
   webhooks, the games' own included; an organizer can give their own games a Discord webhook, and nothing but one.
-- Configs are private to their owner (and admins) until the owner shares one. Others can then read and copy it, never
-  change or delete it; a disabled user's configs are no longer offered.
+- Configs are private to their owner (and admins) until the owner shares one, with everyone, with their friends or
+  with the friends they choose. Those can then read and copy it, never change or delete it; a disabled user's configs
+  are no longer offered. Only friends can put a player in a game they generate, and only with a config that player
+  shares with them; ending the friendship ends both.
+- Friends: a request names its receiver by user name, and nothing changes until they accept. A player has at most 200
+  friends and requests, and at most 30 requests waiting for an answer.
 - Signing in with Discord uses OAuth2 with a single-use `state` bound to the browser that started it, a fixed redirect
   address, and Discord's account ID; Discord's tokens are revoked right after use. Disabled users cannot sign in this
   way either.

@@ -1,5 +1,5 @@
 import { h, clear, icon, toast, action, confirmDialog, fmtAgo, fmtBytes, openModal } from "../util.js";
-import { api, get, post, put, del, isAdmin, state } from "../api.js";
+import { api, get, post, put, del, isAdmin, canGenerate, state } from "../api.js";
 import { pageHeader, empty, chips, badge, missingGamesPanel, missingRomsPanel, promptMissingGames, checkbox, field,
          defaultPlayerName, configCheckDialog } from "../components.js";
 import { t, tServer, plural } from "../i18n.js";
@@ -20,16 +20,72 @@ export default async function render({ root, query, isCurrent }) {
     drawShared(shared);
   }
 
-  const setShared = (c, shared) => action(async () => {
-    await put(`/api/configs/${c.id}/shared`, { shared });
-    toast(shared ? t("{name} is now shared with the other players", { name: c.name }) : t("{name} is no longer shared", { name: c.name }), "success");
+  const stopSharing = async (c) => {
+    await put(`/api/configs/${c.id}/shared`, { shared: false });
+    toast(t("{name} is no longer shared", { name: c.name }), "success");
     await load();
-  });
+  };
+
+  // Who sees one of the user's configs: every player, their friends, or the friends they choose (configs/sharing.py)
+  async function shareDialog(c) {
+    const { friends } = await get("/api/friends");
+    let choice = c.shared ? c.share_with : "everyone";
+    const picked = new Set((c.shared_with || []).map((f) => f.id));
+    const friendList = h("div", { class: "stack tight share-friends" }, friends.map((f) => {
+      const box = checkbox(f.username, picked.has(f.id));
+      box.input.onchange = () => { if (box.input.checked) picked.add(f.id); else picked.delete(f.id); };
+      return box;
+    }));
+    const options = [
+      ["everyone", t("Every player on this server"), t("Anyone here can look at it and copy it into their configs.")],
+      ["friends", t("All my friends"), t("Also the friends you add later.")],
+      ["chosen", t("Only the friends I choose"), null],
+    ];
+    const radios = options.map(([value, label, hint]) => {
+      const input = h("input", { type: "radio", name: `share-${c.id}`, value, checked: value === choice,
+        disabled: value !== "everyone" && !friends.length });
+      input.onchange = () => { choice = value; friendList.hidden = choice !== "chosen"; };
+      return h("label", { class: "check" }, input, h("span", {}, label, hint ? h("span", { class: "hint" }, hint) : null));
+    });
+    friendList.hidden = choice !== "chosen";
+    const save = h("button", { class: "btn primary", type: "button" }, icon("users", 14), c.shared ? t("Save") : t("Share"));
+    save.onclick = action(async () => {
+      if (choice === "chosen" && !picked.size) throw new Error(t("Choose at least one friend"));
+      await put(`/api/configs/${c.id}/shared`, { shared: true, share_with: choice, friends: choice === "chosen" ? [...picked] : [] });
+      modal.close();
+      toast(choice === "everyone" ? t("{name} is now shared with the other players", { name: c.name })
+        : choice === "friends" ? t("{name} is now shared with your friends", { name: c.name })
+        : t("{name} is now shared with the friends you chose", { name: c.name }), "success");
+      await load();
+    });
+    const modal = openModal({
+      title: t("Share {name}", { name: c.name }),
+      body: h("div", { class: "stack" },
+        h("div", { class: "stack tight" }, radios[0], radios[1], radios[2], friendList),
+        friends.length ? h("p", { class: "muted small" }, t("Friends who see it can also pick it when they generate a game: that puts you in their game."))
+          : h("p", { class: "muted small" }, t("To share it with friends alone, add them first."), " ",
+            h("a", { href: "#/friends", onclick: () => modal.close() }, t("Add friends")))),
+      actions: [h("button", { class: "btn", type: "button", onclick: () => modal.close() }, t("Cancel")),
+        c.shared ? h("button", { class: "btn", type: "button", onclick: action(async () => { await stopSharing(c); modal.close(); }) }, t("Stop sharing")) : null,
+        save],
+    });
+  }
+
+  // who sees a shared config, in a few words
+  function audience(c) {
+    if (c.share_with === "friends") return t("shared with your friends");
+    if (c.share_with === "chosen") {
+      return c.shared_with?.length === 1 ? t("shared with {name}", { name: c.shared_with[0].username })
+        : plural(c.shared_with?.length || 0, "shared with {n} friend", "shared with {n} friends");
+    }
+    return t("shared");
+  }
 
   // Configs other players share: look at one, download it, or copy it into your own
   function drawShared(shared) {
     clear(sharedHost).append(h("h2", {}, t("Shared by players")),
-      h("p", { class: "muted small" }, t("Configs players offer to everyone. Copy one into your configs to use it or change it; the original stays as it is.")));
+      h("p", { class: "muted small" }, t("Configs players offer to everyone, and those your friends share with you. Copy one into your configs to use it or change it; the original stays as it is."),
+        canGenerate() ? [" ", t("Your friends' configs can also be picked when you generate a game, which puts your friend in it.")] : null));
     if (!shared.length) {
       sharedHost.append(h("p", { class: "muted" }, t("Nobody shares a config yet. Share one of yours with the Share button next to it.")));
       return;
@@ -41,9 +97,12 @@ export default async function render({ root, query, isCurrent }) {
           c.description ? h("div", { class: "muted small" }, c.description) : null),
         h("td", {}, c.player_names.length ? c.player_names.join(", ") : h("span", { class: "muted" }, t("from file name"))),
         h("td", {}, chips(c.games, c.missing_games)),
-        h("td", {}, c.mine ? badge(t("you"), "accent") : c.owner, h("div", { class: "muted small" }, fmtAgo(c.shared_at))),
+        h("td", {}, c.mine ? badge(t("you"), "accent") : [c.owner, c.from_friend ? [" ", badge(t("friend"), "ok")] : null],
+          h("div", { class: "muted small" }, [c.mine ? audience(c) : c.share_with !== "everyone" ? t("with friends only") : null, fmtAgo(c.shared_at)]
+            .filter(Boolean).flatMap((part, i) => (i ? [" · ", part] : [part])))),
         h("td", { class: "actions" }, h("div", { class: "row", style: { justifyContent: "flex-end" } },
-          c.mine || admin ? h("button", { class: "btn sm", type: "button", onclick: setShared(c, false) }, t("Stop sharing")) : null,
+          c.mine ? h("button", { class: "btn sm", type: "button", onclick: action(() => shareDialog(c)) }, icon("users", 14), t("Share…"))
+            : admin ? h("button", { class: "btn sm", type: "button", onclick: action(() => stopSharing(c)) }, t("Stop sharing")) : null,
           c.mine ? null : h("button", { class: "btn sm", type: "button", onclick: () => copyDialog(c) }, icon("copy", 14), t("Copy")),
           h("a", { class: "btn sm ghost icon-only", href: `/api/configs/${c.id}/download`, "aria-label": t("Download"), title: t("Download") }, icon("download", 14))))))))));
   }
@@ -130,7 +189,7 @@ export default async function render({ root, query, isCurrent }) {
         showAll ? h("td", {}, c.owner) : null,
         h("td", {}, h("a", { href: `#/configs/${c.id}`, class: "slot-name" }, c.name),
           c.source_game_id ? [" ", h("a", { href: `#/games/${c.source_game_id}` }, badge(t("from a game"), "accent"))] : null,
-          c.shared ? [" ", badge(t("shared"), "ok")] : null,
+          c.shared ? [" ", h("span", { title: (c.shared_with || []).map((f) => f.username).join(", ") || undefined }, badge(audience(c), "ok"))] : null,
           h("div", { class: "muted small" }, fmtBytes(c.size))),
         h("td", {}, c.player_names.length ? c.player_names.join(", ") : h("span", { class: "muted" }, t("from file name"))),
         h("td", {}, chips(c.games, c.missing_games)),
@@ -140,9 +199,10 @@ export default async function render({ root, query, isCurrent }) {
             onclick: () => configCheckDialog({ name: c.name, load: async () => (await get(`/api/configs/${c.id}`)).content,
               editHref: `#/configs/${c.id}` }) }, icon("check", 14), t("Check")),
           h("a", { class: "btn sm", href: `#/configs/${c.id}` }, icon("edit", 14), t("Edit")),
-          c.user_id === state.user.id || c.shared ? h("button", { class: "btn sm ghost", type: "button", "aria-pressed": String(c.shared),
-            title: c.shared ? t("Stop sharing this config") : t("Offer this config to the other players to copy"),
-            onclick: setShared(c, !c.shared) }, icon("users", 14), c.shared ? t("Stop sharing") : t("Share")) : null,
+          c.user_id === state.user.id ? h("button", { class: "btn sm ghost", type: "button",
+            title: c.shared ? t("Change who sees this config, or stop sharing it") : t("Offer this config to the other players or to your friends"),
+            onclick: action(() => shareDialog(c)) }, icon("users", 14), t("Share…"))
+            : c.shared ? h("button", { class: "btn sm ghost", type: "button", onclick: action(() => stopSharing(c)) }, icon("users", 14), t("Stop sharing")) : null,
           h("a", { class: "btn sm ghost icon-only", href: `/api/configs/${c.id}/download`, "aria-label": t("Download"), title: t("Download") }, icon("download", 14)),
           h("button", { class: "btn sm ghost icon-only", type: "button", "aria-label": t("Delete"), title: t("Delete"), onclick: action(async () => {
             if (!(await confirmDialog(t("Delete {name}?", { name: c.name }), { danger: true, confirmText: t("Delete") }))) return;

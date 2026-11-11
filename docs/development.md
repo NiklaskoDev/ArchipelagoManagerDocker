@@ -38,9 +38,9 @@ DATA_DIR=../data AP_DIR=$PWD/../Archipelago AP_PYTHON=$PWD/../ap-venv/bin/python
 | Package | What it does |
 |---|---|
 | `core/` | configuration from the environment, the database, settings, sessions and request guards, the audit log, calendar files |
-| `accounts/` | invite and password-reset links, signing in with Discord |
+| `accounts/` | invite and password-reset links, signing in with Discord, friends |
 | `archipelago/` | talking to the Archipelago installation (`apbridge.py`, which runs `ap_helper.py`), further versions, custom worlds from GitHub releases, notices of new releases |
-| `configs/` | player YAML files: storing them, reading them as the generator does, the options form, *Check*, rolling weights |
+| `configs/` | player YAML files: storing them, reading them as the generator does, who they are shared with, the options form, *Check*, rolling weights |
 | `generation/` | the generation queue (`jobs.py`), saved generation options, what players may generate, sign-up rounds |
 | `games/` | one Archipelago server per game (`rooms.py`), importing and storing games, saves and backups, progress and history, the activity feed, the text client, the away summary, spectators, planned starts, reminders, taking games over from archipelago.gg, encrypted connections |
 | `notify/` | Discord messages, with their German, French and Dutch texts (`de.py`, `fr.py`, `nl.py`) |

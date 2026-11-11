@@ -11,7 +11,9 @@ const PLANDO = () => [["bosses", t("Bosses")], ["connections", t("Connections")]
 export default async function render({ root, cleanup, isCurrent, query }) {
   const admin = isAdmin();
   const presets = presetBar({ read: readOptions, apply: applyOptions });
-  const [configs, jobs, apVersions, presetData, status] = await Promise.all([get(`/api/configs${admin ? "?all=true" : ""}`), get("/api/jobs"),
+  // an administrator generates with anyone's configs; a player with theirs and those their friends share with them
+  const configsUrl = `/api/configs?${admin ? "all" : "friends"}=true`;
+  const [configs, jobs, apVersions, presetData, status] = await Promise.all([get(configsUrl), get("/api/jobs"),
     get("/api/ap-versions"), presets.load(), get("/api/auth/status")]);
   const selected = new Set(query.getAll("config").map(Number));
 
@@ -44,7 +46,7 @@ export default async function render({ root, cleanup, isCurrent, query }) {
     })), reloadConfigs) || "", missingRomsPanel(chosen.map((c) => c.missing_roms)));
   }
   async function reloadConfigs() {
-    const fresh = await get(`/api/configs${admin ? "?all=true" : ""}`);
+    const fresh = await get(configsUrl);
     if (!isCurrent()) return;
     configs.splice(0, configs.length, ...fresh);
     drawRows();
@@ -55,6 +57,10 @@ export default async function render({ root, cleanup, isCurrent, query }) {
   // of its own at the end.
   const SEVERAL = "";
   const groupOf = (c) => (c.games.length === 1 ? c.games[0] : SEVERAL);
+  // whose config it is: everyone's for an administrator; for a player, once a friend's config is among theirs
+  const me = state.user.id;
+  const withOwners = () => admin || configs.some((c) => c.user_id !== me);
+  const ownerCell = (c) => h("td", {}, c.user_id === me ? h("span", { class: "muted" }, t("you")) : c.owner);
   function drawRows() {
     const q = filter.value.trim().toLowerCase();
     boxes.clear();
@@ -96,7 +102,7 @@ export default async function render({ root, cleanup, isCurrent, query }) {
       boxes.set(c.id, box);
       return h("tr", { onclick: (e) => { if (e.target !== box && !e.target.closest("a")) { box.checked = !box.checked; toggle(); } }, style: { cursor: "pointer" } },
         h("td", { class: "select-col" }, box),
-        admin ? h("td", {}, c.owner) : null,
+        withOwners() ? ownerCell(c) : null,
         h("td", {}, h("span", { class: "slot-name" }, c.name)),
         h("td", {}, c.player_names.length ? c.player_names.join(", ") : h("span", { class: "muted" }, t("from file name"))),
         game === SEVERAL ? h("td", {}, chips(c.games, c.missing_games)) : null);
@@ -106,7 +112,7 @@ export default async function render({ root, cleanup, isCurrent, query }) {
       h("summary", {}, all, game === SEVERAL ? h("span", { class: "grow" }, t("Several games")) : h("span", { class: "grow" }, chips([game], missing ? [game] : [])),
         count),
       h("div", { class: "table-wrap" }, h("table", { class: "table" },
-        h("thead", {}, h("tr", {}, h("th", { class: "select-col" }), admin ? h("th", {}, t("Owner")) : null, h("th", {}, t("Config")), h("th", {}, t("Player")),
+        h("thead", {}, h("tr", {}, h("th", { class: "select-col" }), withOwners() ? h("th", {}, t("Owner")) : null, h("th", {}, t("Config")), h("th", {}, t("Player")),
           game === SEVERAL ? h("th", {}, t("Games")) : null)),
         h("tbody", {}, rows))));
     group.addEventListener("toggle", () => { if (group.open) openGroups.add(game); else openGroups.delete(game); });
@@ -219,17 +225,22 @@ export default async function render({ root, cleanup, isCurrent, query }) {
     drawJobs(jobs);
   } else {
     root.append(
-      pageHeader(t("Generate"), admin ? t("Pick the players for a new multiworld, then generate it.") : t("Generate a multiworld from your own configs.")),
+      pageHeader(t("Generate"), admin ? t("Pick the players for a new multiworld, then generate it.")
+        : t("Generate a multiworld from your configs and those your friends share with you.")),
       source ? banner("info", icon("restart", 18), h("div", { class: "grow" },
         h("strong", {}, t("Generating again:")), " ", h("a", { href: `#/jobs/${source.id}` }, source.name || t("Job #{id}", { id: source.id })), ". ",
         t("Its configs and options are filled in. The configs are used as they are now, with a new seed."),
         unavailable.length ? h("div", { class: "small" }, t("No longer available, so not selected: {players}",
-          { players: unavailable.map((p) => (p.names.join(", ") || p.filename) + (admin && p.owner ? ` (${p.owner})` : "")).join(", ") })) : null)) : null,
+          { players: unavailable.map((p) => (p.names.join(", ") || p.filename) + (p.owner && p.user_id !== me ? ` (${p.owner})` : "")).join(", ") })) : null)) : null,
       limitsNote,
       missingHost,
       h("div", { class: "card flush" },
         h("div", { class: "row spread", style: { padding: "14px 16px" } }, h("div", { class: "grow" }, filter), countLabel),
-        groupsHost),
+        groupsHost,
+        admin ? null : h("p", { class: "muted small list-none" }, configs.some((c) => c.user_id !== me)
+          ? t("Picking a friend's config puts them in the game: it shows up under their games.")
+          : [t("Want to play with friends? Once they share a config with you, it is listed here, and picking it puts them in the game."), " ",
+            h("a", { href: "#/friends" }, t("Friends"))])),
       h("div", { class: "card stack section" },
         h("h2", {}, t("Options")),
         presets.node,

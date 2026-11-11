@@ -15,7 +15,7 @@ from .config import CONFIG
 
 log = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 22
+SCHEMA_VERSION = 23
 
 # Added in schema version 3
 _SIGNUPS = """
@@ -240,6 +240,31 @@ CREATE TABLE password_resets (
 ALTER TABLE users ADD COLUMN invite_id INTEGER;
 """
 
+# Added in schema version 23
+_FRIENDS = """
+-- Friends (accounts/friends.py): a request from user_id to friend_id, a friendship once accepted. One row for each pair
+-- of people, whichever of them asked.
+CREATE TABLE friends (
+    user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    friend_id   INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at  REAL NOT NULL,
+    accepted_at REAL,
+    PRIMARY KEY (user_id, friend_id),
+    CHECK (user_id != friend_id)
+);
+CREATE UNIQUE INDEX friends_pair ON friends(min(user_id, friend_id), max(user_id, friend_id));
+CREATE INDEX friends_friend ON friends(friend_id);
+-- who a shared config is shared with: every player, its owner's friends, or the friends listed in config_shares
+ALTER TABLE configs ADD COLUMN share_with TEXT NOT NULL DEFAULT 'everyone'
+    CHECK (share_with IN ('everyone', 'friends', 'chosen'));
+CREATE TABLE config_shares (
+    config_id INTEGER NOT NULL REFERENCES configs(id) ON DELETE CASCADE,
+    user_id   INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    PRIMARY KEY (config_id, user_id)
+);
+CREATE INDEX config_shares_user ON config_shares(user_id);
+"""
+
 SCHEMA = _USERS + _USERS_INDEX + """
 CREATE TABLE sessions (
     token_hash TEXT PRIMARY KEY,
@@ -379,7 +404,7 @@ CREATE TABLE job_players (
 );
 CREATE INDEX job_players_job ON job_players(job_id);
 """ + _SIGNUPS + _SOURCES + "ALTER TABLE apworld_sources ADD COLUMN latest_asset TEXT; " + \
-    "ALTER TABLE signups ADD COLUMN test_job_id INTEGER;" + _PROGRESS + _AUDIT + _VISITS + _AP_VERSIONS + _API_TOKENS + _SPECTATE_REMINDERS + _MYSTERY + _PRESETS + _SLOTS + _DISCORD_AVATAR + _INVITES
+    "ALTER TABLE signups ADD COLUMN test_job_id INTEGER;" + _PROGRESS + _AUDIT + _VISITS + _AP_VERSIONS + _API_TOKENS + _SPECTATE_REMINDERS + _MYSTERY + _PRESETS + _SLOTS + _DISCORD_AVATAR + _INVITES + _FRIENDS
 
 
 # Upgrades for databases created by older versions: MIGRATIONS[n] turns schema n - 1 into schema n. New databases get
@@ -438,6 +463,7 @@ MIGRATIONS: dict[int, str] = {
     20: _SLOTS,
     21: _DISCORD_AVATAR,
     22: _INVITES,
+    23: _FRIENDS,
 }
 
 

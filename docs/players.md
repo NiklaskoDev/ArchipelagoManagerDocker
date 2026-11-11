@@ -102,8 +102,9 @@ What players do in the web UI: their configs, their games and slots, the tracker
     and a link to the results. Filter by outcome or search by game, world or slot name.
 
 **Generating your own games** (when an admin lets players generate, *Admin → Settings*): *Generate* works as it does
-for admins, with your own configs. So that one player cannot fill the server, a game you
-generate has at most 15 worlds, you can have 3 unfinished games of your own at a time (generations still under way
+for admins, with your own configs and those your friends share with you (see *Friends* below). Picking a friend's
+config puts that friend in the game: their slot is theirs, and the game shows up under their games. So that one player
+cannot fill the server, a game you generate has at most 15 worlds, you can have 3 unfinished games of your own at a time (generations still under way
 count), and one of them running (a game asleep until its players come back counts as running). *Generate* shows how
 many you have left. When a game of yours will not be played to the end, *Move to the archive* on its page lists it as
 aborted, stops its server and frees its place; *Back to the running games* takes it out again while you have a place
@@ -111,9 +112,18 @@ free (a game everyone finished stays in the archive). A game you
 generate with *start the server when done* while another of yours runs is generated but not started. Organizers and
 administrators have none of these limits, and they can start a game of yours while another one runs.
 
-**Sharing configs:** *Share* next to one of your configs offers it to everyone on the server; *Stop sharing* takes it
-back. Configs others share are listed under **Shared by players** on **My configs** (also reachable from *New config*):
-look at one, download it, or *Copy* it into your own configs. The copy asks for your player name and puts it into the
+**Friends:** under **Friends**, add someone by their user name (as it shows next to their slots). They see your
+request on their dashboard and on their **Friends** page, and once they accept you are friends; asking someone who has
+asked you already accepts their request. *Take back* withdraws a request of yours, *Decline* turns one down, *Remove*
+ends a friendship. **People you played with** suggests those who had slots in your games. Friends can share configs
+with each other alone, and generate games with each other in (see *Generating your own games* above).
+
+**Sharing configs:** *Share…* next to one of your configs offers it to **every player on this server**, to **all your
+friends** (also those you add later), or to **only the friends you choose**; the same dialog changes that later or
+*Stop sharing*. The badge next to the config says who sees it. Ending a friendship stops sharing by name between the
+two of you; a config shared with that friend alone is then no longer shared at all. Configs others share with you are
+listed under **Shared by players** on **My configs** (also reachable from *New config*), with your friends' marked
+*friend*: look at one, download it, or *Copy* it into your own configs. The copy asks for your player name and puts it into the
 file in place of the original one (everything else, comments included, stays as it is); a file with several players is
 copied as it is, so change the names in the editor. The copy is yours: neither the copy nor the original changes when
 the other does. Administrators can stop sharing any config.
