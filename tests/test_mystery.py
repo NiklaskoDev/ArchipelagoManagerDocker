@@ -93,7 +93,11 @@ def test_in_a_mystery_round_everyone_joins_with_a_name_and_gets_what_the_weights
     assert r.status_code == 409 and "mystery round" in r.json()["detail"]
     r = ann.post(f"/api/signups/{sid}/mystery-entries", json={"player_name": "AnnM"})
     assert r.status_code == 200, r.text
-    assert bob.post(f"/api/signups/{sid}/mystery-entries", json={"player_name": "annm"}).status_code == 409
+    # a name someone else has is fine (generating numbers them); bob takes it back to join with another name below
+    r = bob.post(f"/api/signups/{sid}/mystery-entries", json={"player_name": "annm"})
+    assert r.status_code == 200, r.text
+    taken_back = next(e for e in r.json()["entries"] if e["mine"])
+    assert bob.delete(f"/api/signups/{sid}/entries/{taken_back['id']}").status_code == 200
     assert bob.post(f"/api/signups/{sid}/mystery-entries", json={"player_name": "{player}"}).status_code == 400
     r = bob.post(f"/api/signups/{sid}/mystery-entries", json={"player_name": "BobM"})
     assert r.status_code == 200, r.text

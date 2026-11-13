@@ -136,8 +136,9 @@ outcome, *Use it* to put that outcome into the editor, in place of the weights, 
 keeps it, to play exactly that one. (Unsaved, the config keeps its weights: every generation rolls them anew.)
 
 **Sign-ups:** open rounds are on the dashboard and under **Sign-ups**. *Join* → pick one of your configs or upload a
-YAML. It is checked against the round's rules right away (allowed games, unique player names, how many slots each
-player may enter). A file with several players, its documents separated by `---`, takes a slot for each of them, so it
+YAML. It is checked against the round's rules right away (allowed games, how many slots each player may enter). A
+player name someone else in the round has is fine: when the game is generated, the second one becomes *Name2*, the
+third *Name3*, and so on. A file with several players, its documents separated by `---`, takes a slot for each of them, so it
 cannot bring more games into a round of one per player. Your entry is a copy: if you edit the config afterwards, the
 round page offers to use the new version. You can withdraw until the round closes. *Add to calendar* on a round with a
 deadline puts the deadline into your calendar, with a reminder a day before (an hour, if it is closer than that).

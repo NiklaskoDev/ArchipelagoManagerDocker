@@ -92,13 +92,33 @@ def test_job_options_are_validated(admin, payload, message):
     assert r.status_code == 400 and message.lower() in r.json()["detail"].lower(), r.text
 
 
-def test_duplicate_player_names_and_repeated_configs_are_refused(admin, make_user):
-    _a, alice = make_user()
-    _b, bob = make_user()
+def test_repeated_player_names_are_numbered(admin, make_user):
+    """A name more than one player has gets {NUMBER} before generating: the first keeps it, the next get 2, 3, ...
+    Every slot still goes to the owner of the config it came from."""
+    alice_name, alice = make_user()
+    bob_name, bob = make_user()
     one = cfg(alice, "Twin")
-    two = cfg(bob, "twin")  # names are compared case-insensitively, like the generator does
-    r = admin.post("/api/jobs", json={"config_ids": [one, two]})
-    assert r.status_code == 400 and "unique" in r.json()["detail"]
+    two = cfg(bob, "twin")  # names are compared without regard to case, like the generator does
+    # a file with two players of the same name, and a name so long that the number has to replace its last letter
+    pair = cfg(bob, "Pair", content=player_yaml("Twin") + "---\n" + player_yaml("Sixteen Letters!", "APQuest"))
+    long = cfg(alice, "Long", content="# my long name\n" + player_yaml("Sixteen Letters!"))
+    job = run_job(admin, [one, two, pair, long])
+    assert job["status"] == "succeeded", job
+    slots = admin.get(f"/api/games/{job['game_id']}").json()["slots"]
+    names = sorted((s["name"] for s in slots), key=str.casefold)
+    assert [n.casefold() for n in names] == ["sixteen letters", "sixteen letters2", "twin", "twin2", "twin3"], names
+    # the names the job lists are the ones the game has, and each slot belongs to the owner of its config
+    owners = {name: p["owner"] for p in job["players"] for name in p["names"]}
+    assert sorted(owners, key=str.casefold) == names
+    assert {s["name"]: s["owner"] for s in slots} == owners
+    assert sorted(n for p in job["players"] if p["owner"] == alice_name for n in p["names"]) == \
+        sorted(n for n, o in owners.items() if o == alice_name)
+    assert {o for o in owners.values()} == {alice_name, bob_name}
+    # the library configs are not changed: the numbers go into the job's copies only
+    assert admin.get(f"/api/configs/{long}").json()["content"] == "# my long name\n" + player_yaml("Sixteen Letters!")
+    admin.delete(f"/api/games/{job['game_id']}")
+
+    # still refused: the same config twice, and the one name the generator never takes
     assert admin.post("/api/jobs", json={"config_ids": [one, one]}).status_code == 400
     arch = cfg(admin, "Archipelago")
     assert admin.post("/api/jobs", json={"config_ids": [arch]}).status_code == 400

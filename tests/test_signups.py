@@ -92,8 +92,11 @@ def test_the_rules_of_a_round(admin, make_user):
     assert enter(ann, sid, first).status_code == 409  # the same config twice
     r = enter(ann, sid, config(ann, "Second"))
     assert r.status_code == 409 and "1 slot in this round. Withdraw an entry first." in r.json()["detail"]
-    r = enter(bo, sid, config(bo, "taken"))  # names clash regardless of case
-    assert r.status_code == 409 and "already taken" in r.json()["detail"]
+    # a name another entry has (whatever its case) is fine: generating numbers them
+    r = enter(bo, sid, config(bo, "taken"))
+    assert r.status_code == 200, r.text
+    mine = next(e for e in r.json()["entries"] if e["mine"])
+    assert bo.delete(f"/api/signups/{sid}/entries/{mine['id']}").status_code == 200
     r = enter(bo, sid, config(bo, "Quester", "APQuest"))
     assert r.status_code == 400 and "only allows ChecksFinder" in r.json()["detail"]
     r = enter(bo, sid, config(bo, "Broken", content="name: Broken\ngame: ChecksFinder\n"))
@@ -117,6 +120,27 @@ def test_the_rules_of_a_round(admin, make_user):
     # an admin can generate only once sign-ups are closed
     r = admin.post(f"/api/signups/{sid}/generate")
     assert r.status_code == 409 and "Close the sign-ups" in r.json()["detail"]
+    admin.delete(f"/api/signups/{sid}")
+
+
+def test_players_of_the_same_name_are_numbered_when_the_round_generates(admin, make_user):
+    ann_name, ann = make_user("ann")
+    bo_name, bo = make_user("bo")
+    sid = new_round(admin)["id"]
+    for client in (ann, bo):
+        assert enter(client, sid, config(client, "Twin")).status_code == 200
+    signup = admin.get(f"/api/signups/{sid}").json()
+    assert all(not e.get("issues") for e in signup["entries"]), signup["entries"]
+    admin.post(f"/api/signups/{sid}/close")
+    done = wait_round(admin, sid, ("done",))
+    slots = admin.get(f"/api/games/{done['game_id']}").json()["slots"]
+    assert sorted(s["name"] for s in slots) == ["Twin", "Twin2"]
+    assert sorted(s["owner"] for s in slots) == sorted([ann_name, bo_name])
+    # each one has the slot of their own entry: the second file the generator reads got the number
+    job = admin.get(f"/api/jobs/{done['job_id']}").json()
+    by_owner = {p["owner"]: p["names"] for p in job["players"]}
+    assert {s["owner"]: [s["name"]] for s in slots} == by_owner
+    admin.delete(f"/api/games/{done['game_id']}")
     admin.delete(f"/api/signups/{sid}")
 
 
