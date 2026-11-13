@@ -12,7 +12,7 @@ import shutil
 import signal
 import sqlite3
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -48,6 +48,11 @@ class PreparedPlayer:
     filename: str
     data: bytes
     info: yamlinfo.YamlInfo
+    # the slot names the generator will give out, once repeated names are numbered (number_repeated_names)
+    names: list[str] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        self.names = self.names or list(self.info.player_names)
 
 
 def job_dir(job_id: int) -> Path:
@@ -107,17 +112,62 @@ def prepare_player(config_id: int | None, user_id: int | None, label: str, data:
     return PreparedPlayer(config_id, user_id, label, filename, data, info)
 
 
+def number_repeated_names(players: list[PreparedPlayer]) -> None:
+    """Gives every player name that more than one player has a {NUMBER} at its end, in their files. The generator
+    leaves it empty for the first of them and makes it 2, 3, ... for the next (Generate.handle_name, which counts the
+    names without regard to case), so a name may come up more than once. Each player's `names` become the slot names
+    the generator will give out, which the game links to the players' owners by: the generator takes the files sorted
+    by name, then the players in each file, and so is followed here. A name is shortened where the number would not
+    fit in the 16 characters a slot name has."""
+    order = sorted(players, key=lambda p: p.filename.casefold())
+    counts = collections.Counter(doc.name.lower() for p in order for doc in p.info.docs if doc.name)
+    repeated = {key for key, n in counts.items() if n > 1}
+    if not repeated:
+        return
+    # a name the generator numbers itself (a placeholder of its own) must not share the count with the ones numbered here
+    own_placeholders = {doc.raw_name.lower() for p in order for doc in p.info.docs if not doc.name and doc.raw_name}
+    seen: collections.Counter[str] = collections.Counter()
+    for p in order:
+        renames: dict[int, str] = {}
+        names = []
+        for index, doc in enumerate(p.info.docs):
+            if not doc.name:
+                continue
+            key = doc.name.lower()
+            if key not in repeated:
+                names.append(doc.name)
+                continue
+            base = doc.name[:yamlinfo.MAX_NAME_LENGTH - len(str(counts[key]))].rstrip()
+            raw = base.replace("%", "%%") + "{NUMBER}"  # "%%" is how the generator writes a single "%"
+            if raw.lower() in own_placeholders:
+                raise JobRequestError(f"More than one player is named '{doc.name}', and another one '{doc.raw_name}': "
+                                      "rename one of them.")
+            seen[key] += 1
+            renames[index] = raw
+            names.append(base + (str(seen[key]) if seen[key] > 1 else ""))
+        if renames:
+            try:
+                p.data = yamlinfo.with_document_names(yamlinfo.decode_text(p.data), renames).encode()
+            except yamlinfo.YamlError:
+                raise JobRequestError(f"More than one player is named '{p.info.docs[min(renames)].name}', and the name "
+                                      f"cannot be numbered in '{p.label}'. Rename one of them.") from None
+        p.names = names
+
+
 def check_players(players: list[PreparedPlayer], version: str | None = None) -> None:
-    """Checks the players together: unique names, and every game installed (in that Archipelago version; for a further
-    version, call apbridge.extra_info first, or the games cannot be checked here)."""
+    """Checks the players together: their names (numbering those that more than one has, number_repeated_names), and
+    every game installed (in that Archipelago version; for a further version, call apbridge.extra_info first, or the
+    games cannot be checked here)."""
+    for p in players:
+        if any(name.casefold() == "archipelago" for name in p.info.player_names):
+            raise JobRequestError(f"'{p.label}': a player cannot be named Archipelago")
+    number_repeated_names(players)
     names: dict[str, str] = {}
     for p in players:
-        for name in p.info.player_names:
-            if name.casefold() == "archipelago":
-                raise JobRequestError(f"'{p.label}': a player cannot be named Archipelago")
-            if name.casefold() in names:
-                raise JobRequestError(f"Two players are named '{name}' ('{names[name.casefold()]}' and "
-                                      f"'{p.label}'). Player names must be unique.")
+        for name in p.names:
+            if name.casefold() in names:  # numbering made a name another player has already, such as Bob2
+                raise JobRequestError(f"Two players would be named '{name}' ('{names[name.casefold()]}' and "
+                                      f"'{p.label}'). Rename one of them.")
             names[name.casefold()] = p.label
 
     if apbridge.STATE.info is None:
@@ -182,7 +232,7 @@ def create_job(user: sqlite3.Row, players: list[PreparedPlayer], *, name: str | 
             for p in players:
                 conn.execute("INSERT INTO job_players(job_id, config_id, user_id, filename, player_names, games, "
                              "sha256) VALUES (?,?,?,?,?,?,?)",
-                             (job_id, p.config_id, p.user_id, p.filename, db.jdumps(p.info.player_names),
+                             (job_id, p.config_id, p.user_id, p.filename, db.jdumps(p.names),
                               db.jdumps(p.info.games), hashlib.sha256(p.data).hexdigest()))
     except BaseException:
         db.execute("DELETE FROM jobs WHERE id = ?", (job_id,))

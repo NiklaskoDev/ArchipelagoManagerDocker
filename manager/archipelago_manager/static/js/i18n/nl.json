@@ -1589,7 +1589,6 @@
   "A player name has 1 to {0} characters and no placeholders": "Een spelersnaam heeft 1 tot {0} tekens en geen placeholders",
   "A test of this round is already running": "Er loopt al een test van deze ronde",
   "Administrator access required": "Beheerderstoegang vereist",
-  "Another entry also uses the name {0}": "Een andere inschrijving gebruikt ook de naam {0}",
   "Archipelago could not check the file: {0}": "Archipelago kon het bestand niet controleren: {0}",
   "Archipelago helper timed out after {0}s": "De Archipelago-helper reageerde niet binnen {0} s",
   "Archipelago is not installed at {0}": "Archipelago is niet geïnstalleerd in {0}",
@@ -1758,7 +1757,6 @@
   "The multiworld data file is missing from disk": "Het multiworld-gegevensbestand ontbreekt op de schijf",
   "The name cannot be empty": "De naam mag niet leeg zijn",
   "The new deadline is in the past": "De nieuwe deadline ligt in het verleden",
-  "The player name '{0}' is already taken in this round (by {1}). Change the name in your config and try again.": "De spelersnaam \"{0}\" is in deze ronde al in gebruik (door {1}). Wijzig de naam in je config en probeer het opnieuw.",
   "The player name could not be set in this file. Copy it without a new name and change it in the editor.": "De spelersnaam kon in dit bestand niet worden ingesteld. Kopieer het zonder nieuwe naam en wijzig hem in de editor.",
   "The player name is picked at random from several. Use the YAML editor for this file.": "De spelersnaam wordt willekeurig uit meerdere gekozen. Gebruik voor dit bestand de YAML-editor.",
   "The release changed since it was shown here; the newest is now {0}. Look at it again before installing it.": "De release is veranderd sinds hij hier werd getoond; de nieuwste is nu {0}. Bekijk hem opnieuw voordat je hem installeert.",
@@ -1798,7 +1796,6 @@
   "Too many failed logins. Try again in a few minutes.": "Te veel mislukte inlogpogingen. Probeer het over een paar minuten nog eens.",
   "Too many games": "Te veel spellen",
   "Too many players": "Te veel spelers",
-  "Two players are named '{0}' ('{1}' and '{2}'). Player names must be unique.": "Twee spelers heten \"{0}\" (\"{1}\" en \"{2}\"). Spelersnamen moeten uniek zijn.",
   "Type a message or a command": "Typ een bericht of een commando",
   "unexpected release name {0}": "onverwachte releasenaam {0}",
   "Unknown action": "Onbekende actie",
@@ -1958,7 +1955,6 @@
   "This item was found already": "Dit item is al gevonden",
   "This round has no deadline": "Deze ronde heeft geen deadline",
   "Your last check is not done yet. Check again when it is.": "Je laatste controle is nog niet klaar. Controleer opnieuw zodra die klaar is.",
-  "Two players in this file are named '{0}'. Player names must be unique.": "Twee spelers in dit bestand heten \"{0}\". Spelersnamen moeten uniek zijn.",
   "An invite can be used 1 to {0} times": "Een uitnodiging werkt 1 tot {0} keer",
   "An invite is valid for 1, 7 or 30 days": "Een uitnodiging is 1, 7 of 30 dagen geldig",
   "An invite makes a user or an organizer. Administrators are made under Users.": "Een uitnodiging maakt een gebruiker of een organisator. Beheerders maak je aan onder Gebruikers.",
@@ -1984,7 +1980,13 @@
   "Share with one of: {0}": "Deel met een van: {0}",
   "Choose at least one friend to share it with": "Kies minstens één vriend om hem mee te delen",
   "You can share a config by name only with your friends": "Je kunt een config alleen specifiek met je vrienden delen",
-  "'{0}' is shared by {1}, who is not your friend. Copy it into your configs to generate with it.": "'{0}' wordt gedeeld door {1}, die niet in je vriendenlijst staat. Kopieer hem naar je configs om ermee te genereren."
+  "'{0}' is shared by {1}, who is not your friend. Copy it into your configs to generate with it.": "'{0}' wordt gedeeld door {1}, die niet in je vriendenlijst staat. Kopieer hem naar je configs om ermee te genereren.",
+  "The player names could not be changed in this file": "De spelersnamen konden in dit bestand niet worden gewijzigd",
+  "The name of player #{0} cannot be changed in this file": "De naam van speler #{0} kan in dit bestand niet worden gewijzigd",
+  "More than one player is named '{0}', and another one '{1}': rename one of them.": "Meer dan één speler heet '{0}', en een andere '{1}': geef een van hen een andere naam.",
+  "Two players would be named '{0}' ('{1}' and '{2}'). Rename one of them.": "Twee spelers zouden '{0}' heten ('{1}' en '{2}'). Geef een van hen een andere naam.",
+  "More than one player is named '{0}', and the name cannot be numbered in '{1}'. Rename one of them.": "Meer dan één speler heet '{0}', en de naam kan in '{1}' geen nummer krijgen. Geef een van hen een andere naam.",
+  "More than one player in this file is named '{0}'. Generating numbers them: the first keeps the name, the next get 2, 3, ... at its end.": "Meer dan één speler in dit bestand heet '{0}'. Bij het genereren worden ze genummerd: de eerste houdt de naam, de volgende krijgen 2, 3, … erachter."
  },
  "server_extra": [
   " (line {0})",
@@ -1995,7 +1997,6 @@
   "'{0}' is not a usable world folder name",
   "A built-in world named '{0}' already exists, so this cannot be installed",
   "A file needed to generate is missing on the server. If a game in this multiworld needs its base ROM, put {0}, named exactly like that.",
-  "Another entry also uses the name {0}",
   "Archipelago is unavailable",
   "Cancelled",
   "Close the sign-ups before generating",
@@ -2058,9 +2059,9 @@
   "Enter the key with its full path in the container, e.g. /config/tls/privkey.pem",
   "Document #{0}: the player name has no visible characters, so nobody can read it",
   "Document #{0}: the player name contains characters that change the direction of the text, so it shows differently from how it is spelled",
-  "Two players in this file are named '{0}'. Player names must be unique.",
   "This .apworld has no archipelago.json manifest, and which game it is for cannot be read from its code. Ask its author for a version with a manifest.",
   "This world has no archipelago.json manifest, which Archipelago 0.7.0 and newer need, but this server runs {0}",
-  "The manifest gives {0} as {1}, but Archipelago only reads three numbers such as 1.0.0; with this file it would load no custom game at all"
+  "The manifest gives {0} as {1}, but Archipelago only reads three numbers such as 1.0.0; with this file it would load no custom game at all",
+  "More than one player in this file is named '{0}'. Generating numbers them: the first keeps the name, the next get 2, 3, ... at its end."
  ]
 }
