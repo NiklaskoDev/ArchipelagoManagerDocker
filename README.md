@@ -8,6 +8,7 @@ players log in to keep their YAML configs, see their games and download their pa
 
 - **Runs several multiworlds at once.** Every game gets its own server process on its own port, with its own
   password and rules. Games that were running come back after a container restart; a crashed server is restarted.
+  *Stop* and *Restart* wait until nobody is connected, and a game everyone has finished stops by itself.
 - **Lets games sleep.** A game can fall asleep when nobody has been connected for a while, and wakes up when one of its
   players opens the game page, like on archipelago.gg. Games that are not running lend their port to one that needs it,
   so there can be more games than ports. A game can also be set to never fall asleep.
@@ -50,7 +51,8 @@ players log in to keep their YAML configs, see their games and download their pa
 - **Encrypts game connections.** With a certificate (such as the one your reverse proxy already has), every game
   server speaks `wss://`; Archipelago's clients switch over by themselves, and renewed certificates are taken over.
 - **Spectators and stream overlays.** A game can have a link that shows it without signing in: everyone's progress,
-  the standings and the race clock, optionally what happens in it (never the chat). It comes with an overlay for OBS.
+  the standings and the race clock, optionally what happens in it (never the chat). It comes with an overlay for OBS,
+  which marks players who are stuck (BK) or away (AFK).
 - **Reminds players who stopped playing.** A player who has not played for some days while the others play on is
   reminded on their dashboard and on Discord, with how many hinted items of others wait in their world and the offer
   to hand the slot over.

@@ -1,11 +1,12 @@
 """Games that fall asleep: with nobody connected for the time set for a game, the manager stops its server; a player
 opening the game page wakes it up. Asleep and stopped games lend their port to a game that needs one when none is
 free, so there can be more games than ports. A minute lasts two seconds here (SLEEP_MINUTE_SECONDS)."""
+import json
 import time
 
 import pytest
 
-from helpers import APClient, make_game, wait_state
+from helpers import APClient, make_game, save_now, wait_for, wait_state
 
 pytestmark = pytest.mark.ap
 
@@ -139,3 +140,46 @@ def test_more_games_than_ports(sleepy):
     assert wait_state(admin, third, "running")["port"] == second
     assert admin.get(f"/api/games/{napper}").json()["port"] == first
     admin.post(f"/api/games/{third}/stop")
+
+
+def test_a_server_is_stopped_or_restarted_only_while_nobody_is_connected(sleepy):
+    admin = sleepy.client("admin", "adminpass1")
+    gid, _job = make_game(admin, names=("Busy",))
+    assert admin.post(f"/api/games/{gid}/start").status_code == 200
+    port = wait_state(admin, gid, "running")["port"]
+    with APClient(port, "Busy", "ChecksFinder") as client:
+        assert client.connected
+        wait_for(lambda: admin.get(f"/api/games/{gid}").json()["connected"] == 1, timeout=15, message="the join")
+        # it would throw the player out of the game
+        for verb in ("stop", "restart"):
+            r = admin.post(f"/api/games/{gid}/{verb}")
+            assert r.status_code == 409 and "A player is connected" in r.json()["detail"], r.text
+        assert admin.get(f"/api/games/{gid}").json()["state"] == "running"
+    wait_for(lambda: admin.get(f"/api/games/{gid}").json()["connected"] == 0, timeout=15, message="the leave")
+    assert admin.post(f"/api/games/{gid}/restart").status_code == 200
+    wait_state(admin, gid, "running")
+    assert admin.post(f"/api/games/{gid}/stop").status_code == 200
+    admin.delete(f"/api/games/{gid}")
+
+
+def test_a_finished_game_stops_once_nobody_is_connected(sleepy):
+    from archipelago_manager.games.rooms import FINISHED_IDLE_MINUTES
+    admin = sleepy.client("admin", "adminpass1")
+    gid, _job = make_game(admin, names=("Done",))
+    assert admin.post(f"/api/games/{gid}/start").status_code == 200
+    port = wait_state(admin, gid, "running")["port"]
+    with APClient(port, "Done", "ChecksFinder") as client:
+        client.ws.send(json.dumps([{"cmd": "StatusUpdate", "status": 30}]))  # the goal
+        time.sleep(1)
+        save_now(admin, gid)
+        wait_for(lambda: admin.get(f"/api/games/{gid}").json()["finished_at"], timeout=60, message="the game to finish")
+        # whoever is still connected keeps it running, however long they stay
+        time.sleep(FINISHED_IDLE_MINUTES * MINUTE + 3)
+        assert admin.get(f"/api/games/{gid}").json()["state"] == "running"
+    game = wait_state(admin, gid, "stopped", timeout=FINISHED_IDLE_MINUTES * MINUTE + 30)
+    assert game["desired_state"] == "stopped"  # stopped for good: not asleep, so a visit does not wake it
+    log = [line["text"] for line in admin.get(f"/api/games/{gid}/log").json()["lines"]]
+    assert any("every player reached their goal" in line for line in log), log[-5:]
+    assert admin.post(f"/api/games/{gid}/wake").status_code == 200
+    assert admin.get(f"/api/games/{gid}").json()["state"] == "stopped"
+    admin.delete(f"/api/games/{gid}")

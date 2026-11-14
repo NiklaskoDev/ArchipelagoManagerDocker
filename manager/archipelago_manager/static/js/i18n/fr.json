@@ -1568,7 +1568,14 @@
   "shares {n} config with you": "partage {n} config avec vous",
   "shares {n} configs with you": "partage {n} configs avec vous",
   "{n} friend request": "{n} demande d'ami",
-  "{n} friend requests": "{n} demandes d'ami"
+  "{n} friend requests": "{n} demandes d'ami",
+  "Restart the server?": "Redémarrer le serveur ?",
+  "It stops and starts again. Players can connect again a few seconds later.": "Il s'arrête et redémarre. Les joueurs peuvent se reconnecter quelques secondes plus tard.",
+  "Stop the server?": "Arrêter le serveur ?",
+  "Players can no longer connect until it is started again.": "Les joueurs ne peuvent plus se connecter tant qu'il n'est pas redémarré.",
+  "{n} player is connected. Stopping and restarting wait until nobody is.": "{n} joueur est connecté. L'arrêt et le redémarrage attendent que plus personne ne le soit.",
+  "{n} players are connected. Stopping and restarting wait until nobody is.": "{n} joueurs sont connectés. L'arrêt et le redémarrage attendent que plus personne ne le soit.",
+  "{n} of {total}": "{n} sur {total}"
  },
  "server": {
   " (line {0})": " (ligne {0})",
@@ -1986,7 +1993,9 @@
   "More than one player is named '{0}', and another one '{1}': rename one of them.": "Plusieurs joueurs s'appellent '{0}', et un autre '{1}' : renommez l'un d'eux.",
   "Two players would be named '{0}' ('{1}' and '{2}'). Rename one of them.": "Deux joueurs s'appelleraient '{0}' ('{1}' et '{2}'). Renommez l'un d'eux.",
   "More than one player is named '{0}', and the name cannot be numbered in '{1}'. Rename one of them.": "Plusieurs joueurs s'appellent '{0}', et le nom ne peut pas être numéroté dans '{1}'. Renommez l'un d'eux.",
-  "More than one player in this file is named '{0}'. Generating numbers them: the first keeps the name, the next get 2, 3, ... at its end.": "Plusieurs joueurs de ce fichier s'appellent '{0}'. La génération les numérote : le premier garde le nom, les suivants reçoivent 2, 3, … à la fin."
+  "More than one player in this file is named '{0}'. Generating numbers them: the first keeps the name, the next get 2, 3, ... at its end.": "Plusieurs joueurs de ce fichier s'appellent '{0}'. La génération les numérote : le premier garde le nom, les suivants reçoivent 2, 3, … à la fin.",
+  "A player is connected to this game. Its server can be stopped or restarted once nobody is connected.": "Un joueur est connecté à cette partie. Son serveur peut être arrêté ou redémarré dès que plus personne n'est connecté.",
+  "{0} players are connected to this game. Its server can be stopped or restarted once nobody is connected.": "{0} joueurs sont connectés à cette partie. Son serveur peut être arrêté ou redémarré dès que plus personne n'est connecté."
  },
  "server_extra": [
   " (line {0})",

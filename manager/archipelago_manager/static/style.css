@@ -208,6 +208,9 @@ textarea.input { font-family: var(--mono); font-size: .88rem; line-height: 1.45;
 textarea.editor { min-height: 62vh; white-space: pre; overflow: auto; }
 .check { display: flex; gap: 10px; align-items: flex-start; cursor: pointer; }
 .check input { margin-top: 4px; accent-color: var(--accent); width: 16px; height: 16px; }
+/* a disabled button whose reason shows on hover: the wrapper takes the hover, as a disabled button gives no title */
+.disabled-hint { display: inline-flex; cursor: not-allowed; }
+.disabled-hint > .btn { pointer-events: none; }
 /* the friends a config is shared with, under the choice they belong to (views/configs.js) */
 .share-friends { padding-left: 26px; max-height: 240px; overflow-y: auto; }
 .form-grid { display: grid; gap: 14px 18px; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
@@ -383,6 +386,17 @@ a.chip-link { color: inherit; text-decoration: none; gap: 6px; }
 a.chip-link:hover { border-color: var(--accent); color: var(--accent-strong); }
 /* the generate page's configs, a group for each game that opens (views/generate.js) */
 .config-group { border-top: 1px solid var(--border); }
+/* the tracker's locations by place (views/game.js): side by side, an opened one across the whole width */
+.place-groups { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 6px; align-items: start; }
+.place-group { border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); min-width: 0; }
+.place-group[open] { grid-column: 1 / -1; }
+.place-group > summary { display: flex; align-items: center; gap: 8px; padding: 6px 10px; cursor: pointer; list-style: none; }
+.place-group > summary::-webkit-details-marker { display: none; }
+.place-group > summary::after { content: "▸"; color: var(--muted); transition: transform .15s; }
+.place-group[open] > summary::after { transform: rotate(90deg); }
+.place-group > summary .grow { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 550; }
+.place-group > .chips { padding: 2px 10px 10px; }
+.place-groups > .chips { grid-column: 1 / -1; }
 .config-group > summary { display: flex; align-items: center; gap: 12px; padding: 11px 16px; cursor: pointer; list-style: none; }
 .config-group > summary::-webkit-details-marker { display: none; }
 .config-group > summary::after { content: "▸"; color: var(--muted); transition: transform .15s; }
@@ -534,6 +548,9 @@ body.overlay #watch { padding: 8px; }
 .ov-rank { color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
 .ov-player { display: inline-flex; align-items: center; gap: 7px; min-width: 0; }
 .ov-player-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ov-tag { flex: none; padding: 0 5px; border-radius: 4px; font-size: .7rem; font-weight: 700; letter-spacing: .04em;
+  line-height: 1.5; color: #0b1220; background: #f0b94a; }
+.ov-tag.away { background: #b6c4d4; }
 .ov .progress { height: 7px; background: rgba(255, 255, 255, .14); border-color: transparent; }
 .ov .progress .bar { background: #52cdbb; }
 .ov .progress .bar.done { background: #3ecf8e; }
