@@ -416,17 +416,35 @@ export function isActive(game) {
 // Start / stop / restart for whoever may control the game. `onUpdate` receives the refreshed game.
 export function controlButtons(game, onUpdate) {
   if (!game.can_control) return null;
-  const run = (label, iconName, verb, cls = "", title = undefined) => h("button", {
+  // `ask`: what a confirmation says before stopping or restarting ({ title, text })
+  const run = (label, iconName, verb, { cls = "", title, ask } = {}) => h("button", {
     class: `btn sm ${cls}`, type: "button", title,
-    onclick: action(async () => onUpdate(await post(`/api/games/${game.id}/${verb}`))),
+    onclick: action(async () => {
+      if (ask && !(await confirmDialog(ask.text, { title: ask.title, confirmText: label }))) return;
+      onUpdate(await post(`/api/games/${game.id}/${verb}`));
+    }),
   }, icon(iconName, 14), label);
-  if (isActive(game)) return [run(t("Restart"), "restart", "restart"), run(t("Stop"), "stop", "stop")];
+  if (isActive(game)) {
+    const restart = run(t("Restart"), "restart", "restart", { ask: { title: t("Restart the server?"),
+      text: t("It stops and starts again. Players can connect again a few seconds later.") } });
+    const stop = run(t("Stop"), "stop", "stop", { ask: { title: t("Stop the server?"),
+      text: t("Players can no longer connect until it is started again.") } });
+    if (!game.connected) return [restart, stop];
+    // stopping or restarting would throw the players out of the game (the server refuses it too, routes/games.py)
+    const why = plural(game.connected, "{n} player is connected. Stopping and restarting wait until nobody is.",
+      "{n} players are connected. Stopping and restarting wait until nobody is.");
+    return [restart, stop].map((button) => {
+      button.disabled = true;
+      return h("span", { class: "disabled-hint", title: why }, button);  // a disabled button shows no title itself
+    });
+  }
   // an asleep game wakes up when one of its players opens its page: Stop ends that, without starting it first
   if (game.state === "sleeping") {
-    return [run(t("Start"), "play", "start", "primary"),
-      run(t("Stop"), "stop", "stop", "", t("It stays stopped, and no longer wakes up when a player opens its page"))];
+    return [run(t("Start"), "play", "start", { cls: "primary" }),
+      run(t("Stop"), "stop", "stop", { title: t("It stays stopped, and no longer wakes up when a player opens its page"),
+        ask: { title: t("Stop the server?"), text: t("It stays stopped, and no longer wakes up when a player opens its page") } })];
   }
-  return [run(t("Start"), "play", "start", "primary")];
+  return [run(t("Start"), "play", "start", { cls: "primary" })];
 }
 
 // Which Archipelago version generates or hosts a game (GET /api/ap-versions): null when there is only the server's own

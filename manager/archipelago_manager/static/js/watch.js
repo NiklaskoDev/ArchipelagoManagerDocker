@@ -55,12 +55,17 @@ function tick() {
   clockLabel.textContent = clock ? clock.label : "";
 }
 
+// What a player who has not reached their goal said about themselves, as streams write it (the slot status: game.js)
+const TAGS = { stuck: "BK", away: "AFK" };
+const tagOf = (p) => (p.goal_at == null ? TAGS[p.player_status] : null);
+
 function drawOverlay() {
   clear(root).append(h("div", { class: "ov" },
     h("div", { class: "ov-head" }, h("span", { class: "ov-name" }, data.name), h("span", { class: "ov-clock" }, clockLabel, clockValue)),
     ranked(data.players).map((p, i) => h("div", { class: `ov-row${p.goal_at != null ? " done" : ""}` },
       h("span", { class: "ov-rank" }, p.goal_at != null ? String(i + 1) : ""),
-      h("span", { class: "ov-player" }, h("span", { class: `dot ${p.status === "online" || p.status === "goal" ? "ok" : ""}` }), h("span", { class: "ov-player-name" }, p.name)),
+      h("span", { class: "ov-player" }, h("span", { class: `dot ${p.status === "online" || p.status === "goal" ? "ok" : ""}` }), h("span", { class: "ov-player-name" }, p.name),
+        tagOf(p) ? h("span", { class: `ov-tag ${p.player_status}`, title: SAID[p.player_status][1]() }, tagOf(p)) : null),
       h("div", { class: "progress" }, h("div", { class: `bar ${p.goal_at != null ? "done" : ""}`, style: { width: `${p.total ? Math.min(100, (100 * p.checked) / p.total) : 0}%` } })),
       h("span", { class: "ov-value" }, result(p))))));
   tick();

@@ -1568,7 +1568,14 @@
   "shares {n} config with you": "deelt {n} config met jou",
   "shares {n} configs with you": "deelt {n} configs met jou",
   "{n} friend request": "{n} vriendschapsverzoek",
-  "{n} friend requests": "{n} vriendschapsverzoeken"
+  "{n} friend requests": "{n} vriendschapsverzoeken",
+  "Restart the server?": "Server opnieuw starten?",
+  "It stops and starts again. Players can connect again a few seconds later.": "Hij stopt en start opnieuw. Spelers kunnen een paar seconden later weer verbinden.",
+  "Stop the server?": "Server stoppen?",
+  "Players can no longer connect until it is started again.": "Spelers kunnen niet meer verbinden tot hij weer gestart wordt.",
+  "{n} player is connected. Stopping and restarting wait until nobody is.": "{n} speler is verbonden. Stoppen en herstarten wachten tot niemand meer verbonden is.",
+  "{n} players are connected. Stopping and restarting wait until nobody is.": "{n} spelers zijn verbonden. Stoppen en herstarten wachten tot niemand meer verbonden is.",
+  "{n} of {total}": "{n} van {total}"
  },
  "server": {
   " (line {0})": " (regel {0})",
@@ -1986,7 +1993,9 @@
   "More than one player is named '{0}', and another one '{1}': rename one of them.": "Meer dan één speler heet '{0}', en een andere '{1}': geef een van hen een andere naam.",
   "Two players would be named '{0}' ('{1}' and '{2}'). Rename one of them.": "Twee spelers zouden '{0}' heten ('{1}' en '{2}'). Geef een van hen een andere naam.",
   "More than one player is named '{0}', and the name cannot be numbered in '{1}'. Rename one of them.": "Meer dan één speler heet '{0}', en de naam kan in '{1}' geen nummer krijgen. Geef een van hen een andere naam.",
-  "More than one player in this file is named '{0}'. Generating numbers them: the first keeps the name, the next get 2, 3, ... at its end.": "Meer dan één speler in dit bestand heet '{0}'. Bij het genereren worden ze genummerd: de eerste houdt de naam, de volgende krijgen 2, 3, … erachter."
+  "More than one player in this file is named '{0}'. Generating numbers them: the first keeps the name, the next get 2, 3, ... at its end.": "Meer dan één speler in dit bestand heet '{0}'. Bij het genereren worden ze genummerd: de eerste houdt de naam, de volgende krijgen 2, 3, … erachter.",
+  "A player is connected to this game. Its server can be stopped or restarted once nobody is connected.": "Er is een speler met dit spel verbonden. De server kan worden gestopt of herstart zodra niemand meer verbonden is.",
+  "{0} players are connected to this game. Its server can be stopped or restarted once nobody is connected.": "Er zijn {0} spelers met dit spel verbonden. De server kan worden gestopt of herstart zodra niemand meer verbonden is."
  },
  "server_extra": [
   " (line {0})",

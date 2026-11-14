@@ -363,7 +363,8 @@ export default async function render({ root, params, cleanup, isCurrent, query, 
 
   function signature() {
     return JSON.stringify([game.state, game.error, game.slots, game.progress, game.password, game.address, game.tls, game.missing_games, game.my_slots,
-      game.finished_at, game.start, game.sleep_minutes, game.offered_slots, game.return_blocked]);
+      game.finished_at, game.start, game.sleep_minutes, game.offered_slots, game.return_blocked,
+      game.connected]);  // Stop and Restart wait until nobody is connected
   }
   function drawLive() {
     drawnSignature = signature();
@@ -483,6 +484,7 @@ export default async function render({ root, params, cleanup, isCurrent, query, 
   function trackerSection(slots) {
     let current = (slots.find((s) => s.mine) || slots[0]).slot;
     let tab = "items", data = null, loaded = "";
+    const openPlaces = new Set();  // the groups of locations opened by hand, kept open while the list is drawn anew
     const picker = slots.length > 1 ? select(slots.map((s) => [s.slot, live(() => `${s.name} (${s.game})${s.mine ? ` · ${t("you")}` : ""}`)]), current) : null;
     if (picker) picker.style.maxWidth = "320px";
     const search = h("input", { class: "input", type: "search", placeholder: t("Filter…"), "aria-label": t("Filter the tracker") });
@@ -516,10 +518,49 @@ export default async function render({ root, params, cleanup, isCurrent, query, 
             : g.last.from === data.name ? t("Your own world · {location}", { location: g.last.location }) : `${g.last.from} · ${g.last.location}`))))));
     }
 
+    // A long list of locations is grouped by the place in their names ("Alpine Skyline - Bird Pass Fork",
+    // "Act Completion (Award Ceremony)"), each place a group that opens; a place with only a few is not worth a group
+    const GROUP_FROM = 30, GROUP_MIN = 3;
+    const placeOf = (name) => {
+      const dash = name.indexOf(" - ");
+      // a bracket before the dash holds the rest: "Act Completion (Time Rift - Alpine Skyline)"
+      const bracket = name.match(/^(.+?) \((.+)\)$/);
+      if (bracket && (dash < 0 || bracket[1].length < dash)) return [bracket[1], bracket[2]];
+      return dash > 0 ? [name.slice(0, dash), name.slice(dash + 3)] : [null, name];
+    };
     function locationsTab() {
-      const open = data.locations.filter((l) => !l.checked && matches(l.location)).map((l) => l.location).sort(byName);
-      const done = data.locations.filter((l) => l.checked && matches(l.location)).map((l) => l.location).sort(byName);
-      const list = (names) => h("div", { class: "chips" }, names.map((n) => h("span", { class: "chip" }, n)));
+      const visible = data.locations.filter((l) => matches(l.location));
+      const open = visible.filter((l) => !l.checked).map((l) => l.location).sort(byName);
+      const done = visible.filter((l) => l.checked).map((l) => l.location).sort(byName);
+      const totals = new Map();  // every location of a place, checked or not: "3 left of 12"
+      for (const l of data.locations) {
+        const [place] = placeOf(l.location);
+        if (place) totals.set(place, (totals.get(place) || 0) + 1);
+      }
+      const chips = (names) => h("div", { class: "chips" }, names.map((n) => h("span", { class: "chip" }, n)));
+      const list = (names) => {
+        if (data.locations.length < GROUP_FROM) return chips(names);
+        const groups = new Map(), loose = [];
+        for (const name of names) {
+          const [place, rest] = placeOf(name);
+          if (place && totals.get(place) >= GROUP_MIN) {
+            if (!groups.has(place)) groups.set(place, []);
+            groups.get(place).push(rest);
+          } else loose.push(name);
+        }
+        if (groups.size < 2) return chips(names);
+        const filtering = !!search.value.trim();
+        return h("div", { class: "place-groups" },
+          [...groups.keys()].sort(byName).map((place) => {
+            const group = h("details", { class: "place-group", open: filtering || openPlaces.has(place) },
+              h("summary", {}, h("span", { class: "grow", title: place }, place),
+                h("span", { class: "muted small" }, t("{n} of {total}", { n: groups.get(place).length, total: totals.get(place) }))),
+              chips(groups.get(place)));
+            group.addEventListener("toggle", () => { if (group.open) openPlaces.add(place); else openPlaces.delete(place); });
+            return group;
+          }),
+          loose.length ? chips(loose) : null);
+      };
       return h("div", { class: "stack" },
         h("div", { class: "stack tight" }, h("strong", {}, t("Still to check ({n})", { n: open.length })),
           open.length ? list(open) : h("span", { class: "muted" }, data.locations.some((l) => !l.checked) ? t("Nothing matches.") : t("Everything is checked."))),

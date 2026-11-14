@@ -36,6 +36,8 @@ CRASH_RESTART_WINDOW = 10 * 60
 CRASH_RESTART_LIMIT = 3
 PROGRESS_CHECK_INTERVAL = 20
 IDLE_CHECK_INTERVAL = 10
+# a game every player has finished stops after this many minutes with nobody connected (watch_idle)
+FINISHED_IDLE_MINUTES = 2
 
 # A password is handed to the server as a console argument, so it must survive being split on whitespace.
 _PASSWORD_OK = re.compile(r"[^\s\x00-\x1f\x7f]{1,64}")
@@ -300,10 +302,16 @@ class RoomManager:
             "exit_code": room.exit_code,
             "error": room.error,
             "tls": room.tls_stamp is not None if room.active else None,  # None: decided when the server starts
+            "connected": self.connected(game_id),
         }
 
     def is_active(self, game_id: int) -> bool:
         return self.room(game_id).active
+
+    def connected(self, game_id: int) -> int:
+        """How many clients are connected to the server of a game (its log's joins and leaves)."""
+        room = self.room(game_id)
+        return room.clients if room.active else 0
 
     # ------------------------------------------------------------------------------------------------------------
     # lifecycle
@@ -566,7 +574,8 @@ class RoomManager:
         return True
 
     async def watch_idle(self) -> None:
-        """Puts a server to sleep after the time set for its game with nobody connected."""
+        """Puts a server to sleep after the time set for its game with nobody connected, and stops the server of a game
+        every player has finished once nobody is connected."""
         minute = CONFIG.sleep_minute_seconds
         while True:
             await asyncio.sleep(min(IDLE_CHECK_INTERVAL, max(1, minute // 4)))
@@ -574,9 +583,15 @@ class RoomManager:
                 if room.state != "running" or room.clients or room.idle_since is None:
                     continue
                 try:
-                    game = db.query_one("SELECT options, start_stage FROM games WHERE id = ?", (game_id,))
+                    game = db.query_one("SELECT options, start_stage, finished_at FROM games WHERE id = ?", (game_id,))
                     # a game opened ahead of its planned start waits for the players and the countdown
                     if not game or game["start_stage"] == "opened":
+                        continue
+                    if game["finished_at"] is not None:
+                        if time.time() - room.idle_since >= FINISHED_IDLE_MINUTES * minute:
+                            self._append_log(room, f"--- every player reached their goal and nobody was connected "
+                                                   f"for {FINISHED_IDLE_MINUTES} min: the server stops ---")
+                            await self.stop(game_id)  # and stays stopped: a visit does not wake it
                         continue
                     minutes = sleep_minutes(game)
                     if minutes and time.time() - room.idle_since >= minutes * minute:

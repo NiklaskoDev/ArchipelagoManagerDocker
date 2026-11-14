@@ -32,7 +32,9 @@ What players do in the web UI: their configs, their games and slots, the tracker
      the list of games and on the game page (under *Connect*), whenever the game's server is running.
 4. While you play, **Your tracker** on the game page shows the items you received (and from whom), the locations you
    still have to check, and your hints: where your items are, and which items of other players are in your world. It
-   is read from the server's save, so it can be up to a minute behind.
+   is read from the server's save, so it can be up to a minute behind. A game with many locations lists them by place
+   (the part of their names before " - " or a bracket), each place a box that opens, with how many are left of it;
+   the filter opens the places it finds something in.
    - It also shows your hint points, what a hint costs, and how many hints they buy (or how many checks until the
      next one).
    - **Mark your hints**, as in Archipelago's own client: next to each hint for one of your items, choose *Priority*
