@@ -41,8 +41,9 @@ async def check(text: str) -> dict:
     for name in info.player_names:
         if name.casefold() == "archipelago":
             errors.append("A player cannot be named Archipelago")
-        elif name.casefold() in seen:
-            errors.append(f"Two players in this file are named '{name}'. Player names must be unique.")
+        elif name.casefold() in seen:  # generating numbers them (jobs.number_repeated_names)
+            warnings.append(f"More than one player in this file is named '{name}'. Generating numbers them: the "
+                            "first keeps the name, the next get 2, 3, ... at its end.")
         seen.add(name.casefold())
     missing_roms = [item["game"] for item in apbridge.missing_files(info.games)]
     if errors:  # Archipelago would only stop at the same thing, less clearly

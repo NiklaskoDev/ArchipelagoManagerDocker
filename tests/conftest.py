@@ -44,11 +44,26 @@ def pytest_collection_modifyitems(config, items):
             item.add_marker(skip)
 
 
+def _ephemeral_ports() -> tuple[int, int]:
+    """The ports the kernel hands out to outgoing connections."""
+    try:
+        low, high = map(int, Path("/proc/sys/net/ipv4/ip_local_port_range").read_text().split())
+        return low, high
+    except (OSError, ValueError):
+        return 32768, 60999  # Linux's default
+
+
 def free_port_block(size: int) -> int:
-    """First port of a block of `size` consecutive free ports."""
+    """First port of a block of `size` consecutive free ports, below the ports the kernel hands out to outgoing
+    connections: once a game's server stops, any outgoing connection (the tests' own, to the manager) can be given
+    such a port, and a test that then binds it, or starts the game again, finds it in use."""
     import random
+    low = 10000
+    high = min(_ephemeral_ports()[0], 65536) - size - 1
+    if high <= low:  # an unusual range that starts low: take what is above it
+        low, high = _ephemeral_ports()[1] + 1, 65535 - size
     while True:
-        start = random.randint(30000, 60000 - size)
+        start = random.randint(low, high)
         sockets = []
         try:
             for port in range(start, start + size):

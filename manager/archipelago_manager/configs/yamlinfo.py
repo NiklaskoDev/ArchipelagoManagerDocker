@@ -248,6 +248,37 @@ def with_player_name(text: str, name: str) -> str:
     return result
 
 
+def with_document_names(text: str, names: dict[int, str]) -> str:
+    """The yaml with the `name` of some of its players replaced: `names` maps a player's index (its document, empty
+    documents not counted, as in analyze) to the name to write as it is, placeholders included. Only those values
+    change; the rest of the file stays as it is. Raises YamlError if a name cannot be set this way, such as for a
+    player without a `name` of its own."""
+    text = text.lstrip("﻿")
+    documents = load_documents(text)
+    try:
+        nodes = list(yaml.compose_all(text, Loader=UniqueKeyLoader))
+    except yaml.YAMLError as e:
+        raise YamlError(f"Invalid YAML: {e}") from None
+    players = [node for node, doc in zip(nodes, documents, strict=True) if doc is not None]
+    spans = []
+    for index, name in names.items():
+        node = players[index] if index < len(players) else None
+        value = next((v for k, v in node.value if isinstance(k, yaml.ScalarNode) and k.value == "name"), None) \
+            if isinstance(node, yaml.MappingNode) else None
+        if not isinstance(value, yaml.ScalarNode) or value.style in ("|", ">"):
+            raise YamlError(f"The name of player #{index + 1} cannot be changed in this file")
+        spans.append((value.start_mark.index, value.end_mark.index, json.dumps(name, ensure_ascii=False)))
+    for start, end, replacement in sorted(spans, reverse=True):
+        text = text[:start] + replacement + text[end:]
+    # an anchor or an unusual layout could make the change land elsewhere: the result has to say what was asked
+    expected = [doc.get("name") for doc in documents if doc is not None]
+    for index, name in names.items():
+        expected[index] = name
+    if [doc.get("name") for doc in load_documents(text) if doc is not None] != expected:
+        raise YamlError("The player names could not be changed in this file")
+    return text
+
+
 _UNSAFE = re.compile(r"[^\w. -]+")  # \w: the letters and digits of every language, and _
 
 

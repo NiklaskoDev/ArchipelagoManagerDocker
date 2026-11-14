@@ -125,17 +125,10 @@ def _check_entry(signup: sqlite3.Row, info: yamlinfo.YamlInfo, label: str, *, us
                               "Withdraw an entry first.", 409)
         raise SignupError(f"Each player can enter {limit} slots in this round, and '{label}' has {slots}: there is "
                           f"room for {limit - own} more.", 409)
-    taken: dict[str, str] = {}
-    for row in conn.execute("SELECT e.player_names, u.username FROM signup_entries e JOIN users u ON u.id = e.user_id "
-                            "WHERE e.signup_id = ? AND e.id != ?", (signup["id"], ignore_entry or 0)):
-        for name in db.jloads(row["player_names"], []):
-            taken[name.casefold()] = row["username"]
-    for name in info.player_names:
-        if name.casefold() == "archipelago":
-            raise SignupError("A player cannot be named Archipelago")
-        if name.casefold() in taken:
-            raise SignupError(f"The player name '{name}' is already taken in this round (by {taken[name.casefold()]}). "
-                              "Change the name in your config and try again.", 409)
+    # A name another entry has already is fine: generating numbers the names that come up more than once
+    # (jobs.number_repeated_names)
+    if any(name.casefold() == "archipelago" for name in info.player_names):
+        raise SignupError("A player cannot be named Archipelago")
 
 
 def _read_library_config(config: sqlite3.Row) -> tuple[bytes, yamlinfo.YamlInfo]:
@@ -302,23 +295,13 @@ def _warnings(info: yamlinfo.YamlInfo) -> list[str]:
 
 
 def entry_issues(signup: sqlite3.Row, rows: list[sqlite3.Row]) -> dict[int, list[str]]:
-    """Problems that would stop generation, per entry: games the round does not allow and clashing player names.
-    (Entries are checked when made, but the round's rules can change afterwards.)"""
+    """Problems that would stop generation, per entry: games the round does not allow. (Entries are checked when made,
+    but the round's rules can change afterwards.) Names several entries share are numbered when generating."""
     allowed = db.jloads(signup["allowed_games"], [])
-    owners: dict[str, list[int]] = {}
-    for row in rows:
-        for name in db.jloads(row["player_names"], []):
-            owners.setdefault(name.casefold(), []).append(row["id"])
     issues: dict[int, list[str]] = {}
     for row in rows:
-        found = []
         other = [g for g in db.jloads(row["games"], []) if allowed and g not in allowed]
-        if other:
-            found.append(f"Not allowed in this round: {', '.join(other)}")
-        for name in db.jloads(row["player_names"], []):
-            if len(owners[name.casefold()]) > 1:
-                found.append(f"Another entry also uses the name {name}")
-        issues[row["id"]] = found
+        issues[row["id"]] = [f"Not allowed in this round: {', '.join(other)}"] if other else []
     return issues
 
 

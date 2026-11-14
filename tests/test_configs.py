@@ -157,9 +157,13 @@ def test_a_config_is_checked_the_way_the_generator_reads_it(make_user):
     # each player of a file on their own; names the generator refuses are found before Archipelago is asked
     result = check(player_yaml("One") + "---\nname: Two\ngame: APQuest\nAPQuest:\n  progression_balancing: 200\n").json()
     assert [(p["name"], bool(p["errors"])) for p in result["players"]] == [("One", False), ("Two", True)]
+    result = check(player_yaml("Archipelago")).json()
+    assert result["ok"] is False and result["errors"] == ["A player cannot be named Archipelago"]
+    # a name that comes up twice is numbered when generating: worth a warning, not an error
     result = check(player_yaml("Same") + "---\n" + player_yaml("same")).json()
-    assert result["ok"] is False and result["players"] == []
-    assert result["errors"] == ["Two players in this file are named 'same'. Player names must be unique."]
+    assert result["ok"] is True and [p["name"] for p in result["players"]] == ["Same", "same"]
+    assert "More than one player in this file is named 'same'. Generating numbers them: the first keeps the name, " \
+        "the next get 2, 3, ... at its end." in result["warnings"]
     result = check("name: Broken\ngame: ChecksFinder\n").json()  # no options section: the structure check says so
     assert result["ok"] is False and "ChecksFinder:" in result["errors"][0]
     result = check("name: [unclosed\n").json()
