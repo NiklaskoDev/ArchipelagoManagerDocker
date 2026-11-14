@@ -165,7 +165,7 @@ def game_summary(row: sqlite3.Row, slots: list[sqlite3.Row], user: sqlite3.Row, 
         "id": row["id"], "name": row["name"], "seed_name": row["seed_name"], "source": row["source"],
         "created_at": row["created_at"], "race_mode": bool(row["race_mode"]),
         "state": runtime["state"], "error": runtime["error"], "started_at": runtime["started_at"],
-        "connected": runtime["connected"],  # clients connected to the server: stopping and restarting wait for none
+        "connected": textclient.players_connected(row["id"]),  # stopping and restarting wait for none
         "desired_state": row["desired_state"],
         "sleep_minutes": sleep_minutes(row),  # 0: never falls asleep
         "port": row["port"], "address": f"{host}:{row['port']}" if row["port"] else None,
@@ -592,7 +592,7 @@ async def wake_game(game_id: int, request: Request, user: sqlite3.Row = Depends(
 
 def _nobody_connected(game_id: int) -> None:
     """A server is stopped or restarted only when that throws nobody out of the game."""
-    connected = ROOMS.connected(game_id)
+    connected = textclient.players_connected(game_id)
     if connected == 1:
         raise HTTPException(409, "A player is connected to this game. Its server can be stopped or restarted once "
                                  "nobody is connected.")

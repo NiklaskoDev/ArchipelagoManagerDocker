@@ -84,13 +84,12 @@ def test_a_player_talks_to_the_server_from_the_browser(admin, make_user):
     assert "Map Width" in names["items"] and "Tile 1" in names["locations"]
     assert other.get(f"{url}/names").status_code == 404
 
-    # the text client is a player like any other: the server is not stopped or restarted under it
-    r = admin.post(f"/api/games/{gid}/stop")
-    assert r.status_code == 409 and "A player is connected" in r.json()["detail"], r.text
-    # when the server stops anyway (here from its console), so does the connection; it comes back with the server
-    assert admin.post(f"/api/games/{gid}/command", json={"command": "/exit"}).status_code == 200
+    # the manager's own connection does not count as a player who is connected: it comes back by itself after a
+    # restart, so stopping waits for nobody
+    assert admin.get(f"/api/games/{gid}").json()["connected"] == 0
+    # when the server stops, so does the connection; it comes back with the server
+    assert admin.post(f"/api/games/{gid}/stop").status_code == 200
     wait_for(lambda: poll(ann, url)["state"] == "offline", timeout=30, message="going offline")
-    wait_state(admin, gid, "stopped")
     assert any("connection to the server was lost" in text(m) for m in poll(ann, url)["messages"])
     admin.post(f"/api/games/{gid}/start")
     wait_state(admin, gid, "running")

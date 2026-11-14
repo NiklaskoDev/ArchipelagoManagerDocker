@@ -324,7 +324,10 @@ def test_play_a_game_end_to_end(admin, make_user):
 
     # passwords take effect on the running server without a restart
     assert admin.patch(f"/api/games/{gid}", json={"password": "letmein"}).status_code == 200
-    wait_for(lambda: not APClient(port, "Aly", "ChecksFinder").connected, timeout=10, message="password to apply")
+    def refused() -> bool:
+        with APClient(port, "Aly", "ChecksFinder") as attempt:
+            return not attempt.connected
+    wait_for(refused, timeout=10, message="password to apply")
     with APClient(port, "Aly", "ChecksFinder", "wrong") as client:
         assert client.response["errors"] == ["InvalidPassword"]
     with APClient(port, "Aly", "ChecksFinder", "letmein") as client:
@@ -334,7 +337,8 @@ def test_play_a_game_end_to_end(admin, make_user):
     assert next(g for g in alice.get("/api/games").json() if g["id"] == gid)["password"] == "letmein"
     assert stranger.get("/api/games").json() == []
 
-    # stopping and starting keeps progress and settings
+    # stopping and starting keeps progress and settings, once the server has seen the last player leave
+    wait_for(lambda: admin.get(f"/api/games/{gid}").json()["connected"] == 0, timeout=15, message="everyone to leave")
     assert bob.post(f"/api/games/{gid}/stop").status_code == 200
     wait_state(admin, gid, "stopped")
     with pytest.raises((OSError, ConnectionError, TimeoutError)):

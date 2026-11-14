@@ -241,9 +241,17 @@ log("“Generate again” fills in the configs and options of the game");
 await nav(admin, gameUrl.slice(BASE.length + 1));
 
 // game page ------------------------------------------------------------------------------------------------------------
-await admin.locator(".page-actions").getByRole("button", { name: "Start" }).click();
+// the generation started it already: stopping asks first, then it starts again from the UI (names exactly: "Restart"
+// contains "Start")
+const pageActions = admin.locator(".page-actions");
+if (await pageActions.getByRole("button", { name: "Stop", exact: true }).count()) {
+  await pageActions.getByRole("button", { name: "Stop", exact: true }).click();
+  await admin.locator(".modal", { hasText: "Stop the server?" }).getByRole("button", { name: "Stop" }).click();
+  await admin.locator(".page-head .badge", { hasText: "Stopped" }).waitFor({ timeout: 60000 });
+}
+await pageActions.getByRole("button", { name: "Start", exact: true }).click();
 await admin.locator(".badge", { hasText: "Running" }).first().waitFor({ timeout: 60000 });
-log("server starts from the UI");
+log("the server stops once that is confirmed, and starts from the UI");
 await gameTab(admin, "Players");
 await admin.locator("h2", { hasText: "Progress over time" }).waitFor({ timeout: 45000 });
 // nobody checked anything yet: flat lines at 0 %, which have no height and so never count as visible
@@ -267,7 +275,7 @@ await gameTab(admin, "Manage");
 await admin.getByRole("button", { name: "Back to the running games" }).click();
 await gameTab(admin, "Players");
 await admin.locator("h2", { hasText: "Progress over time" }).waitFor({ timeout: 15000 });
-await admin.locator(".page-actions").getByRole("button", { name: "Start" }).click();
+await admin.locator(".page-actions").getByRole("button", { name: "Start", exact: true }).click();
 await admin.locator(".page-head .badge", { hasText: "Running" }).waitFor({ timeout: 60000 });
 log("an admin moves the game to the archive, which stops it, and back");
 // the slots table (the standings above it have no selects, Files below has)
@@ -337,7 +345,7 @@ await admin.getByLabel("Falls asleep after (minutes)").fill("5");
 await admin.getByRole("button", { name: "Save settings" }).click();
 await expectText(admin, "Settings saved");
 log("claiming (one slot each) enabled, game made visible to everyone and set to fall asleep");
-await admin.locator(".page-actions").getByRole("button", { name: "Start" }).click();
+await admin.locator(".page-actions").getByRole("button", { name: "Start", exact: true }).click();
 await admin.locator(".page-head .badge", { hasText: "Asleep" }).waitFor({ timeout: 60000 });
 await gameTab(admin, "Play");
 await expectText(admin, "It wakes up when one of its players opens this page.");

@@ -438,3 +438,11 @@ def suggestions(session: Session) -> dict:
 
 
 TEXT_CLIENTS = TextClients()
+
+
+def players_connected(game_id: int) -> int:
+    """The clients connected to a game's server but the manager's own (the text client in the browser, and the
+    connection the hint and release buttons use), which connect again by themselves after a restart. Stopping and
+    restarting the server wait for none (routes/games.py)."""
+    own = sum(1 for s in TEXT_CLIENTS.sessions.values() if s.game_id == game_id and s.state == "connected")
+    return max(0, ROOMS.connected(game_id) - own)
