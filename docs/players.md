@@ -95,8 +95,10 @@ What players do in the web UI: their configs, their games and slots, the tracker
 11. **Progress over time** (the game page's *Players* tab) charts every player's share of their locations checked, from
     the first
     check on, with a dot where someone reached their goal. Point at the chart (or focus it and use the arrow keys) for
-    everyone's numbers at that moment; pressing a name in the legend brings that player to the front. With more than
-    eight players, your own slots are in color and the others gray. While the game runs, the slots below it show each
+    everyone's numbers at that moment; pressing a name in the legend brings that player to the front. There are eight
+    colors: the ninth to sixteenth player get them again with a dashed line, the seventeenth to twenty-fourth with a
+    dotted one. With more than 24 players, your own slots are in color and the others gray. While the game runs, the
+    slots below it show each
     player's progress, and when they reached their goal; once it is over, a table of results lists who reached their
     goal first, and after how long, then who got furthest.
 12. **Archive:** *Games → Archive* lists the games you were in that are over, *Finished* (every player reached their

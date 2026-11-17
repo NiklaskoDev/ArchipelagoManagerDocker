@@ -297,8 +297,8 @@ table.table { width: 100%; border-collapse: collapse; }
 
 /* progress chart -------------------------------------------------------------------------------------------- */
 .chart { position: relative; }
-.chart svg { display: block; width: 100%; overflow: visible; touch-action: pan-y; }
-.chart svg:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 4px; }
+.chart > svg { display: block; width: 100%; overflow: visible; touch-action: pan-y; }
+.chart > svg:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 4px; }
 .chart .gridline { stroke: var(--border); stroke-width: 1; shape-rendering: crispEdges; }
 .chart .axis-label { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
 .chart .series { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
@@ -311,7 +311,7 @@ table.table { width: 100%; border-collapse: collapse; }
 .chart-tip .row-line { display: flex; align-items: center; gap: 8px; line-height: 1.6; }
 .chart-tip .value { font-weight: 600; min-width: 3.2em; font-variant-numeric: tabular-nums; }
 .chart-tip .name { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.line-key { display: inline-block; width: 14px; height: 2px; border-radius: 1px; flex: none; }
+.line-key { display: inline-block; flex: none; vertical-align: middle; width: 18px; height: 6px; }
 .legend { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: .85rem; color: var(--muted); }
 .legend button { all: unset; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; border-radius: 4px; padding: 1px 2px; }
 .legend button:focus-visible { outline: 2px solid var(--accent); }

@@ -6,7 +6,12 @@ import { t, locale, live } from "./i18n.js";
 const SVG = "http://www.w3.org/2000/svg";
 const HEIGHT = 240;
 const MARGIN = { top: 10, right: 14, bottom: 26, left: 42 };
-const COLORED = 8;  // more players than series colors: the viewer's own slots in color, the rest in one gray
+// The series colors (style.css --series-1 to 8) go once round; with more players the round repeats with a dashed line,
+// then a dotted one, so that up to 24 players are told apart by color and line together. Past that, the viewer's own
+// slots are in color and the rest in one gray.
+const COLORS = 8;
+const DASHES = [null, "8 5", "1 5"];
+const DISTINCT = COLORS * DASHES.length;
 const TIME_STEPS = [60, 300, 600, 900, 1800, 3600, 7200, 10800, 21600, 43200, 86400, 172800, 604800, 1209600, 2592000];
 
 function svg(tag, attrs = {}, ...children) {
@@ -38,6 +43,14 @@ function valueAt(points, at) {
   return value;
 }
 
+// A player's line in short, as the legend, the tooltip and the standings show it: their color, solid, dashed or dotted
+const KEY_DASHES = [null, "4 4", "0.5 4"];  // DASHES, shortened to fit the key
+function lineKey(p) {
+  return svg("svg", { class: "line-key", width: 18, height: 6, viewBox: "0 0 18 6", "aria-hidden": "true" },
+    svg("line", { x1: 2, x2: 16, y1: 3, y2: 3, stroke: p.color, "stroke-width": 2, "stroke-linecap": "round",
+      "stroke-dasharray": KEY_DASHES[DASHES.indexOf(p.dash)] }));
+}
+
 // A race time to the second: "1:23:45", or "23:45" under an hour
 export function raceTime(seconds) {
   const total = Math.max(0, Math.floor(seconds));
@@ -52,10 +65,13 @@ export function progressSection(data, { mine = new Set(), cleanup, table = true 
   const start = data.race_start ?? data.play_started_at ?? data.recorded_from;
   const end = Math.max(data.finished_at ?? data.now, start + 60);
   const known = (ts) => ts != null && ts > data.recorded_from + 1;  // goals before recording began have no real time
-  const players = data.slots.filter((s) => s.points.length).map((s, i, all) => {
+  // a player keeps their color and line by their place among all the slots, whether others have checked anything yet
+  const many = data.slots.length > DISTINCT;
+  const players = data.slots.map((s, i) => ({ s, i })).filter(({ s }) => s.points.length).map(({ s, i }) => {
     const pct = s.points.map(([time, checked]) => [time, s.total ? (100 * checked) / s.total : 0]);
-    const color = all.length <= COLORED ? `var(--series-${i + 1})` : mine.has(s.slot) ? "var(--series-1)" : "var(--series-rest)";
-    return { ...s, pct, color, checked: s.points.at(-1)[1] };
+    const color = !many ? `var(--series-${(i % COLORS) + 1})` : mine.has(s.slot) ? "var(--series-1)" : "var(--series-rest)";
+    const dash = many ? null : DASHES[Math.floor(i / COLORS)];
+    return { ...s, pct, color, dash, checked: s.points.at(-1)[1] };
   });
   const times = [...new Set([start, end, ...players.flatMap((p) => p.points.map(([time]) => time))])]
     .filter((time) => time >= start && time <= end).sort((a, b) => a - b);
@@ -96,7 +112,7 @@ export function progressSection(data, { mine = new Set(), cleanup, table = true 
     for (const p of order) {
       const dim = focused != null && p.slot !== focused;
       const color = p.slot === focused && p.color === "var(--series-rest)" ? "var(--series-2)" : p.color;
-      children.push(svg("path", { class: `series${dim ? " dim" : ""}`, d: path(p), stroke: color }));
+      children.push(svg("path", { class: `series${dim ? " dim" : ""}`, d: path(p), stroke: color, "stroke-dasharray": p.dash }));
       if (known(p.goal_at) && p.goal_at <= end) {
         children.push(svg("circle", { class: `marker${dim ? " dim" : ""}`, cx: x(p.goal_at), cy: y(valueAt(p.pct, p.goal_at) ?? 0), r: 5, fill: color },
           svg("title", {}, t("{player} reached their goal", { player: p.name }))));
@@ -115,7 +131,7 @@ export function progressSection(data, { mine = new Set(), cleanup, table = true 
     const shown = rows.slice(0, 12);
     clear(tip).append(h("div", { class: "when" }, fmtDate(at)),
       shown.map(({ p, pct, checked }) => h("div", { class: "row-line" },
-        h("span", { class: "line-key", style: { background: p.color } }),
+        lineKey(p),
         h("span", { class: "value" }, `${Math.round(pct)}%`),
         h("span", { class: "name" }, p.name, ` · ${checked}/${p.total}`, p.goal_at && p.goal_at <= at ? [" · ", t("goal")] : null))),
       rows.length > shown.length ? h("div", { class: "name" }, t("…and {n} more", { n: rows.length - shown.length })) : null);
@@ -147,7 +163,7 @@ export function progressSection(data, { mine = new Set(), cleanup, table = true 
 
   // The legend names every line; pressing a name brings that player to the front
   const buttons = players.map((p) => {
-    const button = h("button", { type: "button", "aria-pressed": "false" }, h("span", { class: "line-key", style: { background: p.color } }), p.name);
+    const button = h("button", { type: "button", "aria-pressed": "false" }, lineKey(p), p.name);
     button.onclick = () => {
       focused = focused === p.slot ? null : p.slot;
       for (const [other, b] of buttons) b.setAttribute("aria-pressed", String(other.slot === focused));
@@ -171,7 +187,7 @@ function standings(data, players, known, start) {
   const rows = data.slots.map((s) => {
     const p = players.find((q) => q.slot === s.slot);
     const checked = p ? p.checked : 0;
-    return { ...s, checked, pct: s.total ? checked / s.total : 0, color: p?.color };
+    return { ...s, checked, pct: s.total ? checked / s.total : 0, line: p };
   }).sort((a, b) => (a.goal_at == null) - (b.goal_at == null) || (a.goal_at ?? 0) - (b.goal_at ?? 0) || b.pct - a.pct);
   const goal = (s) => {
     if (s.goal_at == null) return h("span", { class: "muted" }, "—");
@@ -185,7 +201,7 @@ function standings(data, players, known, start) {
     h("thead", {}, h("tr", {}, ["#", t("Player"), t("Game"), t("Checked"), data.race_start != null ? t("Race time") : t("Goal reached")].map((text) => h("th", {}, text)))),
     h("tbody", {}, rows.map((s, i) => h("tr", {},
       h("td", { class: "muted" }, s.goal_at != null ? String(i + 1) : ""),
-      h("td", {}, h("span", { class: "row", style: { gap: "8px" } }, s.color ? h("span", { class: "line-key", style: { background: s.color } }) : null,
+      h("td", {}, h("span", { class: "row", style: { gap: "8px" } }, s.line ? lineKey(s.line) : null,
         h("span", { class: "slot-name" }, s.name)), s.owner ? h("div", { class: "muted small" }, s.owner) : null),
       h("td", {}, s.game),
       h("td", {}, t("{checked} of {total}", { checked: s.checked, total: s.total }), h("span", { class: "muted" }, ` · ${Math.round(100 * s.pct)}%`)),
