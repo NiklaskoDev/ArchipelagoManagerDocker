@@ -190,7 +190,9 @@ def test_a_game_moves_here_from_archipelago_gg_with_its_progress(moving):
     assert admin.get(f"/api/games/{here}/files/{patch['id']}").content == b"patch-from-the-room"
     assert not seen["Mover"]["files"]  # the room had none to give
     # what was here before is a backup, the history starts where the room stood, and the log has it
-    assert {b["reason"] for b in admin.get(f"/api/games/{here}/backups").json()["backups"]} <= {"before-import"}
+    # (besides it there may be the half-hourly copy taken while the server ran above, when a progress check came by)
+    reasons = {b["reason"] for b in admin.get(f"/api/games/{here}/backups").json()["backups"]}
+    assert "before-import" in reasons and reasons <= {"before-import", "auto"}, reasons
     history = admin.get(f"/api/games/{here}/history").json()
     assert {s["name"]: s["points"][-1][1] for s in history["slots"]} == {n: s["checked"] for n, s in original.items()}
     assert history["play_started_at"] and history["play_started_at"] < time.time()
