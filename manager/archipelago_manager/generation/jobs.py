@@ -423,6 +423,10 @@ class GenerationManager:
 
         cmd = apbridge.ap_command("Generate.py", "--player_files_path", str(directory / "Players"),
                                   "--outputpath", str(output), "--spoiler", str(opts.get("spoiler", 1)), version=version)
+        # Optimized (-O), as Archipelago's releases run it (its setup.py builds them with optimize 1): without the
+        # checks meant for its developers, such as the one at the end of Generate.py that the finished multiworld was
+        # freed, which a world that keeps a reference to it fails after the game has been made
+        cmd.insert(1, "-O")
         if opts.get("race"):
             cmd.append("--race")
         if opts.get("seed") is not None:

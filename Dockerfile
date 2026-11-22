@@ -41,9 +41,11 @@ RUN /opt/venv-ap/bin/cythonize -b -i _speedups.pyx
 
 # Archipelago expects a Players folder and a manifest.json in its install directory when that directory is read-only
 # for the running user, which is how this image runs. Without them every start fails with FileNotFoundError.
+# Compiled for plain and for optimized Python (-o 1): the manager runs Generate.py optimized (generation/jobs.py),
+# and in this read-only folder Python could not keep the compiled files: it would compile every world at each generation.
 RUN mkdir -p Players custom_worlds \
  && printf '{"version": "%s"}\n' "${AP_VERSION}" > manifest.json \
- && /opt/venv-ap/bin/python -m compileall -q /opt/archipelago /opt/venv-ap/lib
+ && /opt/venv-ap/bin/python -m compileall -q -o 0 -o 1 /opt/archipelago /opt/venv-ap/lib
 
 # ---------------------------------------------------------------------------------------------------------------------
 # Stage 2: the manager's own, much smaller, environment.

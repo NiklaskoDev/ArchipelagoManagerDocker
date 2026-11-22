@@ -161,11 +161,11 @@ CUSTOM_ROM_WORLD = '''
 
 def build_apworld(path: Path, *, game="Custom Checks", module="customchecks", version="1.2.0", minimum="0.6.0",
                   slow_seconds: int = 0, with_options: bool = False, rom: bytes | None = None,
-                  manifest: bool = True) -> Path:
+                  manifest: bool = True, keeps_multiworld: bool = False) -> Path:
     """Repackages the built-in ChecksFinder world under another name: a real, loadable custom world. `with_options`
     gives it options of its own (CUSTOM_OPTIONS) besides the ones every game has; `rom` makes it need a base ROM to
     generate, the file with these contents. `manifest=False` leaves out archipelago.json, as some worlds are
-    released."""
+    released. `keeps_multiworld` makes it hold on to the multiworld it generated in, as some worlds do by mistake."""
     src = Path(AP_DIR) / "worlds" / "checksfinder"
     contents = {"version": 7, "compatible_version": 7, "game": game, "world_version": version, "minimum_ap_version": minimum}
     with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -178,6 +178,9 @@ def build_apworld(path: Path, *, game="Custom Checks", module="customchecks", ve
             if slow_seconds and f.name == "__init__.py":  # make generation take a while, for cancellation tests
                 data = data.replace(b"    def create_regions(self):",
                                     f"    def create_regions(self):\n        import time; time.sleep({slow_seconds})".encode())
+            if keeps_multiworld and f.name == "__init__.py" and f.parent == src:
+                data = data.replace(b"    def create_regions(self):", b"    def create_regions(self):\n        import builtins; "
+                                    b"builtins.__dict__.setdefault('kept_multiworlds', []).append(self.multiworld)")
             if rom is not None and f.name == "__init__.py" and f.parent == src:
                 fill = {"game": game, "module": module, "md5": hashlib.md5(rom).hexdigest()}
                 data = data.replace(b"from worlds.AutoWorld import World, WebWorld\n",

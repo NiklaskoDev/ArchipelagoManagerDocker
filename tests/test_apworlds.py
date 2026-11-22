@@ -284,3 +284,18 @@ def test_oversized_manifest_is_rejected(admin, tmp_path, clean_custom):
         zf.writestr("bigmanifest/archipelago.json", '{"game": "Big", "pad": "' + "x" * (2 * 1024 * 1024) + '"}')
     r = post_apworld(admin, path)
     assert r.status_code == 400 and "unreasonably large" in r.json()["detail"]
+
+
+def test_a_world_that_keeps_the_multiworld_still_generates(admin, tmp_path, clean_custom):
+    """At its end Generate.py checks that the finished multiworld was freed: an assert meant for Archipelago's
+    developers, which a world that keeps a reference to it fails after the game has been made ("MultiWorld object was
+    not de-allocated"). The manager runs Generate.py optimized, as Archipelago's releases do, so the game is made."""
+    r = post_apworld(admin, build_apworld(tmp_path / "customchecks.apworld", keeps_multiworld=True))
+    assert r.status_code == 200 and r.json()["load_error"] is None, r.text
+    cfg = upload_yaml(admin, "keeper", player_yaml("Keeper", game=CUSTOM)).json()["created"][0]
+    job = run_job(admin, [cfg["id"]])
+    assert job["status"] == "succeeded", job["error"]
+    log = [line["text"] for line in admin.get(f"/api/jobs/{job['id']}/log").json()["lines"]]
+    assert not any("de-allocated" in line for line in log), log[-5:]
+    assert admin.get(f"/api/games/{job['game_id']}").json()["games"] == [CUSTOM]
+    admin.delete(f"/api/games/{job['game_id']}")
